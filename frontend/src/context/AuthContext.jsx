@@ -1,22 +1,39 @@
 import { createContext, useState, useContext } from 'react';
+import axios from 'axios';
 
-// Create the context
 const AuthContext = createContext();
 
-// Create a custom hook for easy access
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
-  // We will initialize this to null. When a user logs in, it will hold their data (e.g., { name: 'Ralph', role: 'Admin' })
-  const [user, setUser] = useState(null);
+  // Initialize user state directly from localStorage if it exists
+  const [user, setUser] = useState(() => {
+    const savedUser = localStorage.getItem('user');
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
 
-  // Mock login function (we will connect this to your Express backend later)
-  const login = (userData) => {
-    setUser(userData);
+  const login = async (email, password) => {
+    try {
+      const response = await axios.post('http://localhost:5000/api/auth/login', {
+        email,
+        password,
+      });
+
+      const userData = response.data;
+      setUser(userData);
+      localStorage.setItem('user', JSON.stringify(userData));
+      return { success: true };
+    } catch (error) {
+      return { 
+        success: false, 
+        message: error.response?.data?.message || 'Login failed' 
+      };
+    }
   };
 
   const logout = () => {
     setUser(null);
+    localStorage.removeItem('user');
   };
 
   return (
