@@ -2,24 +2,22 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import AdminDashboard from './pages/AdminDashboard';
+import TenantDashboard from './pages/TenantDashboard';
 import ManagerDashboard from './pages/ManagerDashboard';
 import AgentDashboard from './pages/AgentDashboard';
-import TenantDashboard from './pages/TenantDashboard';
 import OwnerDashboard from './pages/OwnerDashboard';
-import NotFound from './pages/NotFound';
 
-// Role-based protection wrapper
-const RoleProtectedRoute = ({ children, allowedRoles }) => {
+// ProtectedRoute component handling authentication and case-insensitive role checks
+const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user } = useAuth();
+  
+  if (!user) return <Navigate to="/login" replace />;
+  
+  const userRole = user.role?.toLowerCase();
+  const hasAccess = allowedRoles.some(role => role.toLowerCase() === userRole);
 
-  if (!user) {
-    return <Navigate to="/" replace />;
-  }
-
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
-    return <Navigate to="/unauthorized" replace />;
-  }
-
+  if (!hasAccess) return <h2 className="text-center mt-5">Unauthorized Access</h2>;
+  
   return children;
 };
 
@@ -28,40 +26,54 @@ export default function App() {
     <AuthProvider>
       <Router>
         <Routes>
-          <Route path="/" element={<Login />} />
-          
-          <Route path="/admin" element={
-            <RoleProtectedRoute allowedRoles={['Admin']}>
-              <AdminDashboard />
-            </RoleProtectedRoute>
-          } />
+          {/* Public Routes */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
 
-          <Route path="/manager" element={
-            <RoleProtectedRoute allowedRoles={['Admin', 'Property Manager']}>
-              <ManagerDashboard />
-            </RoleProtectedRoute>
-          } />
+          {/* Protected Dashboard Routes */}
+          <Route 
+            path="/admin" 
+            element={
+              <ProtectedRoute allowedRoles={['Admin']}>
+                <AdminDashboard />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/tenant" 
+            element={
+              <ProtectedRoute allowedRoles={['Tenant']}>
+                <TenantDashboard />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/manager" 
+            element={
+              <ProtectedRoute allowedRoles={['Property Manager', 'Admin']}>
+                <ManagerDashboard />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/agent" 
+            element={
+              <ProtectedRoute allowedRoles={['Agent', 'Admin']}>
+                <AgentDashboard />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/owner" 
+            element={
+              <ProtectedRoute allowedRoles={['Owner', 'Admin']}>
+                <OwnerDashboard />
+              </ProtectedRoute>
+            } 
+          />
 
-          <Route path="/agent" element={
-            <RoleProtectedRoute allowedRoles={['Admin', 'Agent']}>
-              <AgentDashboard />
-            </RoleProtectedRoute>
-          } />
-
-          <Route path="/tenant" element={
-            <RoleProtectedRoute allowedRoles={['Tenant']}>
-              <TenantDashboard />
-            </RoleProtectedRoute>
-          } />
-
-          <Route path="/owner" element={
-            <RoleProtectedRoute allowedRoles={['Owner']}>
-              <OwnerDashboard />
-            </RoleProtectedRoute>
-          } />
-
-          <Route path="/unauthorized" element={<div className="container mt-5 text-center"><h3>Unauthorized Access</h3></div>} />
-          <Route path="*" element={<NotFound />} />
+          {/* Fallback route */}
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Router>
     </AuthProvider>

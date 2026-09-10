@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Container, Form, Button, Alert, Card } from 'react-bootstrap';
+import { Container, Form, Button, Alert } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -17,64 +17,52 @@ export default function Login() {
     const result = await login(email, password);
 
     if (result.success) {
-      switch (result.role) {
-        case 'Admin':
-          navigate('/admin');
-          break;
-        case 'Property Manager':
-          navigate('/manager');
-          break;
-        case 'Agent':
-          navigate('/agent');
-          break;
-        case 'Tenant':
-          navigate('/tenant');
-          break;
-        case 'Owner':
-          navigate('/owner');
-          break;
-        default:
-          navigate('/unauthorized');
-      }
+      const role = result.user?.role?.toLowerCase();
+      if (role === 'admin') navigate('/admin');
+      else if (role === 'property manager') navigate('/manager');
+      else if (role === 'agent') navigate('/agent');
+      else if (role === 'tenant') navigate('/tenant');
+      else if (role === 'owner') navigate('/owner');
+      else navigate('/unauthorized');
     } else {
       setError(result.message);
     }
   };
 
   return (
-    <Container className="d-flex justify-content-center align-items-center" style={{ minHeight: '80vh' }}>
-      <Card style={{ width: '400px' }} className="p-4 shadow-sm">
-        <h3 className="text-center mb-4">Sign In</h3>
-        {error && <Alert variant="danger">{error}</Alert>}
-        
-        <Form onSubmit={handleSubmit}>
-          <Form.Group className="mb-3">
-            <Form.Label>Email Address</Form.Label>
-            <Form.Control 
-              type="email" 
-              value={email} 
-              onChange={(e) => setEmail(e.target.value)} 
-              placeholder="Enter email"
-              required 
-            />
-          </Form.Group>
+    <Container className="mt-5" style={{ maxWidth: '400px' }}>
+      <h2>Sign In</h2>
+      {error && <Alert variant="danger">{error}</Alert>}
+      <Form onSubmit={handleSubmit} className="mt-4">
+        {/* Added controlId and name to resolve DevTools warnings */}
+        <Form.Group className="mb-3" controlId="email">
+          <Form.Label>Email Address</Form.Label>
+          <Form.Control 
+            type="email" 
+            name="email"
+            placeholder="Enter email"
+            value={email} 
+            onChange={(e) => setEmail(e.target.value)} 
+            required 
+          />
+        </Form.Group>
 
-          <Form.Group className="mb-4">
-            <Form.Label>Password</Form.Label>
-            <Form.Control 
-              type="password" 
-              value={password} 
-              onChange={(e) => setPassword(e.target.value)} 
-              placeholder="Password"
-              required 
-            />
-          </Form.Group>
+        <Form.Group className="mb-3" controlId="password">
+          <Form.Label>Password</Form.Label>
+          <Form.Control 
+            type="password" 
+            name="password"
+            placeholder="Password"
+            value={password} 
+            onChange={(e) => setPassword(e.target.value)} 
+            required 
+          />
+        </Form.Group>
 
-          <Button variant="primary" type="submit" className="w-100">
-            Login
-          </Button>
-        </Form>
-      </Card>
+        <Button variant="primary" type="submit" className="w-100">
+          Login
+        </Button>
+      </Form>
     </Container>
   );
 }
