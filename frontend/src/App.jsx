@@ -1,7 +1,5 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import 'bootstrap/dist/css/bootstrap.min.css';
-
-// Import Pages
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import AdminDashboard from './pages/AdminDashboard';
 import ManagerDashboard from './pages/ManagerDashboard';
@@ -10,43 +8,62 @@ import TenantDashboard from './pages/TenantDashboard';
 import OwnerDashboard from './pages/OwnerDashboard';
 import NotFound from './pages/NotFound';
 
-// Import the Protected Route Wrapper
-import RoleProtectedRoute from './components/RoleProtectedRoute';
+// Role-based protection wrapper
+const RoleProtectedRoute = ({ children, allowedRoles }) => {
+  const { user } = useAuth();
 
-function App() {
+  if (!user) {
+    return <Navigate to="/" replace />;
+  }
+
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    return <Navigate to="/unauthorized" replace />;
+  }
+
+  return children;
+};
+
+export default function App() {
   return (
-    <Router>
-      <Routes>
-        {/* Public Route */}
-        <Route path="/" element={<Login />} />
-        
-        {/* Protected Routes by Role */}
-        <Route element={<RoleProtectedRoute allowedRoles={['Admin']} />}>
-          <Route path="/admin" element={<AdminDashboard />} />
-        </Route>
+    <AuthProvider>
+      <Router>
+        <Routes>
+          <Route path="/" element={<Login />} />
+          
+          <Route path="/admin" element={
+            <RoleProtectedRoute allowedRoles={['Admin']}>
+              <AdminDashboard />
+            </RoleProtectedRoute>
+          } />
 
-        <Route element={<RoleProtectedRoute allowedRoles={['Admin', 'Property Manager']} />}>
-          <Route path="/manager" element={<ManagerDashboard />} />
-        </Route>
+          <Route path="/manager" element={
+            <RoleProtectedRoute allowedRoles={['Admin', 'Property Manager']}>
+              <ManagerDashboard />
+            </RoleProtectedRoute>
+          } />
 
-        <Route element={<RoleProtectedRoute allowedRoles={['Admin', 'Property Manager', 'Agent']} />}>
-          <Route path="/agent" element={<AgentDashboard />} />
-        </Route>
+          <Route path="/agent" element={
+            <RoleProtectedRoute allowedRoles={['Admin', 'Agent']}>
+              <AgentDashboard />
+            </RoleProtectedRoute>
+          } />
 
-        <Route element={<RoleProtectedRoute allowedRoles={['Tenant']} />}>
-          <Route path="/tenant" element={<TenantDashboard />} />
-        </Route>
+          <Route path="/tenant" element={
+            <RoleProtectedRoute allowedRoles={['Tenant']}>
+              <TenantDashboard />
+            </RoleProtectedRoute>
+          } />
 
-        <Route element={<RoleProtectedRoute allowedRoles={['Owner']} />}>
-          <Route path="/owner" element={<OwnerDashboard />} />
-        </Route>
+          <Route path="/owner" element={
+            <RoleProtectedRoute allowedRoles={['Owner']}>
+              <OwnerDashboard />
+            </RoleProtectedRoute>
+          } />
 
-        {/* Catch-all Routes */}
-        <Route path="/unauthorized" element={<h2>Unauthorized Access</h2>} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </Router>
+          <Route path="/unauthorized" element={<div className="container mt-5 text-center"><h3>Unauthorized Access</h3></div>} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }
-
-export default App;
