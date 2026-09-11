@@ -54,7 +54,7 @@ const terminateContract = async (req, res) => {
     const contract = await Contract.findById(req.params.id);
     if (!contract) return res.status(404).json({ message: 'Contract not found' });
 
-    contract.status = 'Completed';
+    contract.status = 'Terminated';
     await contract.save();
 
     // Revert the property status to 'Available'

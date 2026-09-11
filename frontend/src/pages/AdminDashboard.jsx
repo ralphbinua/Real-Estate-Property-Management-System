@@ -64,15 +64,18 @@ export default function AdminDashboard() {
 
   // Handle Property Deletion
   const handleDeleteProperty = async (id) => {
-  // Contracts may come back with `property` as a raw ID or a populated object
+  setError('');
+  setSuccess('');
+
   const linkedContracts = contracts.filter((c) => {
     const propId = c.property?._id || c.property;
-    return propId === id;
+    const isActive = ['active', 'pending'].includes(c.status?.toLowerCase());
+    return propId === id && isActive;
   });
 
   if (linkedContracts.length > 0) {
     setError(
-      `Cannot delete this property: ${linkedContracts.length} lease contract(s) are still linked to it. Cancel or reassign those leases first.`
+      `Cannot delete this property: ${linkedContracts.length} active lease contract(s) are still linked to it. Cancel or reassign those leases first.`
     );
     return;
   }
@@ -96,16 +99,18 @@ export default function AdminDashboard() {
 
   // Submit Updated Property Details
   const handleEditSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      await updateProperty(editingProperty._id, editingProperty);
-      setSuccess('Property updated successfully!');
-      setShowEditModal(false);
-      loadData();
-    } catch (err) {
-      setError('Failed to update property details.');
-    }
-  };
+  e.preventDefault();
+  setError('');
+  setSuccess('');
+  try {
+    await updateProperty(editingProperty._id, editingProperty);
+    setSuccess('Property updated successfully!');
+    setShowEditModal(false);
+    loadData();
+  } catch (err) {
+    setError('Failed to update property details.');
+  }
+};
 
   // Auto-fill Rent Amount when a property is selected in the lease modal
   const handlePropertySelect = (propertyId) => {

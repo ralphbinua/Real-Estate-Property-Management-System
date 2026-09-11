@@ -18,11 +18,19 @@ const userSchema = new mongoose.Schema(
     role: {
       type: String,
       enum: ['Admin', 'Property Manager', 'Agent', 'Tenant', 'Owner'],
-      default: 'Tenant', // Default role for new signups
+      default: 'Tenant',
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
     },
   },
   {
-    timestamps: true, // Automatically creates 'createdAt' and 'updatedAt' fields
+    timestamps: true,
   }
 );
 

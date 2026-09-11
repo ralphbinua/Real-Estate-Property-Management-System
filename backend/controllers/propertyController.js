@@ -1,15 +1,14 @@
 const Property = require('../models/Property');
 const Contract = require('../models/Contract');
 
-// @desc    Get all properties
+// @desc    Get all active properties
 // @route   GET /api/properties
 // @access  Private (All authenticated roles)
 const getProperties = async (req, res) => {
   try {
-    // Populate pulls in the name and email of the linked manager and owner
-    const properties = await Property.find()
-      .populate('manager', 'name email')
-      .populate('owner', 'name email');
+    const properties = await Property.find({ isDeleted: { $ne: true } })
+      .populate('owner', 'name email')
+      .populate('manager', 'name email');
     res.status(200).json(properties);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -23,7 +22,6 @@ const createProperty = async (req, res) => {
   try {
     const propertyData = { ...req.body };
 
-    // Remove empty string references so Mongoose doesn't attempt to cast "" to ObjectId
     if (!propertyData.owner || propertyData.owner === '') {
       delete propertyData.owner;
     }
@@ -44,11 +42,12 @@ const createProperty = async (req, res) => {
 const updateProperty = async (req, res) => {
   try {
     const property = await Property.findById(req.params.id);
-    if (!property) return res.status(404).json({ message: 'Property not found' });
+    if (!property || property.isDeleted) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
 
     const updatedProperty = await Property.findByIdAndUpdate(req.params.id, req.body, { new: true });
 
-    // If price was updated, sync active lease contracts for this property
     if (req.body.price) {
       await Contract.updateMany(
         { property: req.params.id, status: 'Active' },
@@ -62,16 +61,21 @@ const updateProperty = async (req, res) => {
   }
 };
 
-// @desc    Delete property
+// @desc    Soft delete property
 // @route   DELETE /api/properties/:id
 // @access  Private (Admin)
 const deleteProperty = async (req, res) => {
   try {
     const property = await Property.findById(req.params.id);
-    if (!property) return res.status(404).json({ message: 'Property not found' });
+    if (!property || property.isDeleted) {
+      return res.status(404).json({ message: 'Property not found' });
+    }
 
-    await property.deleteOne();
-    res.status(200).json({ message: 'Property deleted successfully' });
+    property.isDeleted = true;
+    property.deletedAt = new Date();
+    await property.save();
+
+    res.status(200).json({ message: 'Property archived successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

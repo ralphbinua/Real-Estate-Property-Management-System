@@ -1,12 +1,12 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 
-// @desc    Get all registered users
+// @desc    Get all active users (excluding soft-deleted)
 // @route   GET /api/users
 // @access  Private (Admin only)
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find({}).select('-password');
+    const users = await User.find({ isDeleted: { $ne: true } }).select('-password');
     res.status(200).json(users);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -54,7 +54,7 @@ const updateUserRole = async (req, res) => {
     const { role } = req.body;
     const user = await User.findById(req.params.id);
 
-    if (!user) {
+    if (!user || user.isDeleted) {
       return res.status(404).json({ message: 'User not found' });
     }
 
@@ -67,4 +67,25 @@ const updateUserRole = async (req, res) => {
   }
 };
 
-module.exports = { getUsers, createUser, updateUserRole };
+// @desc    Soft delete user account
+// @route   DELETE /api/users/:id
+// @access  Private (Admin only)
+const deleteUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user || user.isDeleted) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    user.isDeleted = true;
+    user.deletedAt = new Date();
+    await user.save();
+
+    res.status(200).json({ message: 'User account deactivated successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getUsers, createUser, updateUserRole, deleteUser };
