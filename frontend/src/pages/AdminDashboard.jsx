@@ -64,16 +64,29 @@ export default function AdminDashboard() {
 
   // Handle Property Deletion
   const handleDeleteProperty = async (id) => {
-    if (window.confirm('Are you sure you want to delete this property?')) {
-      try {
-        await deleteProperty(id);
-        setSuccess('Property deleted successfully!');
-        loadData();
-      } catch (err) {
-        setError('Failed to delete property.');
-      }
+  // Contracts may come back with `property` as a raw ID or a populated object
+  const linkedContracts = contracts.filter((c) => {
+    const propId = c.property?._id || c.property;
+    return propId === id;
+  });
+
+  if (linkedContracts.length > 0) {
+    setError(
+      `Cannot delete this property: ${linkedContracts.length} lease contract(s) are still linked to it. Cancel or reassign those leases first.`
+    );
+    return;
+  }
+
+  if (window.confirm('Are you sure you want to delete this property?')) {
+    try {
+      await deleteProperty(id);
+      setSuccess('Property deleted successfully!');
+      loadData();
+    } catch (err) {
+      setError('Failed to delete property.');
     }
-  };
+  }
+};
 
   // Open Edit Modal with Pre-filled Data
   const handleEditClick = (prop) => {
@@ -94,9 +107,35 @@ export default function AdminDashboard() {
     }
   };
 
-  // Handle Contract Submission
+  // Auto-fill Rent Amount when a property is selected in the lease modal
+  const handlePropertySelect = (propertyId) => {
+    const selectedProp = properties.find((p) => p._id === propertyId);
+    setContractData({
+      ...contractData,
+      property: propertyId,
+      rentAmount: selectedProp ? selectedProp.price : ''
+    });
+  };
+
+  // Handle Contract Submission (with date & availability validation)
   const handleContractSubmit = async (e) => {
     e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    // Validate Dates
+    if (new Date(contractData.endDate) <= new Date(contractData.startDate)) {
+      setError('End Date must be strictly after Start Date.');
+      return;
+    }
+
+    // Validate Property Availability
+    const selectedProp = properties.find((p) => p._id === contractData.property);
+    if (selectedProp && selectedProp.status?.toLowerCase() === 'rented') {
+      setError('This property already has an active lease.');
+      return;
+    }
+
     try {
       await createContract({
         ...contractData,
@@ -136,6 +175,12 @@ export default function AdminDashboard() {
       totalRevenue: activeContractsList.reduce((acc, curr) => acc + (curr.rentAmount || 0), 0),
     };
   }, [properties, contracts]);
+
+  // Properties that don't already have an active/rented lease
+  const availableProperties = useMemo(
+    () => properties.filter((p) => p.status?.toLowerCase() !== 'rented'),
+    [properties]
+  );
 
   return (
     <div className="bg-light min-vh-100 py-4">
@@ -384,11 +429,11 @@ export default function AdminDashboard() {
                 <Form.Label className="fw-bold text-secondary">Select Property</Form.Label>
                 <Form.Select
                   value={contractData.property}
-                  onChange={(e) => setContractData({ ...contractData, property: e.target.value })}
+                  onChange={(e) => handlePropertySelect(e.target.value)}
                   required
                 >
                   <option value="">-- Choose Property --</option>
-                  {properties.map((p) => (
+                  {availableProperties.map((p) => (
                     <option key={p._id} value={p._id}>
                       {p.title} (₱{p.price?.toLocaleString()}/mo)
                     </option>

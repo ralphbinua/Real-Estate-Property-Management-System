@@ -37,13 +37,13 @@ const propertySchema = new mongoose.Schema(
     // Link to the User model for the assigned Property Manager
     manager: {
       type: mongoose.Schema.Types.ObjectId,
-      required: true,
+      required: false,
       ref: 'User', 
     },
     // Link to the User model for the Owner of the property
     owner: {
       type: mongoose.Schema.Types.ObjectId,
-      required: true,
+      required: false,
       ref: 'User',
     }
   },

@@ -1,4 +1,5 @@
 const Property = require('../models/Property');
+const Contract = require('../models/Contract');
 
 // @desc    Get all properties
 // @route   GET /api/properties
@@ -15,27 +16,25 @@ const getProperties = async (req, res) => {
   }
 };
 
-// @desc    Create a new property
+// @desc    Create new property
 // @route   POST /api/properties
-// @access  Private (Admin & Property Manager only)
+// @access  Private (Admin / Property Manager)
 const createProperty = async (req, res) => {
   try {
-    const { title, description, address, propertyType, price, features, owner } = req.body;
+    const propertyData = { ...req.body };
 
-    const property = await Property.create({
-      title,
-      description,
-      address,
-      propertyType,
-      price,
-      features,
-      manager: req.user._id, // Automatically assigns the logged-in user making the request
-      owner
-    });
+    // Remove empty string references so Mongoose doesn't attempt to cast "" to ObjectId
+    if (!propertyData.owner || propertyData.owner === '') {
+      delete propertyData.owner;
+    }
+    if (!propertyData.manager || propertyData.manager === '') {
+      delete propertyData.manager;
+    }
 
+    const property = await Property.create(propertyData);
     res.status(201).json(property);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(400).json({ message: error.message });
   }
 };
 
@@ -48,6 +47,15 @@ const updateProperty = async (req, res) => {
     if (!property) return res.status(404).json({ message: 'Property not found' });
 
     const updatedProperty = await Property.findByIdAndUpdate(req.params.id, req.body, { new: true });
+
+    // If price was updated, sync active lease contracts for this property
+    if (req.body.price) {
+      await Contract.updateMany(
+        { property: req.params.id, status: 'Active' },
+        { rentAmount: Number(req.body.price) }
+      );
+    }
+
     res.status(200).json(updatedProperty);
   } catch (error) {
     res.status(500).json({ message: error.message });
