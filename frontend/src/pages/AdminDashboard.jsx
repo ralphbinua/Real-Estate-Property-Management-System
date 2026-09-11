@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Container, Table, Alert, Button, Form, Row, Col, Modal, Card, Spinner } from 'react-bootstrap';
 import { fetchProperties, updateProperty, deleteProperty } from '../services/propertyService';
-import { fetchContracts, createContract } from '../services/contractService';
+import { fetchContracts, createContract, terminateContract } from '../services/contractService';
 import { fetchUsers } from '../services/userService';
 import PropertyForm from '../components/PropertyForm';
 import UserManagement from '../components/UserManagement';
@@ -147,6 +147,19 @@ export default function AdminDashboard() {
       loadData();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to create contract.');
+    }
+  };
+
+  // Handle Lease Termination
+  const handleTerminateContract = async (id) => {
+    if (window.confirm('Are you sure you want to end this lease? The property will be set back to Available.')) {
+      try {
+        await terminateContract(id);
+        setSuccess('Lease terminated successfully.');
+        loadData();
+      } catch (err) {
+        setError('Failed to terminate lease contract.');
+      }
     }
   };
 
@@ -314,8 +327,9 @@ export default function AdminDashboard() {
                   <tr>
                     <th>Property</th>
                     <th>Tenant</th>
-                    <th>Monthly Rent</th>
+                    <th>Rent Amount</th>
                     <th>Status</th>
+                    <th className="text-center">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -326,11 +340,22 @@ export default function AdminDashboard() {
                         <td>{con.tenant?.name || con.tenant}</td>
                         <td>₱{con.rentAmount?.toLocaleString()}</td>
                         <td>{renderStatusBadge(con.status)}</td>
+                        <td className="text-center">
+                          {con.status === 'Active' && (
+                            <Button
+                              variant="outline-warning"
+                              size="sm"
+                              onClick={() => handleTerminateContract(con._id)}
+                            >
+                              End Lease
+                            </Button>
+                          )}
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="4" className="text-center text-muted py-4">No lease contracts recorded.</td>
+                      <td colSpan="5" className="text-center text-muted py-4">No lease contracts recorded.</td>
                     </tr>
                   )}
                 </tbody>

@@ -2,13 +2,18 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 const connectDB = require('./config/db');
+const startContractScheduler = require('./utils/contractScheduler');
 
 connectDB();
+
+// Start the daily contract expiration background job
+startContractScheduler();
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Add these API Routes
+// API Routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/properties', require('./routes/propertyRoutes'));
 app.use('/api/maintenance', require('./routes/maintenanceRoutes'));
