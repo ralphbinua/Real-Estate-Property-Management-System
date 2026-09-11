@@ -89,5 +89,3 @@ module.exports = {
   registerUser,
   loginUser,
 };
-
-module.exports = { registerUser, loginUser };

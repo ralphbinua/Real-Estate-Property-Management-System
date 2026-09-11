@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import NavigationBar from './components/Navbar';
 import Login from './pages/Login';
 import AdminDashboard from './pages/AdminDashboard';
 import TenantDashboard from './pages/TenantDashboard';
@@ -25,6 +26,7 @@ export default function App() {
   return (
     <AuthProvider>
       <Router>
+        <NavigationBar />
         <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />

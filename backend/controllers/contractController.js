@@ -1,35 +1,25 @@
 const Contract = require('../models/Contract');
 
-// @desc    Get all contracts
+// @desc    Get all contracts (populated)
 // @route   GET /api/contracts
-// @access  Private (Admins, Property Managers see all; Tenants see their own)
+// @access  Private
 const getContracts = async (req, res) => {
   try {
-    let query = {};
-    if (req.user.role === 'Tenant') {
-      query.tenant = req.user._id;
-    }
-
-    const contracts = await Contract.find(query)
+    const contracts = await Contract.find({})
       .populate('property', 'title address price')
       .populate('tenant', 'name email');
-
     res.status(200).json(contracts);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Create a new lease contract
+// @desc    Create lease contract
 // @route   POST /api/contracts
-// @access  Private (Admin & Property Manager only)
+// @access  Private (Admin / Manager)
 const createContract = async (req, res) => {
   try {
     const { property, tenant, startDate, endDate, rentAmount } = req.body;
-
-    if (!property || !tenant || !startDate || !endDate || !rentAmount) {
-      return res.status(400).json({ message: 'Please provide all contract fields' });
-    }
 
     const contract = await Contract.create({
       property,
@@ -37,16 +27,17 @@ const createContract = async (req, res) => {
       startDate,
       endDate,
       rentAmount,
-      status: 'Active'
+      status: 'Active',
     });
 
-    res.status(201).json(contract);
+    const populatedContract = await Contract.findById(contract._id)
+      .populate('property', 'title address')
+      .populate('tenant', 'name email');
+
+    res.status(201).json(populatedContract);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-module.exports = {
-  getContracts,
-  createContract,
-};
+module.exports = { getContracts, createContract };

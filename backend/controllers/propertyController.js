@@ -39,4 +39,34 @@ const createProperty = async (req, res) => {
   }
 };
 
-module.exports = { getProperties, createProperty };
+// @desc    Update property details
+// @route   PUT /api/properties/:id
+// @access  Private (Admin/Manager)
+const updateProperty = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) return res.status(404).json({ message: 'Property not found' });
+
+    const updatedProperty = await Property.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.status(200).json(updatedProperty);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Delete property
+// @route   DELETE /api/properties/:id
+// @access  Private (Admin)
+const deleteProperty = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) return res.status(404).json({ message: 'Property not found' });
+
+    await property.deleteOne();
+    res.status(200).json({ message: 'Property deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getProperties, createProperty, updateProperty, deleteProperty };
