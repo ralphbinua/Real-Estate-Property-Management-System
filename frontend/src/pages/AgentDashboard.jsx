@@ -1,102 +1,171 @@
-import { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Alert, Badge } from 'react-bootstrap';
+import { useState, useEffect, useMemo } from 'react';
+import { Container, Row, Col, Card, Form, Spinner } from 'react-bootstrap';
 import { fetchProperties } from '../services/propertyService';
-import PropertyFilter from '../components/PropertyFilter';
-import MetricCard from '../components/MetricCard';
-import { renderStatusBadge } from '../utils/badgeUtils';
+import './AgentDashboard.css';
+
+const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
+const PROPERTY_STATUSES = ['Available', 'Occupied', 'Pending', 'Under Maintenance'];
+
+const PILL_CLASS = {
+  available: 'pm-pill-available',
+  rented: 'pm-pill-occupied',
+  occupied: 'pm-pill-occupied',
+  'under maintenance': 'pm-pill-maintenance',
+  pending: 'pm-pill-occupied',
+};
+
+function StatusPill({ status }) {
+  if (!status) return null;
+  const cls = PILL_CLASS[status.toLowerCase()] || 'pm-pill-default';
+  return (
+    <span className={`pm-pill ${cls}`}>
+      <span className="pm-pill-dot" />
+      {status}
+    </span>
+  );
+}
 
 export default function AgentDashboard() {
   const [properties, setProperties] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Search & Filter State
+  // Filter State
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
 
+  const loadAgentData = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchProperties();
+      setProperties(Array.isArray(data) ? data : []);
+      setError('');
+    } catch (err) {
+      setError('Failed to fetch property listings.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadAgentData = async () => {
-      try {
-        const data = await fetchProperties();
-        setProperties(data);
-      } catch (err) {
-        setError('Failed to fetch property listings.');
-      }
-    };
     loadAgentData();
   }, []);
 
-  const filteredProperties = properties.filter((prop) => {
-    const matchesSearch = prop.title?.toLowerCase().includes(search.toLowerCase()) || 
-                          prop.address?.toLowerCase().includes(search.toLowerCase());
-    const matchesType = filterType ? prop.propertyType === filterType : true;
-    const matchesStatus = filterStatus ? prop.status?.toLowerCase() === filterStatus.toLowerCase() : true;
-    return matchesSearch && matchesType && matchesStatus;
-  });
+  const filteredProperties = useMemo(() => {
+    const q = search.toLowerCase();
+    return properties.filter((prop) => {
+      const matchesSearch =
+        prop.title?.toLowerCase().includes(q) || prop.address?.toLowerCase().includes(q);
+      const matchesType = filterType ? prop.propertyType === filterType : true;
+      const matchesStatus = filterStatus ? prop.status?.toLowerCase() === filterStatus.toLowerCase() : true;
+      return matchesSearch && matchesType && matchesStatus;
+    });
+  }, [properties, search, filterType, filterStatus]);
 
   const totalListings = properties.length;
-  const availableCount = properties.filter(p => p.status?.toLowerCase() === 'available').length;
+  const availableCount = properties.filter((p) => p.status?.toLowerCase() === 'available').length;
 
   return (
-    <div className="bg-light min-vh-100 py-4">
+    <div className="pm-agent">
       <Container>
         {/* Header */}
-        <div className="bg-white p-4 rounded border shadow-sm mb-4">
-          <h2 className="fw-bold text-dark mb-1">Agent Property Directory</h2>
-          <p className="text-secondary mb-0">Browse real-time listings, pricing, and availability for clients</p>
+        <div className="pm-header">
+          <div>
+            <h1 className="pm-title">Agent Property Directory</h1>
+            <p className="pm-subtitle">
+              Browse real-time listings, pricing, and availability for clients
+            </p>
+          </div>
         </div>
 
-        {error && <Alert variant="danger">{error}</Alert>}
+        {error && (
+          <div className="pm-alert pm-alert-error" role="alert">
+            <span>{error}</span>
+            <button className="pm-alert-close" onClick={() => setError('')} aria-label="Dismiss">×</button>
+          </div>
+        )}
 
-        {/* Metrics */}
-        <Row className="mb-2">
-          <Col md={6}>
-            <MetricCard title="Total System Listings" value={totalListings} variant="primary" icon="🏘️" />
-          </Col>
-          <Col md={6}>
-            <MetricCard title="Available for Lease" value={availableCount} variant="success" icon="✅" />
-          </Col>
-        </Row>
-
-        {/* Search & Filter */}
-        <PropertyFilter 
-          search={search} 
-          setSearch={setSearch} 
-          filterType={filterType} 
-          setFilterType={setFilterType} 
-          filterStatus={filterStatus} 
-          setFilterStatus={setFilterStatus} 
-        />
-
-        {/* Property Grid View */}
-        <Row>
-          {filteredProperties.length > 0 ? (
-            filteredProperties.map((prop) => (
-              <Col md={4} key={prop._id} className="mb-4">
-                <Card className="shadow-sm border-0 h-100">
-                  <Card.Body className="d-flex flex-column">
-                    <div className="d-flex justify-content-between align-items-start mb-2">
-                      <Badge bg="secondary" className="fw-normal">{prop.propertyType}</Badge>
-                      {renderStatusBadge(prop.status)}
-                    </div>
-                    <Card.Title className="fw-bold text-dark">{prop.title}</Card.Title>
-                    <Card.Text className="text-secondary small mb-3">📍 {prop.address}</Card.Text>
-                    <div className="mt-auto pt-3 border-top d-flex justify-content-between align-items-center">
-                      <span className="text-muted small">Monthly Rent</span>
-                      <span className="fw-bold fs-5 text-primary">₱{prop.price?.toLocaleString()}</span>
-                    </div>
-                  </Card.Body>
-                </Card>
-              </Col>
-            ))
-          ) : (
-            <Col md={12}>
-              <div className="bg-white text-center p-5 rounded border text-muted">
-                No properties match your current search criteria.
+        {loading ? (
+          <div className="pm-loading">
+            <Spinner animation="border" size="sm" className="me-2" />
+            Synchronizing property listings…
+          </div>
+        ) : (
+          <>
+            {/* Metrics Strip */}
+            <div className="pm-metrics">
+              <div className="pm-metric">
+                <span className="pm-metric-label">Total system listings</span>
+                <span className="pm-metric-value">{totalListings}</span>
               </div>
-            </Col>
-          )}
-        </Row>
+              <div className="pm-metric">
+                <span className="pm-metric-label">Available for lease</span>
+                <span className="pm-metric-value">{availableCount}</span>
+              </div>
+            </div>
+
+            {/* Filter Toolbar */}
+            <div className="pm-filterbar">
+              <Form.Control
+                className="pm-input pm-search"
+                placeholder="Search by title or location…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <Form.Select
+                className="pm-input pm-select"
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value)}
+              >
+                <option value="">All property types</option>
+                {PROPERTY_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </Form.Select>
+              <Form.Select
+                className="pm-input pm-select"
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+              >
+                <option value="">All statuses</option>
+                {PROPERTY_STATUSES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </Form.Select>
+            </div>
+
+            {/* Property Cards Grid */}
+            <Row>
+              {filteredProperties.length > 0 ? (
+                filteredProperties.map((prop) => (
+                  <Col md={4} key={prop._id} className="mb-4">
+                    <Card className="pm-card h-100">
+                      <Card.Body className="d-flex flex-column p-4">
+                        <div className="d-flex justify-content-between align-items-center mb-2">
+                          <span className="pm-card-type">{prop.propertyType}</span>
+                          <StatusPill status={prop.status} />
+                        </div>
+                        <h5 className="pm-card-title">{prop.title}</h5>
+                        <p className="pm-card-address">📍 {prop.address}</p>
+                        <div className="pm-card-footer">
+                          <span className="text-muted small">Monthly rate</span>
+                          <span className="pm-card-price">₱{prop.price?.toLocaleString()}</span>
+                        </div>
+                      </Card.Body>
+                    </Card>
+                  </Col>
+                ))
+              ) : (
+                <Col md={12}>
+                  <div className="pm-empty-grid">
+                    No properties match your current search criteria.
+                  </div>
+                </Col>
+              )}
+            </Row>
+          </>
+        )}
       </Container>
     </div>
   );

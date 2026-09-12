@@ -1,63 +1,59 @@
-import { Navbar, Nav, Container, Button, Badge } from 'react-bootstrap';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { Navbar, Nav, Container, Button } from 'react-bootstrap';
 
-export default function NavigationBar() {
-  const { user, logout } = useAuth();
+export default function AppNavbar() {
   const navigate = useNavigate();
+  const user = JSON.parse(localStorage.getItem('user'));
+
+  // Get home route dynamically based on active session role
+  const getHomeRoute = () => {
+    if (!user) return '/login';
+    switch (user.role) {
+      case 'Admin':
+        return '/admin';
+      case 'Property Manager':
+        return '/manager';
+      default:
+        return '/tenant';
+    }
+  };
 
   const handleLogout = () => {
-    logout();
+    localStorage.removeItem('user');
     navigate('/login');
   };
 
-  if (!user) return null; // Hide navbar on login page when unauthenticated
-
-  const role = user.role?.toLowerCase();
-
   return (
-    <Navbar bg="dark" variant="dark" expand="lg" className="shadow-sm px-3 sticky-top">
-      <Container fluid>
-        <Navbar.Brand as={Link} to="/" className="fw-bold text-white">
+    <Navbar bg="dark" variant="dark" expand="lg">
+      <Container>
+        {/* Brand logo routes to current role dashboard */}
+        <Navbar.Brand as={Link} to={getHomeRoute()} className="fw-bold fs-4">
           🏢 PropManage
         </Navbar.Brand>
-        <Navbar.Toggle aria-controls="navbar-nav" />
-        <Navbar.Collapse id="navbar-nav">
+
+        <Navbar.Toggle aria-controls="basic-navbar-nav" />
+        <Navbar.Collapse id="basic-navbar-nav">
           <Nav className="me-auto">
-            {role === 'admin' && (
-              <Nav.Link as={Link} to="/admin" className="text-light fw-medium">
+            {user?.role === 'Admin' && (
+              <Nav.Link as={Link} to="/admin">
                 Admin Dashboard
               </Nav.Link>
             )}
-            {(role === 'property manager' || role === 'admin') && (
-              <Nav.Link as={Link} to="/manager" className="text-light fw-medium">
+            {user?.role === 'Property Manager' && (
+              <Nav.Link as={Link} to="/manager">
                 Manager Portal
               </Nav.Link>
             )}
-            {(role === 'agent' || role === 'admin') && (
-              <Nav.Link as={Link} to="/agent" className="text-light fw-medium">
-                Agent Listings
-              </Nav.Link>
-            )}
-            {role === 'tenant' && (
-              <Nav.Link as={Link} to="/tenant" className="text-light fw-medium">
-                Tenant Portal
-              </Nav.Link>
-            )}
-            {role === 'owner' && (
-              <Nav.Link as={Link} to="/owner" className="text-light fw-medium">
-                Owner Portfolio
-              </Nav.Link>
-            )}
           </Nav>
-          <Nav className="align-items-center">
-            <span className="text-light me-3 fw-medium">
-              {user.name} <Badge bg="secondary" className="ms-1">{user.role}</Badge>
-            </span>
-            <Button variant="outline-danger" size="sm" className="fw-bold" onClick={handleLogout}>
-              Logout
-            </Button>
-          </Nav>
+
+          {user && (
+            <div className="d-flex align-items-center gap-2">
+              <span className="text-light me-2">{user.name}</span>
+              <Button variant="outline-danger" size="sm" onClick={handleLogout}>
+                Logout
+              </Button>
+            </div>
+          )}
         </Navbar.Collapse>
       </Container>
     </Navbar>

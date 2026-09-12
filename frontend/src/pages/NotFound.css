@@ -1,0 +1,71 @@
+.pm-notfound-page {
+  --ink: #17233F;
+  --ink-soft: #3B4863;
+  --paper: #F5F4EF;
+  --surface: #FFFFFF;
+  --line: #E3E0D6;
+  --accent: #2F6F5E;
+  --accent-soft: #E7F0EC;
+  --muted: #6B7280;
+  --slate: #4A5568;
+
+  background: var(--paper);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--ink);
+  padding: 24px;
+}
+
+.pm-notfound-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 480px;
+  padding: 48px 36px;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(23, 35, 63, 0.04);
+}
+
+.pm-notfound-code {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 4rem;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1;
+  margin-bottom: 12px;
+}
+
+.pm-notfound-title {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.75rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+
+.pm-notfound-subtitle {
+  color: var(--muted);
+  font-size: 0.925rem;
+  margin-bottom: 28px;
+  line-height: 1.5;
+}
+
+.pm-notfound-card .btn.pm-btn-primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+  font-weight: 500;
+  padding: 10px 24px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.pm-notfound-card .btn.pm-btn-primary:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
