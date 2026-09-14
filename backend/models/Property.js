@@ -36,7 +36,7 @@ const propertySchema = new mongoose.Schema(
 );
 
 // Pre-save Hook: Ensure House properties always initialize as 1 unit
-propertySchema.pre('save', function (next) {
+propertySchema.pre('save', function () {
   if (this.propertyType === 'House' && (!this.units || this.units.length === 0)) {
     this.units = [
       {
@@ -46,7 +46,6 @@ propertySchema.pre('save', function (next) {
       },
     ];
   }
-  next();
 });
 
 module.exports = mongoose.model('Property', propertySchema);

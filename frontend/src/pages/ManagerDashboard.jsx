@@ -1,8 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Container, Table, Form, Spinner, Button, Row, Col, Badge } from 'react-bootstrap';
-import { fetchProperties } from '../services/propertyService';
+import { Container, Table, Form, Spinner, Button, Row, Col, Badge, Modal } from 'react-bootstrap';
+import { fetchProperties, createProperty } from '../services/propertyService';
+import { fetchContracts, createContract, terminateContract } from '../services/contractService';
+import { fetchUsers } from '../services/userService';
+import { fetchInvoices } from '../services/invoiceService';
 import AdminMaintenanceManager from '../components/AdminMaintenanceManager';
 import ManagerInvoiceTracker from '../components/ManagerInvoiceTracker';
+import ManagerReports from '../components/ManagerReports';
 import './ManagerDashboard.css';
 
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
@@ -14,6 +18,8 @@ const PILL_CLASS = {
   occupied: 'pm-pill-occupied',
   'under maintenance': 'pm-pill-maintenance',
   pending: 'pm-pill-occupied',
+  active: 'pm-pill-active',
+  terminated: 'pm-pill-terminated',
 };
 
 function StatusPill({ status }) {
@@ -29,13 +35,43 @@ function StatusPill({ status }) {
 
 export default function ManagerDashboard() {
   const [properties, setProperties] = useState([]);
+  const [contracts, setContracts] = useState([]);
+  const [userList, setUserList] = useState([]);
+  const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  // Panel Toggles
   const [showMaintenanceQueue, setShowMaintenanceQueue] = useState(false);
   const [showInvoices, setShowInvoices] = useState(true);
+  const [showReports, setShowReports] = useState(false);
   
   // Selected property for viewing units
   const [selectedPropertyId, setSelectedPropertyId] = useState(null);
+
+  // New Lease Contract Modal State
+  const [showContractModal, setShowContractModal] = useState(false);
+  const [contractData, setContractData] = useState({
+    property: '',
+    unitId: '',
+    unitNumber: '',
+    tenant: '',
+    startDate: '',
+    endDate: '',
+    rentAmount: ''
+  });
+
+  // New Property Modal State
+  const [showPropertyModal, setShowPropertyModal] = useState(false);
+  const [propertyFormData, setPropertyFormData] = useState({
+    title: '',
+    address: '',
+    propertyType: 'Apartment',
+    price: '',
+    unitCount: 10,
+    defaultUnitRate: 8500,
+  });
 
   // Filter State
   const [search, setSearch] = useState('');
@@ -45,11 +81,19 @@ export default function ManagerDashboard() {
   const loadManagerData = async () => {
     setLoading(true);
     try {
-      const data = await fetchProperties();
-      setProperties(Array.isArray(data) ? data : []);
+      const [propData, contractList, usersData, invoiceData] = await Promise.all([
+        fetchProperties(),
+        fetchContracts(),
+        fetchUsers(),
+        fetchInvoices(),
+      ]);
+      setProperties(Array.isArray(propData) ? propData : []);
+      setContracts(Array.isArray(contractList) ? contractList : []);
+      setUserList(usersData.filter((u) => u.role?.toLowerCase() === 'tenant'));
+      setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
       setError('');
     } catch (err) {
-      setError('Failed to fetch property records.');
+      setError('Failed to fetch manager dashboard records.');
     } finally {
       setLoading(false);
     }
@@ -58,6 +102,134 @@ export default function ManagerDashboard() {
   useEffect(() => {
     loadManagerData();
   }, []);
+
+  const handlePropertySelect = (propertyId) => {
+    const selectedProp = properties.find((p) => p._id === propertyId);
+    if (!selectedProp) return;
+
+    if (!selectedProp.units || selectedProp.units.length === 0) {
+      setContractData({
+        ...contractData,
+        property: propertyId,
+        unitId: '',
+        unitNumber: 'Main Unit',
+        rentAmount: selectedProp.price || selectedProp.monthlyRate || ''
+      });
+    } else {
+      setContractData({
+        ...contractData,
+        property: propertyId,
+        unitId: '',
+        unitNumber: '',
+        rentAmount: ''
+      });
+    }
+  };
+
+  const handleUnitSelect = (unitId) => {
+    const selectedProp = properties.find((p) => p._id === contractData.property);
+    if (!selectedProp || !selectedProp.units) return;
+
+    const selectedUnit = selectedProp.units.find((u) => u._id === unitId);
+    if (selectedUnit) {
+      setContractData({
+        ...contractData,
+        unitId: selectedUnit._id,
+        unitNumber: selectedUnit.unitNumber,
+        rentAmount: selectedUnit.monthlyRate
+      });
+    }
+  };
+
+  const handleOpenLeaseForUnit = (propertyId, unit) => {
+    setContractData({
+      property: propertyId,
+      unitId: unit._id,
+      unitNumber: unit.unitNumber,
+      tenant: '',
+      startDate: '',
+      endDate: '',
+      rentAmount: unit.monthlyRate
+    });
+    setShowContractModal(true);
+  };
+
+  const handleContractSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    if (new Date(contractData.endDate) <= new Date(contractData.startDate)) {
+      setError('End Date must be strictly after Start Date.');
+      return;
+    }
+
+    const payload = {
+      ...contractData,
+      unitId: contractData.unitId || null,
+      unitNumber: contractData.unitNumber || 'Main Unit',
+      rentAmount: Number(contractData.rentAmount),
+    };
+
+    try {
+      await createContract(payload);
+      setSuccess('Lease contract created successfully!');
+      setContractData({ property: '', unitId: '', unitNumber: '', tenant: '', startDate: '', endDate: '', rentAmount: '' });
+      setShowContractModal(false);
+      loadManagerData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to create lease contract.');
+    }
+  };
+
+  const handlePropertySubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    try {
+      let units = [];
+      if (['Apartment', 'Condo'].includes(propertyFormData.propertyType)) {
+        for (let i = 1; i <= Number(propertyFormData.unitCount); i++) {
+          units.push({
+            unitNumber: `Room ${100 + i}`,
+            monthlyRate: Number(propertyFormData.defaultUnitRate),
+            status: 'Available',
+          });
+        }
+      }
+
+      const payload = {
+        title: propertyFormData.title,
+        address: propertyFormData.address,
+        propertyType: propertyFormData.propertyType,
+        price: Number(propertyFormData.price || propertyFormData.defaultUnitRate),
+        units,
+      };
+
+      await createProperty(payload);
+      setSuccess('New property listing created successfully!');
+      setPropertyFormData({ title: '', address: '', propertyType: 'Apartment', price: '', unitCount: 10, defaultUnitRate: 8500 });
+      setShowPropertyModal(false);
+      loadManagerData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to add property listing.');
+    }
+  };
+
+  const handleTerminateContract = async (id) => {
+    if (window.confirm('Are you sure you want to end this lease? The unit will return to Available status.')) {
+      setError('');
+      setSuccess('');
+      try {
+        await terminateContract(id);
+        setSuccess('Lease contract terminated successfully.');
+        loadManagerData();
+      } catch (err) {
+        setError(err.response?.data?.message || 'Failed to end lease contract.');
+      }
+    }
+  };
 
   const filteredProperties = useMemo(() => {
     const q = search.toLowerCase();
@@ -70,7 +242,6 @@ export default function ManagerDashboard() {
     });
   }, [properties, search, filterType, filterStatus]);
 
-  // Aggregated Room-Level Metrics
   const metrics = useMemo(() => {
     let totalAssigned = properties.length;
     let availableCount = 0;
@@ -108,6 +279,27 @@ export default function ManagerDashboard() {
           <div className="d-flex gap-2">
             <Button
               variant="light"
+              className="pm-btn-primary"
+              onClick={() => setShowPropertyModal(true)}
+            >
+              Add property
+            </Button>
+            <Button
+              variant="light"
+              className="pm-btn-ghost"
+              onClick={() => setShowContractModal(true)}
+            >
+              New lease
+            </Button>
+            <Button
+              variant="light"
+              className="pm-btn-ghost"
+              onClick={() => setShowReports(!showReports)}
+            >
+              {showReports ? 'Hide reports' : 'View performance reports'}
+            </Button>
+            <Button
+              variant="light"
               className="pm-btn-ghost"
               onClick={() => setShowInvoices(!showInvoices)}
             >
@@ -127,6 +319,12 @@ export default function ManagerDashboard() {
           <div className="pm-alert pm-alert-error" role="alert">
             <span>{error}</span>
             <button className="pm-alert-close" onClick={() => setError('')} aria-label="Dismiss">×</button>
+          </div>
+        )}
+        {success && (
+          <div className="pm-alert pm-alert-success" role="alert">
+            <span>{success}</span>
+            <button className="pm-alert-close" onClick={() => setSuccess('')} aria-label="Dismiss">×</button>
           </div>
         )}
 
@@ -152,6 +350,16 @@ export default function ManagerDashboard() {
                 <span className="pm-metric-value">{metrics.occupiedCount}</span>
               </div>
             </div>
+
+            {/* Performance Analytics & Revenue Reports Panel */}
+            {showReports && (
+              <div className="pm-panel mb-4">
+                <div className="pm-panel-header">Performance & Revenue Analytics</div>
+                <div style={{ padding: '22px' }}>
+                  <ManagerReports properties={properties} invoices={invoices} />
+                </div>
+              </div>
+            )}
 
             {/* Invoicing Ledger Panel */}
             {showInvoices && (
@@ -265,7 +473,7 @@ export default function ManagerDashboard() {
               </Table>
             </div>
 
-            {/* Interactive 20-Unit Matrix Drawer */}
+            {/* Interactive Room Matrix Drawer */}
             {selectedPropertyObj && selectedPropertyObj.units && (
               <div className="pm-panel mb-4" style={{ backgroundColor: '#fcfcfd' }}>
                 <div className="pm-panel-header d-flex justify-content-between align-items-center">
@@ -284,15 +492,18 @@ export default function ManagerDashboard() {
                     {selectedPropertyObj.units.map((unit) => {
                       const isOccupied = unit.status === 'Occupied';
                       const isMaintenance = unit.status === 'Maintenance';
+                      const isAvailable = unit.status === 'Available';
 
                       return (
                         <Col key={unit._id || unit.unitNumber} xs={6} sm={4} md={3} lg={2.4}>
                           <div
-                            className="p-3 rounded border text-center h-100"
+                            className="p-3 rounded border text-center h-100 position-relative"
                             style={{
                               backgroundColor: isOccupied ? '#f0fdf4' : isMaintenance ? '#fffbeb' : '#ffffff',
                               borderColor: isOccupied ? '#bbf7d0' : isMaintenance ? '#fde68a' : '#e5e7eb',
+                              cursor: isAvailable ? 'pointer' : 'default',
                             }}
+                            onClick={() => isAvailable && handleOpenLeaseForUnit(selectedPropertyObj._id, unit)}
                           >
                             <div className="fw-bold fs-6 text-dark">{unit.unitNumber}</div>
                             <div className="fw-bold text-success my-1">
@@ -304,6 +515,11 @@ export default function ManagerDashboard() {
                             >
                               {unit.status}
                             </Badge>
+                            {isAvailable && (
+                              <div className="text-muted text-xs mt-2" style={{ fontSize: '11px' }}>
+                                Click to create lease
+                              </div>
+                            )}
                           </div>
                         </Col>
                       );
@@ -312,8 +528,253 @@ export default function ManagerDashboard() {
                 </div>
               </div>
             )}
+
+            {/* Active Lease Contracts */}
+            <div className="pm-panel mb-4">
+              <div className="pm-panel-header">Active lease contracts ({contracts.length})</div>
+              <Table responsive className="pm-table mb-0">
+                <thead>
+                  <tr>
+                    <th>Property / Unit</th>
+                    <th>Tenant</th>
+                    <th>Rent amount</th>
+                    <th>Status</th>
+                    <th className="text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {contracts.length > 0 ? (
+                    contracts.map((con) => (
+                      <tr key={con._id}>
+                        <td className="pm-cell-title">
+                          {con.property?.title || con.property}
+                          {con.unitNumber && con.unitNumber !== 'Main Unit' ? ` (${con.unitNumber})` : ''}
+                        </td>
+                        <td>{con.tenant?.name || con.tenant}</td>
+                        <td className="pm-cell-strong">₱{con.rentAmount?.toLocaleString()}</td>
+                        <td><StatusPill status={con.status} /></td>
+                        <td className="text-center">
+                          {con.status === 'Active' && (
+                            <Button
+                              variant="light"
+                              size="sm"
+                              className="pm-btn-end-lease"
+                              onClick={() => handleTerminateContract(con._id)}
+                            >
+                              End lease
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="5" className="pm-empty-row">No lease contracts recorded.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </Table>
+            </div>
           </>
         )}
+
+        {/* Modal: New Property Listing */}
+        <Modal show={showPropertyModal} onHide={() => setShowPropertyModal(false)} centered dialogClassName="pm-modal">
+          <Modal.Header closeButton>
+            <Modal.Title>Add property listing</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            <Form onSubmit={handlePropertySubmit}>
+              <Form.Group className="mb-3">
+                <Form.Label className="pm-form-label">Property Title</Form.Label>
+                <Form.Control
+                  className="pm-input"
+                  placeholder="e.g., Horizon Residences"
+                  value={propertyFormData.title}
+                  onChange={(e) => setPropertyFormData({ ...propertyFormData, title: e.target.value })}
+                  required
+                />
+              </Form.Group>
+
+              <Form.Group className="mb-3">
+                <Form.Label className="pm-form-label">Address</Form.Label>
+                <Form.Control
+                  className="pm-input"
+                  placeholder="e.g., 123 Ayala Ave, Makati City"
+                  value={propertyFormData.address}
+                  onChange={(e) => setPropertyFormData({ ...propertyFormData, address: e.target.value })}
+                  required
+                />
+              </Form.Group>
+
+              <Row className="mb-3">
+                <Col md={6}>
+                  <Form.Label className="pm-form-label">Property Type</Form.Label>
+                  <Form.Select
+                    className="pm-input"
+                    value={propertyFormData.propertyType}
+                    onChange={(e) => setPropertyFormData({ ...propertyFormData, propertyType: e.target.value })}
+                  >
+                    <option value="Apartment">Apartment</option>
+                    <option value="Condo">Condo</option>
+                    <option value="House">House</option>
+                    <option value="Commercial">Commercial</option>
+                  </Form.Select>
+                </Col>
+
+                {['Apartment', 'Condo'].includes(propertyFormData.propertyType) ? (
+                  <Col md={6}>
+                    <Form.Label className="pm-form-label">Number of Units</Form.Label>
+                    <Form.Control
+                      className="pm-input"
+                      type="number"
+                      value={propertyFormData.unitCount}
+                      onChange={(e) => setPropertyFormData({ ...propertyFormData, unitCount: e.target.value })}
+                      required
+                    />
+                  </Col>
+                ) : (
+                  <Col md={6}>
+                    <Form.Label className="pm-form-label">Monthly Rate (₱)</Form.Label>
+                    <Form.Control
+                      className="pm-input"
+                      type="number"
+                      value={propertyFormData.price}
+                      onChange={(e) => setPropertyFormData({ ...propertyFormData, price: e.target.value })}
+                      required
+                    />
+                  </Col>
+                )}
+              </Row>
+
+              {['Apartment', 'Condo'].includes(propertyFormData.propertyType) && (
+                <Form.Group className="mb-4">
+                  <Form.Label className="pm-form-label">Default Rent per Unit (₱)</Form.Label>
+                  <Form.Control
+                    className="pm-input"
+                    type="number"
+                    value={propertyFormData.defaultUnitRate}
+                    onChange={(e) => setPropertyFormData({ ...propertyFormData, defaultUnitRate: e.target.value })}
+                    required
+                  />
+                </Form.Group>
+              )}
+
+              <Button variant="light" className="pm-btn-primary w-100 py-2" type="submit">
+                Save Property Listing
+              </Button>
+            </Form>
+          </Modal.Body>
+        </Modal>
+
+        {/* Modal: Unit-Aware New Lease Contract */}
+        <Modal show={showContractModal} onHide={() => setShowContractModal(false)} centered dialogClassName="pm-modal">
+          <Modal.Header closeButton>
+            <Modal.Title>Create lease contract</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            <Form onSubmit={handleContractSubmit}>
+              <Form.Group className="mb-3">
+                <Form.Label className="pm-form-label">Select property</Form.Label>
+                <Form.Select
+                  className="pm-input"
+                  value={contractData.property}
+                  onChange={(e) => handlePropertySelect(e.target.value)}
+                  required
+                >
+                  <option value="">-- Choose property --</option>
+                  {properties.map((p) => (
+                    <option key={p._id} value={p._id}>
+                      {p.title} ({p.units?.length > 0 ? `${p.units.length} Units` : 'Standalone House'})
+                    </option>
+                  ))}
+                </Form.Select>
+              </Form.Group>
+
+              {(() => {
+                const selectedProp = properties.find((p) => p._id === contractData.property);
+                const availableUnits = selectedProp?.units?.filter((u) => u.status === 'Available') || [];
+
+                if (selectedProp && selectedProp.units?.length > 0) {
+                  return (
+                    <Form.Group className="mb-3">
+                      <Form.Label className="pm-form-label">Select room / unit</Form.Label>
+                      <Form.Select
+                        className="pm-input"
+                        value={contractData.unitId}
+                        onChange={(e) => handleUnitSelect(e.target.value)}
+                        required
+                      >
+                        <option value="">-- Choose available unit --</option>
+                        {availableUnits.map((u) => (
+                          <option key={u._id} value={u._id}>
+                            {u.unitNumber} — ₱{u.monthlyRate?.toLocaleString()}/mo
+                          </option>
+                        ))}
+                      </Form.Select>
+                    </Form.Group>
+                  );
+                }
+                return null;
+              })()}
+
+              <Form.Group className="mb-3">
+                <Form.Label className="pm-form-label">Select tenant account</Form.Label>
+                <Form.Select
+                  className="pm-input"
+                  value={contractData.tenant}
+                  onChange={(e) => setContractData({ ...contractData, tenant: e.target.value })}
+                  required
+                >
+                  <option value="">-- Choose tenant --</option>
+                  {userList.map((u) => (
+                    <option key={u._id} value={u._id}>
+                      {u.name} ({u.email})
+                    </option>
+                  ))}
+                </Form.Select>
+              </Form.Group>
+
+              <Row className="mb-3">
+                <Col md={6}>
+                  <Form.Label className="pm-form-label">Start date</Form.Label>
+                  <Form.Control
+                    className="pm-input"
+                    type="date"
+                    value={contractData.startDate}
+                    onChange={(e) => setContractData({ ...contractData, startDate: e.target.value })}
+                    required
+                  />
+                </Col>
+                <Col md={6}>
+                  <Form.Label className="pm-form-label">End date</Form.Label>
+                  <Form.Control
+                    className="pm-input"
+                    type="date"
+                    value={contractData.endDate}
+                    onChange={(e) => setContractData({ ...contractData, endDate: e.target.value })}
+                    required
+                  />
+                </Col>
+              </Row>
+
+              <Form.Group className="mb-4">
+                <Form.Label className="pm-form-label">Rent amount (₱)</Form.Label>
+                <Form.Control
+                  className="pm-input"
+                  type="number"
+                  value={contractData.rentAmount}
+                  onChange={(e) => setContractData({ ...contractData, rentAmount: e.target.value })}
+                  required
+                />
+              </Form.Group>
+
+              <Button variant="light" className="pm-btn-primary w-100 py-2" type="submit">
+                Save lease contract
+              </Button>
+            </Form>
+          </Modal.Body>
+        </Modal>
       </Container>
     </div>
   );

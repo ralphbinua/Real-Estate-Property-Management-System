@@ -1,5 +1,5 @@
 const Contract = require('../models/Contract');
-const Property = require('../models/Property'); // Import Property model
+const Property = require('../models/Property');
 
 // @desc    Get contracts (populated and role-filtered)
 // @route   GET /api/contracts
@@ -18,23 +18,28 @@ const getContracts = async (req, res) => {
     }
 
     const contracts = await Contract.find(query)
-      .populate('property', 'title address price')
-      .populate('tenant', 'name email');
+      .populate('property', 'title address price propertyType')
+      .populate('tenant', 'name email')
+      .sort({ createdAt: -1 });
+
     res.status(200).json(contracts);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Create lease contract
+// @desc    Create lease contract (Unit-Aware)
 // @route   POST /api/contracts
-// @access  Private (Admin / Manager)
+// @access  Private (Admin / Property Manager)
 const createContract = async (req, res) => {
   try {
-    const { property, tenant, startDate, endDate, rentAmount } = req.body;
+    const { property, unitId, unitNumber, tenant, startDate, endDate, rentAmount } = req.body;
 
+    // 1. Create Contract with unit details
     const contract = await Contract.create({
       property,
+      unitId: unitId || null,
+      unitNumber: unitNumber || 'Main Unit',
       tenant,
       startDate,
       endDate,
@@ -42,9 +47,20 @@ const createContract = async (req, res) => {
       status: 'Active',
     });
 
-    // Automatically set property status to 'Rented'
-    if (property) {
-      await Property.findByIdAndUpdate(property, { status: 'Rented' });
+    // 2. Update specific room inside Property.units array if unitId exists
+    if (unitId) {
+      const propertyDoc = await Property.findById(property);
+      if (propertyDoc && Array.isArray(propertyDoc.units)) {
+        const unit = propertyDoc.units.id(unitId);
+        if (unit) {
+          unit.status = 'Occupied';
+          unit.tenant = tenant;
+          await propertyDoc.save();
+        }
+      }
+    } else if (property) {
+      // Fallback for standalone house
+      await Property.findByIdAndUpdate(property, { status: 'Occupied' });
     }
 
     const populatedContract = await Contract.findById(contract._id)
@@ -57,29 +73,48 @@ const createContract = async (req, res) => {
   }
 };
 
-// @desc    Manually terminate/complete a lease contract
+// @desc    Manually terminate/complete a lease contract (Unit-Aware Sync)
 // @route   PUT /api/contracts/:id/terminate
 // @access  Private (Admin / Property Manager)
 const terminateContract = async (req, res) => {
   try {
     const contract = await Contract.findById(req.params.id);
-    if (!contract) return res.status(404).json({ message: 'Contract not found' });
+    if (!contract) {
+      return res.status(404).json({ message: 'Contract not found.' });
+    }
 
+    // 1. Mark Contract as Terminated
     contract.status = 'Terminated';
     await contract.save();
 
-    // Revert the property status to 'Available'
+    // 2. Revert Sub-Unit Status to Available safely
     if (contract.property) {
-      await Property.findByIdAndUpdate(contract.property, { status: 'Available' });
+      const property = await Property.findById(contract.property);
+      
+      if (property && Array.isArray(property.units) && property.units.length > 0) {
+        // Find matching unit either by sub-document ID or unitNumber string
+        const unit = property.units.find(
+          (u) =>
+            (contract.unitId && u._id.toString() === contract.unitId.toString()) ||
+            (contract.unitNumber && u.unitNumber === contract.unitNumber)
+        );
+
+        if (unit) {
+          unit.status = 'Available';
+          unit.tenant = null;
+          await property.save();
+        }
+      } else if (property) {
+        // Fallback for standalone house
+        property.status = 'Available';
+        await property.save();
+      }
     }
 
-    const updatedContract = await Contract.findById(contract._id)
-      .populate('property', 'title address price')
-      .populate('tenant', 'name email');
-
-    res.status(200).json(updatedContract);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.json({ message: 'Lease terminated successfully.' });
+  } catch (err) {
+    console.error('Error in terminateContract:', err);
+    res.status(500).json({ message: err.message || 'Failed to terminate contract.' });
   }
 };
 
