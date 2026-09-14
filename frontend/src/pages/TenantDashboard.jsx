@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Container, Table, Form, Modal, Spinner, Button, Row, Col } from 'react-bootstrap';
+import { Container, Table, Form, Spinner, Button, Modal } from 'react-bootstrap';
+import { useAuth } from '../context/AuthContext';
 import { fetchMaintenanceRequests, createMaintenanceRequest } from '../services/maintenanceService';
 import { fetchProperties } from '../services/propertyService';
-import { useAuth } from '../context/AuthContext';
+import TenantInvoiceViewer from '../components/TenantInvoiceViewer'; // 1. IMPORT ADDED HERE
 import './TenantDashboard.css';
 
 const TICKET_PILL_CLASS = {
-  open: 'pm-pill-open',
-  'in progress': 'pm-pill-progress',
-  resolved: 'pm-pill-resolved',
+  open: 'pm-pill-pending',
+  'in progress': 'pm-pill-occupied',
+  resolved: 'pm-pill-available',
+  closed: 'pm-pill-default',
 };
 
 function TicketStatusPill({ status }) {
@@ -97,7 +99,7 @@ export default function TenantDashboard() {
           <div>
             <h1 className="pm-title">Welcome back, {user?.name || 'Tenant'}</h1>
             <p className="pm-subtitle">
-              Tenant Portal: Track your repair requests and report maintenance issues
+              Tenant Portal: Track your repair requests, billing statements, and report maintenance issues
             </p>
           </div>
           <div>
@@ -148,6 +150,14 @@ export default function TenantDashboard() {
               <div className="pm-metric">
                 <span className="pm-metric-label">Resolved</span>
                 <span className="pm-metric-value">{resolvedTickets}</span>
+              </div>
+            </div>
+
+            {/* 2. INVOICING & BILLING PANEL ADDED HERE */}
+            <div className="pm-panel mb-4">
+              <div className="pm-panel-header">My rent billing statements</div>
+              <div style={{ padding: '22px' }}>
+                <TenantInvoiceViewer tenantId={user?._id} />
               </div>
             </div>
 

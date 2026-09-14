@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Container, Table, Form, Spinner, Button } from 'react-bootstrap';
 import { fetchProperties } from '../services/propertyService';
 import AdminMaintenanceManager from '../components/AdminMaintenanceManager';
+import ManagerInvoiceTracker from '../components/ManagerInvoiceTracker';
 import './ManagerDashboard.css';
 
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
@@ -31,6 +32,7 @@ export default function ManagerDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showMaintenanceQueue, setShowMaintenanceQueue] = useState(false);
+  const [showInvoices, setShowInvoices] = useState(true); // Toggle state for Financial Ledger
 
   // Filter State
   const [search, setSearch] = useState('');
@@ -79,10 +81,17 @@ export default function ManagerDashboard() {
           <div>
             <h1 className="pm-title">Property Manager Dashboard</h1>
             <p className="pm-subtitle">
-              Oversee property operations, maintenance requests, and unit statuses
+              Oversee property operations, maintenance requests, and monthly billing ledgers
             </p>
           </div>
-          <div>
+          <div className="d-flex gap-2">
+            <Button
+              variant="light"
+              className="pm-btn-ghost"
+              onClick={() => setShowInvoices(!showInvoices)}
+            >
+              {showInvoices ? 'Hide financial ledger' : 'View financial ledger'}
+            </Button>
             <Button
               variant="light"
               className="pm-btn-ghost"
@@ -123,9 +132,19 @@ export default function ManagerDashboard() {
               </div>
             </div>
 
+            {/* Invoicing & Payment Ledger Panel */}
+            {showInvoices && (
+              <div className="pm-panel mb-4">
+                <div className="pm-panel-header">Financial Ledger & Rent Collection</div>
+                <div style={{ padding: '22px' }}>
+                  <ManagerInvoiceTracker />
+                </div>
+              </div>
+            )}
+
             {/* Maintenance Queue Panel (Toggleable) */}
             {showMaintenanceQueue && (
-              <div className="pm-panel">
+              <div className="pm-panel mb-4">
                 <div className="pm-panel-header">Maintenance & repair requests</div>
                 <div style={{ padding: '22px' }}>
                   <AdminMaintenanceManager />
