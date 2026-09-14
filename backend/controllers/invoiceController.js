@@ -1,5 +1,6 @@
 const Invoice = require('../models/Invoice');
 const Contract = require('../models/Contract');
+const Property = require('../models/Property');
 const SystemSettings = require('../models/SystemSettings');
 
 // Helper function to calculate late fees based on SystemSettings
@@ -72,10 +73,21 @@ exports.generateMonthlyInvoices = async (req, res) => {
   }
 };
 
-// Fetch all invoices (Filtered for Property Manager view)
+// Fetch invoices (Role-aware filtering)
 exports.getAllInvoices = async (req, res) => {
   try {
-    const invoices = await Invoice.find()
+    let query = {};
+    const userRole = req.user?.role;
+
+    if (userRole === 'Tenant') {
+      query.tenant = req.user._id;
+    } else if (userRole === 'Owner') {
+      const ownedProperties = await Property.find({ owner: req.user._id }).select('_id');
+      const propertyIds = ownedProperties.map((p) => p._id);
+      query.property = { $in: propertyIds };
+    }
+
+    const invoices = await Invoice.find(query)
       .populate('tenant', 'name email')
       .populate('property', 'title address')
       .sort({ createdAt: -1 });

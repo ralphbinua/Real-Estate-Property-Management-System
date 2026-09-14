@@ -1,63 +1,52 @@
 const mongoose = require('mongoose');
 
+const unitSchema = new mongoose.Schema({
+  unitNumber: { type: String, required: true, default: 'Main Unit' },
+  monthlyRate: { type: Number, required: true },
+  status: {
+    type: String,
+    enum: ['Available', 'Occupied', 'Maintenance', 'Reserved'],
+    default: 'Available',
+  },
+  tenant: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+});
+
 const propertySchema = new mongoose.Schema(
   {
-    title: {
-      type: String,
-      required: [true, 'Please add a property title'],
-      trim: true,
-    },
-    description: {
-      type: String,
-      required: [true, 'Please add a description'],
-    },
-    address: {
-      type: String,
-      required: [true, 'Please add the property address'],
-    },
+    title: { type: String, required: true },
+    description: { type: String, default: '' },
+    address: { type: String, required: true },
     propertyType: {
       type: String,
-      enum: ['Apartment', 'House', 'Condo', 'Commercial'],
+      enum: ['Condo', 'Apartment', 'House', 'Commercial'],
       required: true,
     },
-    price: {
-      type: Number,
-      required: [true, 'Please add the rental price or value'],
-    },
+    price: { type: Number, default: 0 }, // Used for single-unit properties like House
     status: {
       type: String,
-      enum: ['Available', 'Rented', 'Under Maintenance'],
+      enum: ['Available', 'Occupied', 'Pending', 'Under Maintenance'],
       default: 'Available',
     },
-    features: {
-      bedrooms: { type: Number, default: 0 },
-      bathrooms: { type: Number, default: 0 },
-      squareMeters: { type: Number, default: 0 },
-    },
-    // Link to the User model for the assigned Property Manager
-    manager: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: false,
-      ref: 'User', 
-    },
-    // Link to the User model for the Owner of the property
-    owner: {
-      type: mongoose.Schema.Types.ObjectId,
-      required: false,
-      ref: 'User',
-    },
-    isDeleted: {
-      type: Boolean,
-      default: false,
-    },
-    deletedAt: {
-      type: Date,
-      default: null,
-    },
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    manager: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    units: [unitSchema], // Array of rooms for Condos/Apartments
+    isDeleted: { type: Boolean, default: false },
   },
-  {
-    timestamps: true, // Automatically tracks when a listing is created or updated
-  }
+  { timestamps: true }
 );
+
+// Pre-save Hook: Ensure House properties always initialize as 1 unit
+propertySchema.pre('save', function (next) {
+  if (this.propertyType === 'House' && (!this.units || this.units.length === 0)) {
+    this.units = [
+      {
+        unitNumber: 'Main House',
+        monthlyRate: this.price || 0,
+        status: this.status || 'Available',
+      },
+    ];
+  }
+  next();
+});
 
 module.exports = mongoose.model('Property', propertySchema);

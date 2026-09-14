@@ -11,12 +11,12 @@ const invoiceSchema = new mongoose.Schema(
     dueDate: { type: Date, required: true },
     status: {
       type: String,
-      enum: ['Pending', 'Pending Verification', 'Paid', 'Overdue', 'Cancelled'], // <-- Added 'Pending Verification'
+      enum: ['Pending', 'Pending Verification', 'Paid', 'Overdue', 'Cancelled'],
       default: 'Pending',
     },
     paidAt: { type: Date },
     paymentMethod: { type: String, enum: ['Cash', 'Bank Transfer', 'GCash', 'Check', 'N/A'], default: 'N/A' },
-    receiptUrl: { type: String, default: '' }, // Ensure receiptUrl is explicitly defined
+    receiptUrl: { type: String, default: '' },
     remarks: { type: String, default: '' },
   },
   { timestamps: true }

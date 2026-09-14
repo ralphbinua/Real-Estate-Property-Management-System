@@ -8,7 +8,7 @@ const {
 const { protect, authorize } = require('../middleware/authMiddleware');
 
 router.route('/')
-  .get(protect, getMaintenanceRequests)
+  .get(protect, authorize('Admin', 'Property Manager', 'Owner', 'Tenant'), getMaintenanceRequests)
   .post(protect, authorize('Tenant'), createMaintenanceRequest);
 
 router.route('/:id')

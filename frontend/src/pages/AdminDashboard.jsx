@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Container, Table, Form, Row, Col, Modal, Spinner, Button } from 'react-bootstrap';
+import { Container, Table, Form, Row, Col, Modal, Spinner, Button, Badge } from 'react-bootstrap';
 import { fetchProperties, updateProperty, deleteProperty } from '../services/propertyService';
 import { fetchContracts, createContract, terminateContract } from '../services/contractService';
 import { fetchUsers } from '../services/userService';
@@ -40,6 +40,9 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Selected property for viewing units
+  const [selectedPropertyId, setSelectedPropertyId] = useState(null);
 
   // Search & Filter State
   const [search, setSearch] = useState('');
@@ -85,7 +88,6 @@ export default function AdminDashboard() {
     loadData();
   }, []);
 
-  // Soft Delete Guard & Property Deletion
   const handleDeleteProperty = async (id) => {
     setError('');
     setSuccess('');
@@ -114,13 +116,11 @@ export default function AdminDashboard() {
     }
   };
 
-  // Open Edit Modal
   const handleEditClick = (prop) => {
     setEditingProperty({ ...prop });
     setShowEditModal(true);
   };
 
-  // Submit Updated Details
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -135,17 +135,15 @@ export default function AdminDashboard() {
     }
   };
 
-  // Auto-fill Rent Amount on property select
   const handlePropertySelect = (propertyId) => {
     const selectedProp = properties.find((p) => p._id === propertyId);
     setContractData({
       ...contractData,
       property: propertyId,
-      rentAmount: selectedProp ? selectedProp.price : ''
+      rentAmount: selectedProp ? selectedProp.monthlyRate || selectedProp.price || '' : ''
     });
   };
 
-  // Create Contract
   const handleContractSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -153,12 +151,6 @@ export default function AdminDashboard() {
 
     if (new Date(contractData.endDate) <= new Date(contractData.startDate)) {
       setError('End Date must be strictly after Start Date.');
-      return;
-    }
-
-    const selectedProp = properties.find((p) => p._id === contractData.property);
-    if (selectedProp && selectedProp.status?.toLowerCase() === 'rented') {
-      setError('This property already has an active lease.');
       return;
     }
 
@@ -176,7 +168,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // Terminate Lease
   const handleTerminateContract = async (id) => {
     if (window.confirm('Are you sure you want to end this lease? The property will return to Available status.')) {
       setError('');
@@ -191,7 +182,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // Filtering Logic
   const filteredProperties = useMemo(() => {
     const q = search.toLowerCase();
     return properties.filter((prop) => {
@@ -203,22 +193,30 @@ export default function AdminDashboard() {
     });
   }, [properties, search, filterType, filterStatus]);
 
-  // Metric Calculation
+  // Aggregated Metric Calculations (Unit Array Aware)
   const metrics = useMemo(() => {
     const activeContractsList = contracts.filter((c) => c.status?.toLowerCase() === 'active');
+    let totalOccupiedUnits = 0;
+
+    properties.forEach((p) => {
+      if (Array.isArray(p.units) && p.units.length > 0) {
+        totalOccupiedUnits += p.units.filter((u) => u.status === 'Occupied').length;
+      } else if (['occupied', 'rented'].includes(p.status?.toLowerCase())) {
+        totalOccupiedUnits += 1;
+      }
+    });
+
     return {
       totalProperties: properties.length,
-      occupiedCount: properties.filter((p) =>
-        ['occupied', 'rented'].includes(p.status?.toLowerCase())
-      ).length,
+      occupiedCount: totalOccupiedUnits,
       activeContracts: activeContractsList.length,
       totalRevenue: activeContractsList.reduce((acc, curr) => acc + (curr.rentAmount || 0), 0),
     };
   }, [properties, contracts]);
 
-  const availableProperties = useMemo(
-    () => properties.filter((p) => p.status?.toLowerCase() !== 'rented'),
-    [properties]
+  const selectedPropertyObj = useMemo(
+    () => properties.find((p) => p._id === selectedPropertyId),
+    [properties, selectedPropertyId]
   );
 
   return (
@@ -277,7 +275,7 @@ export default function AdminDashboard() {
           </div>
         ) : (
           <>
-            {/* Metrics strip */}
+            {/* Metrics Strip */}
             <div className="pm-metrics">
               <div className="pm-metric">
                 <span className="pm-metric-label">Total properties</span>
@@ -307,7 +305,7 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* Search & Filter Toolbar */}
+            {/* Toolbar */}
             <div className="pm-filterbar">
               <Form.Control
                 className="pm-input pm-search"
@@ -338,7 +336,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* Property Directory */}
-            <div className="pm-panel">
+            <div className="pm-panel mb-4">
               <div className="pm-panel-header">
                 Property directory ({filteredProperties.length})
               </div>
@@ -349,39 +347,61 @@ export default function AdminDashboard() {
                     <th>Address</th>
                     <th>Type</th>
                     <th>Rent rate</th>
-                    <th>Status</th>
+                    <th>Occupancy</th>
                     <th className="text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredProperties.length > 0 ? (
-                    filteredProperties.map((prop) => (
-                      <tr key={prop._id}>
-                        <td className="pm-cell-title">{prop.title}</td>
-                        <td className="pm-cell-muted">{prop.address}</td>
-                        <td>{prop.propertyType}</td>
-                        <td className="pm-cell-strong">₱{prop.price?.toLocaleString()}</td>
-                        <td><StatusPill status={prop.status} /></td>
-                        <td className="text-center">
-                          <Button
-                            variant="light"
-                            size="sm"
-                            className="pm-btn-edit-outline me-2"
-                            onClick={() => handleEditClick(prop)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            variant="light"
-                            size="sm"
-                            className="pm-btn-danger-outline"
-                            onClick={() => handleDeleteProperty(prop._id)}
-                          >
-                            Archive
-                          </Button>
-                        </td>
-                      </tr>
-                    ))
+                    filteredProperties.map((prop) => {
+                      const totalUnits = prop.totalUnits || prop.units?.length || 1;
+                      const occupiedCount = prop.occupiedUnits || (prop.units ? prop.units.filter((u) => u.status === 'Occupied').length : 0);
+                      const rateDisplay = prop.monthlyRate !== undefined ? prop.monthlyRate : prop.price || 0;
+
+                      return (
+                        <tr key={prop._id}>
+                          <td className="pm-cell-title">{prop.title}</td>
+                          <td className="pm-cell-muted">{prop.address}</td>
+                          <td>{prop.propertyType}</td>
+                          <td className="pm-cell-strong">
+                            ₱{rateDisplay.toLocaleString()}{prop.units?.length > 0 ? '/mo up' : ''}
+                          </td>
+                          <td>
+                            <StatusPill status={occupiedCount > 0 ? `${occupiedCount}/${totalUnits} Occupied` : prop.status || 'Available'} />
+                          </td>
+                          <td className="text-center">
+                            {prop.units && prop.units.length > 0 && (
+                              <Button
+                                variant="light"
+                                size="sm"
+                                className="pm-btn-edit-outline me-2"
+                                onClick={() =>
+                                  setSelectedPropertyId(selectedPropertyId === prop._id ? null : prop._id)
+                                }
+                              >
+                                {selectedPropertyId === prop._id ? 'Hide Units' : `View Units (${prop.units.length})`}
+                              </Button>
+                            )}
+                            <Button
+                              variant="light"
+                              size="sm"
+                              className="pm-btn-edit-outline me-2"
+                              onClick={() => handleEditClick(prop)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="light"
+                              size="sm"
+                              className="pm-btn-danger-outline"
+                              onClick={() => handleDeleteProperty(prop._id)}
+                            >
+                              Archive
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
                       <td colSpan="6" className="pm-empty-row">No matching properties found.</td>
@@ -391,8 +411,56 @@ export default function AdminDashboard() {
               </Table>
             </div>
 
+            {/* Interactive 20-Unit Matrix Drawer */}
+            {selectedPropertyObj && selectedPropertyObj.units && (
+              <div className="pm-panel mb-4" style={{ backgroundColor: '#fcfcfd' }}>
+                <div className="pm-panel-header d-flex justify-content-between align-items-center">
+                  <span>Unit breakdown — {selectedPropertyObj.title} ({selectedPropertyObj.units.length} Rooms)</span>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="text-decoration-none text-muted"
+                    onClick={() => setSelectedPropertyId(null)}
+                  >
+                    Close matrix ✕
+                  </Button>
+                </div>
+                <div style={{ padding: '22px' }}>
+                  <Row className="g-3">
+                    {selectedPropertyObj.units.map((unit) => {
+                      const isOccupied = unit.status === 'Occupied';
+                      const isMaintenance = unit.status === 'Maintenance';
+
+                      return (
+                        <Col key={unit._id || unit.unitNumber} xs={6} sm={4} md={3} lg={2.4}>
+                          <div
+                            className="p-3 rounded border text-center h-100"
+                            style={{
+                              backgroundColor: isOccupied ? '#f0fdf4' : isMaintenance ? '#fffbeb' : '#ffffff',
+                              borderColor: isOccupied ? '#bbf7d0' : isMaintenance ? '#fde68a' : '#e5e7eb',
+                            }}
+                          >
+                            <div className="fw-bold fs-6 text-dark">{unit.unitNumber}</div>
+                            <div className="fw-bold text-success my-1">
+                              ₱{(unit.monthlyRate || 0).toLocaleString()}
+                            </div>
+                            <Badge
+                              bg={isOccupied ? 'success' : isMaintenance ? 'warning' : 'secondary'}
+                              className="text-capitalize"
+                            >
+                              {unit.status}
+                            </Badge>
+                          </div>
+                        </Col>
+                      );
+                    })}
+                  </Row>
+                </div>
+              </div>
+            )}
+
             {/* Active Contracts */}
-            <div className="pm-panel">
+            <div className="pm-panel mb-4">
               <div className="pm-panel-header">Active lease contracts</div>
               <Table responsive className="pm-table mb-0">
                 <thead>
@@ -435,7 +503,7 @@ export default function AdminDashboard() {
               </Table>
             </div>
 
-            {/* Maintenance Request Manager */}
+            {/* Maintenance Manager */}
             <div className="pm-panel">
               <div className="pm-panel-header">Maintenance queue</div>
               <div style={{ padding: '22px' }}>
@@ -507,16 +575,6 @@ export default function AdminDashboard() {
                     </Form.Select>
                   </Col>
                 </Row>
-                <Form.Group className="mb-3">
-                  <Form.Label className="pm-form-label">Monthly rate (₱)</Form.Label>
-                  <Form.Control
-                    className="pm-input"
-                    type="number"
-                    value={editingProperty.price}
-                    onChange={(e) => setEditingProperty({ ...editingProperty, price: Number(e.target.value) })}
-                    required
-                  />
-                </Form.Group>
               </Modal.Body>
               <Modal.Footer>
                 <Button variant="light" className="pm-btn-ghost" onClick={() => setShowEditModal(false)}>Cancel</Button>
@@ -542,9 +600,9 @@ export default function AdminDashboard() {
                   required
                 >
                   <option value="">-- Choose property --</option>
-                  {availableProperties.map((p) => (
+                  {properties.map((p) => (
                     <option key={p._id} value={p._id}>
-                      {p.title} (₱{p.price?.toLocaleString()}/mo)
+                      {p.title} (₱{(p.monthlyRate || p.price || 0).toLocaleString()}/mo)
                     </option>
                   ))}
                 </Form.Select>

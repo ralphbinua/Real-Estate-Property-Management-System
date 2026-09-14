@@ -1,14 +1,18 @@
 const MaintenanceRequest = require('../models/MaintenanceRequest');
+const Property = require('../models/Property');
 
-// @desc    Get all maintenance requests
+// @desc    Get maintenance requests
 // @route   GET /api/maintenance
-// @access  Private (Admin, Property Manager see all; Tenants see their own)
+// @access  Private (Admin & Property Manager see all; Tenants see their own; Owners see requests for properties they own)
 const getMaintenanceRequests = async (req, res) => {
   try {
     let query = {};
-    // If the user is a Tenant, only show their own maintenance requests
     if (req.user.role === 'Tenant') {
       query.tenant = req.user._id;
+    } else if (req.user.role === 'Owner') {
+      const ownedProperties = await Property.find({ owner: req.user._id }).select('_id');
+      const propertyIds = ownedProperties.map((p) => p._id);
+      query.property = { $in: propertyIds };
     }
 
     const requests = await MaintenanceRequest.find(query)

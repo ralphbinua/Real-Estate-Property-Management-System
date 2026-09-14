@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Container, Table, Form, Spinner, Button } from 'react-bootstrap';
+import { Container, Table, Form, Spinner, Button, Row, Col, Badge } from 'react-bootstrap';
 import { fetchProperties } from '../services/propertyService';
 import AdminMaintenanceManager from '../components/AdminMaintenanceManager';
 import ManagerInvoiceTracker from '../components/ManagerInvoiceTracker';
@@ -32,7 +32,10 @@ export default function ManagerDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showMaintenanceQueue, setShowMaintenanceQueue] = useState(false);
-  const [showInvoices, setShowInvoices] = useState(true); // Toggle state for Financial Ledger
+  const [showInvoices, setShowInvoices] = useState(true);
+  
+  // Selected property for viewing units
+  const [selectedPropertyId, setSelectedPropertyId] = useState(null);
 
   // Filter State
   const [search, setSearch] = useState('');
@@ -67,11 +70,29 @@ export default function ManagerDashboard() {
     });
   }, [properties, search, filterType, filterStatus]);
 
-  const totalAssigned = properties.length;
-  const availableCount = properties.filter((p) => p.status?.toLowerCase() === 'available').length;
-  const occupiedCount = properties.filter((p) =>
-    ['occupied', 'rented'].includes(p.status?.toLowerCase())
-  ).length;
+  // Aggregated Room-Level Metrics
+  const metrics = useMemo(() => {
+    let totalAssigned = properties.length;
+    let availableCount = 0;
+    let occupiedCount = 0;
+
+    properties.forEach((p) => {
+      if (Array.isArray(p.units) && p.units.length > 0) {
+        availableCount += p.units.filter((u) => u.status === 'Available').length;
+        occupiedCount += p.units.filter((u) => u.status === 'Occupied').length;
+      } else {
+        if (p.status?.toLowerCase() === 'available') availableCount += 1;
+        if (['occupied', 'rented'].includes(p.status?.toLowerCase())) occupiedCount += 1;
+      }
+    });
+
+    return { totalAssigned, availableCount, occupiedCount };
+  }, [properties]);
+
+  const selectedPropertyObj = useMemo(
+    () => properties.find((p) => p._id === selectedPropertyId),
+    [properties, selectedPropertyId]
+  );
 
   return (
     <div className="pm-manager">
@@ -120,19 +141,19 @@ export default function ManagerDashboard() {
             <div className="pm-metrics">
               <div className="pm-metric">
                 <span className="pm-metric-label">Assigned properties</span>
-                <span className="pm-metric-value">{totalAssigned}</span>
+                <span className="pm-metric-value">{metrics.totalAssigned}</span>
               </div>
               <div className="pm-metric">
                 <span className="pm-metric-label">Available units</span>
-                <span className="pm-metric-value">{availableCount}</span>
+                <span className="pm-metric-value">{metrics.availableCount}</span>
               </div>
               <div className="pm-metric">
                 <span className="pm-metric-label">Occupied units</span>
-                <span className="pm-metric-value">{occupiedCount}</span>
+                <span className="pm-metric-value">{metrics.occupiedCount}</span>
               </div>
             </div>
 
-            {/* Invoicing & Payment Ledger Panel */}
+            {/* Invoicing Ledger Panel */}
             {showInvoices && (
               <div className="pm-panel mb-4">
                 <div className="pm-panel-header">Financial Ledger & Rent Collection</div>
@@ -142,7 +163,7 @@ export default function ManagerDashboard() {
               </div>
             )}
 
-            {/* Maintenance Queue Panel (Toggleable) */}
+            {/* Maintenance Queue Panel */}
             {showMaintenanceQueue && (
               <div className="pm-panel mb-4">
                 <div className="pm-panel-header">Maintenance & repair requests</div>
@@ -152,7 +173,7 @@ export default function ManagerDashboard() {
               </div>
             )}
 
-            {/* Search & Filter Bar */}
+            {/* Filter Toolbar */}
             <div className="pm-filterbar">
               <Form.Control
                 className="pm-input pm-search"
@@ -182,8 +203,8 @@ export default function ManagerDashboard() {
               </Form.Select>
             </div>
 
-            {/* Property Overview Table Panel */}
-            <div className="pm-panel">
+            {/* Property Directory */}
+            <div className="pm-panel mb-4">
               <div className="pm-panel-header">
                 Managed properties overview ({filteredProperties.length})
               </div>
@@ -194,30 +215,103 @@ export default function ManagerDashboard() {
                     <th>Address</th>
                     <th>Type</th>
                     <th>Monthly rate</th>
-                    <th>Status</th>
+                    <th>Occupancy</th>
+                    <th className="text-center">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredProperties.length > 0 ? (
-                    filteredProperties.map((prop) => (
-                      <tr key={prop._id}>
-                        <td className="pm-cell-title">{prop.title}</td>
-                        <td className="pm-cell-muted">{prop.address}</td>
-                        <td>{prop.propertyType}</td>
-                        <td className="pm-cell-strong">₱{prop.price?.toLocaleString()}</td>
-                        <td>
-                          <StatusPill status={prop.status} />
-                        </td>
-                      </tr>
-                    ))
+                    filteredProperties.map((prop) => {
+                      const totalUnits = prop.totalUnits || prop.units?.length || 1;
+                      const occupiedCount = prop.occupiedUnits || (prop.units ? prop.units.filter((u) => u.status === 'Occupied').length : 0);
+                      const rateDisplay = prop.monthlyRate !== undefined ? prop.monthlyRate : prop.price || 0;
+
+                      return (
+                        <tr key={prop._id}>
+                          <td className="pm-cell-title">{prop.title}</td>
+                          <td className="pm-cell-muted">{prop.address}</td>
+                          <td>{prop.propertyType}</td>
+                          <td className="pm-cell-strong">
+                            ₱{rateDisplay.toLocaleString()}{prop.units?.length > 0 ? '/mo up' : ''}
+                          </td>
+                          <td>
+                            <StatusPill status={occupiedCount > 0 ? `${occupiedCount}/${totalUnits} Occupied` : prop.status || 'Available'} />
+                          </td>
+                          <td className="text-center">
+                            {prop.units && prop.units.length > 0 ? (
+                              <Button
+                                variant="light"
+                                size="sm"
+                                className="pm-btn-edit-outline"
+                                onClick={() =>
+                                  setSelectedPropertyId(selectedPropertyId === prop._id ? null : prop._id)
+                                }
+                              >
+                                {selectedPropertyId === prop._id ? 'Hide Units' : `View Units (${prop.units.length})`}
+                              </Button>
+                            ) : (
+                              <span className="text-muted small">No sub-units</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
-                      <td colSpan="5" className="pm-empty-row">No matching properties found.</td>
+                      <td colSpan="6" className="pm-empty-row">No matching properties found.</td>
                     </tr>
                   )}
                 </tbody>
               </Table>
             </div>
+
+            {/* Interactive 20-Unit Matrix Drawer */}
+            {selectedPropertyObj && selectedPropertyObj.units && (
+              <div className="pm-panel mb-4" style={{ backgroundColor: '#fcfcfd' }}>
+                <div className="pm-panel-header d-flex justify-content-between align-items-center">
+                  <span>Unit breakdown — {selectedPropertyObj.title} ({selectedPropertyObj.units.length} Rooms)</span>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="text-decoration-none text-muted"
+                    onClick={() => setSelectedPropertyId(null)}
+                  >
+                    Close matrix ✕
+                  </Button>
+                </div>
+                <div style={{ padding: '22px' }}>
+                  <Row className="g-3">
+                    {selectedPropertyObj.units.map((unit) => {
+                      const isOccupied = unit.status === 'Occupied';
+                      const isMaintenance = unit.status === 'Maintenance';
+
+                      return (
+                        <Col key={unit._id || unit.unitNumber} xs={6} sm={4} md={3} lg={2.4}>
+                          <div
+                            className="p-3 rounded border text-center h-100"
+                            style={{
+                              backgroundColor: isOccupied ? '#f0fdf4' : isMaintenance ? '#fffbeb' : '#ffffff',
+                              borderColor: isOccupied ? '#bbf7d0' : isMaintenance ? '#fde68a' : '#e5e7eb',
+                            }}
+                          >
+                            <div className="fw-bold fs-6 text-dark">{unit.unitNumber}</div>
+                            <div className="fw-bold text-success my-1">
+                              ₱{(unit.monthlyRate || 0).toLocaleString()}
+                            </div>
+                            <Badge
+                              bg={isOccupied ? 'success' : isMaintenance ? 'warning' : 'secondary'}
+                              className="text-capitalize"
+                            >
+                              {unit.status}
+                            </Badge>
+                          </div>
+                        </Col>
+                      );
+                    })}
+                  </Row>
+                </div>
+              </div>
+            )}
           </>
         )}
       </Container>

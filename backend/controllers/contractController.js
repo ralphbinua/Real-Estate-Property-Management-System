@@ -1,12 +1,23 @@
 const Contract = require('../models/Contract');
 const Property = require('../models/Property'); // Import Property model
 
-// @desc    Get all contracts (populated)
+// @desc    Get contracts (populated and role-filtered)
 // @route   GET /api/contracts
 // @access  Private
 const getContracts = async (req, res) => {
   try {
-    const contracts = await Contract.find({})
+    let query = {};
+    const userRole = req.user?.role;
+
+    if (userRole === 'Tenant') {
+      query.tenant = req.user._id;
+    } else if (userRole === 'Owner') {
+      const ownedProperties = await Property.find({ owner: req.user._id }).select('_id');
+      const propertyIds = ownedProperties.map((p) => p._id);
+      query.property = { $in: propertyIds };
+    }
+
+    const contracts = await Contract.find(query)
       .populate('property', 'title address price')
       .populate('tenant', 'name email');
     res.status(200).json(contracts);

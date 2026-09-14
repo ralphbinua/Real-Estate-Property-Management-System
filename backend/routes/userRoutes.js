@@ -1,14 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const { getUsers, createUser, updateUserRole } = require('../controllers/userController');
+const { getUsers, createUser, updateUserRole, deleteUser } = require('../controllers/userController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
-router.use(protect, authorize('Admin')); // Protect all user management routes for Admin
-
-router.route('/')
-  .get(getUsers)
-  .post(createUser);
-
-router.put('/:id/role', updateUserRole);
+router.get('/', protect, authorize('Admin', 'Property Manager', 'Owner', 'Agent'), getUsers);
+router.post('/', protect, authorize('Admin'), createUser);
+router.put('/:id/role', protect, authorize('Admin'), updateUserRole);
+router.delete('/:id', protect, authorize('Admin'), deleteUser);
 
 module.exports = router;

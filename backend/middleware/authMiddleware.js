@@ -16,14 +16,19 @@ const protect = async (req, res, next) => {
 
       // Find the user in DB and attach them to the request object (excluding the password)
       req.user = await User.findById(decoded.id).select('-password');
-      next();
+
+      if (!req.user) {
+        return res.status(401).json({ message: 'Not authorized, user account no longer exists' });
+      }
+
+      return next();
     } catch (error) {
-      res.status(401).json({ message: 'Not authorized, token failed' });
+      return res.status(401).json({ message: 'Not authorized, token failed' });
     }
   }
 
   if (!token) {
-    res.status(401).json({ message: 'Not authorized, no token provided' });
+    return res.status(401).json({ message: 'Not authorized, no token provided' });
   }
 };
 
