@@ -1,6 +1,10 @@
-from django.urls import path
-from .views import MaintenanceListStubView
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import MaintenanceRequestViewSet
+
+router = DefaultRouter()
+router.register(r'', MaintenanceRequestViewSet, basename='maintenance')
 
 urlpatterns = [
-    path('', MaintenanceListStubView.as_view(), name='maintenance-list'),
+    path('', include(router.urls)),
 ]

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Table, Button, Modal, Form, Badge, Spinner } from 'react-bootstrap';
 import api from '../services/api';
 
-const API_URL = '/invoices';
+const API_URL = '/invoices/'; // Added trailing slash
 
 export default function ManagerInvoiceTracker() {
   const [invoices, setInvoices] = useState([]);
@@ -15,7 +15,7 @@ export default function ManagerInvoiceTracker() {
   const fetchInvoices = async () => {
     try {
       const res = await api.get(API_URL);
-      setInvoices(Array.isArray(res.data) ? res.data : []);
+      setInvoices(Array.isArray(res.data) ? res.data : res.data.results || []);
     } catch (err) {
       console.error('Failed to load invoices');
     } finally {
@@ -30,8 +30,8 @@ export default function ManagerInvoiceTracker() {
   const handleGenerateInvoices = async () => {
     setGenerating(true);
     try {
-      const res = await api.post(`${API_URL}/generate`);
-      alert(res.data.message);
+      const res = await api.post(`${API_URL}generate/`); // Added trailing slash
+      alert(res.data.message || 'Batch invoices generated successfully.');
       fetchInvoices();
     } catch (err) {
       alert('Failed to run invoice generation.');
@@ -42,7 +42,6 @@ export default function ManagerInvoiceTracker() {
 
   const handleOpenPaymentModal = (inv) => {
     setSelectedInvoice(inv);
-    // Pre-fill existing tenant payment method & reference remarks if submitted
     setPaymentData({
       paymentMethod: inv.paymentMethod && inv.paymentMethod !== 'N/A' ? inv.paymentMethod : 'Bank Transfer',
       remarks: inv.remarks || '',
@@ -53,7 +52,8 @@ export default function ManagerInvoiceTracker() {
   const handleMarkAsPaid = async (e) => {
     e.preventDefault();
     try {
-      await api.put(`${API_URL}/${selectedInvoice._id}`, {
+      // Changed to PATCH with trailing slash
+      await api.patch(`${API_URL}${selectedInvoice._id}/`, {
         status: 'Paid',
         paymentMethod: paymentData.paymentMethod,
         remarks: paymentData.remarks,

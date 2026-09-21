@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Table, Badge, Alert, Tabs, Tab, Button, Card, Form, Modal, Spinner, InputGroup } from 'react-bootstrap';
-import { fetchUsers, deleteUser } from '../services/userService';
+import { fetchUsers, createUserByAdmin, deleteUser } from '../services/userService';
 
 const ROLE_GROUPS = {
   tenants: ['tenant'],
@@ -31,14 +31,24 @@ export default function UserManagement() {
   const [success, setSuccess] = useState('');
   const [activeTab, setActiveTab] = useState('tenants');
   const [search, setSearch] = useState('');
-  const [pendingDelete, setPendingDelete] = useState(null); // user object or null
+  const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Add User Form State
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newUser, setNewUser] = useState({
+    name: '',
+    email: '',
+    password: '',
+    role: 'Tenant',
+  });
 
   const loadUsers = async () => {
     setLoading(true);
     try {
       const data = await fetchUsers();
-      setUsers(data);
+      setUsers(Array.isArray(data) ? data : data.results || []);
       setError('');
     } catch (err) {
       setError('Failed to fetch user accounts.');
@@ -50,6 +60,25 @@ export default function UserManagement() {
   useEffect(() => {
     loadUsers();
   }, []);
+
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+    setCreating(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      await createUserByAdmin(newUser);
+      setSuccess(`User ${newUser.name || newUser.email} created successfully!`);
+      setShowAddModal(false);
+      setNewUser({ name: '', email: '', password: '', role: 'Tenant' });
+      await loadUsers();
+    } catch (err) {
+      setError(err.response?.data?.message || err.response?.data?.detail || 'Failed to create user account.');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const confirmDelete = async () => {
     if (!pendingDelete) return;
@@ -159,14 +188,19 @@ export default function UserManagement() {
     <div>
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h4 className="fw-bold text-dark mb-0">User Directory</h4>
-        <InputGroup style={{ width: 260 }}>
-          <Form.Control
-            placeholder="Search name or email…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            size="sm"
-          />
-        </InputGroup>
+        <div className="d-flex gap-2">
+          <InputGroup style={{ width: 240 }}>
+            <Form.Control
+              placeholder="Search name or email…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              size="sm"
+            />
+          </InputGroup>
+          <Button variant="primary" size="sm" onClick={() => setShowAddModal(true)}>
+            + Add User
+          </Button>
+        </div>
       </div>
 
       {error && <Alert variant="danger" dismissible onClose={() => setError('')}>{error}</Alert>}
@@ -190,6 +224,69 @@ export default function UserManagement() {
         </Card.Body>
       </Card>
 
+      {/* Modal: Create User Account */}
+      <Modal show={showAddModal} onHide={() => setShowAddModal(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title className="fs-5">Create New User Account</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleCreateUser}>
+          <Modal.Body>
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-semibold small">Full Name</Form.Label>
+              <Form.Control
+                type="text"
+                placeholder="e.g. John Doe"
+                value={newUser.name}
+                onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                required
+              />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-semibold small">Email Address</Form.Label>
+              <Form.Control
+                type="email"
+                placeholder="john@example.com"
+                value={newUser.email}
+                onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                required
+              />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-semibold small">Password</Form.Label>
+              <Form.Control
+                type="password"
+                placeholder="••••••••"
+                value={newUser.password}
+                onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                required
+              />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-semibold small">Account Role</Form.Label>
+              <Form.Select
+                value={newUser.role}
+                onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+              >
+                <option value="Tenant">Tenant</option>
+                <option value="Property Manager">Property Manager</option>
+                <option value="Agent">Agent</option>
+                <option value="Owner">Owner</option>
+                <option value="Admin">Admin</option>
+              </Form.Select>
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="outline-secondary" onClick={() => setShowAddModal(false)} disabled={creating}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" disabled={creating}>
+              {creating ? <Spinner animation="border" size="sm" /> : 'Create Account'}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      {/* Modal: Delete User Account */}
       <Modal show={!!pendingDelete} onHide={() => setPendingDelete(null)} centered>
         <Modal.Header closeButton>
           <Modal.Title className="fs-5">Delete user account</Modal.Title>

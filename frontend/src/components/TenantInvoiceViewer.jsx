@@ -23,8 +23,8 @@ export default function TenantInvoiceViewer({ tenantId }) {
     }
     setLoading(true);
     try {
-      const res = await api.get(`/invoices/tenant?tenantId=${tenantId}`);
-      setInvoices(Array.isArray(res.data) ? res.data : []);
+      const res = await api.get(`/invoices/tenant/?tenantId=${tenantId}`);
+      setInvoices(Array.isArray(res.data) ? res.data : res.data.results || []);
       setError('');
     } catch (err) {
       setError('Failed to load billing statement.');
@@ -52,7 +52,11 @@ export default function TenantInvoiceViewer({ tenantId }) {
     if (!selectedInvoice?._id) return;
     setSubmitting(true);
     try {
-      await api.put(`/invoices/${selectedInvoice._id}/submit-payment`, paymentForm);
+      await api.patch(`/invoices/${selectedInvoice._id}/submit-payment/`, {
+        paymentMethod: paymentForm.paymentMethod,
+        remarks: `Ref: ${paymentForm.referenceNumber}`,
+        receiptUrl: paymentForm.receiptUrl
+      });
       setShowPayModal(false);
       fetchInvoices();
     } catch (err) {

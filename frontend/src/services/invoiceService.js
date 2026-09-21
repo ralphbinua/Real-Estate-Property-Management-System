@@ -1,28 +1,21 @@
-import axios from 'axios';
-
-const API_URL = 'http://localhost:5000/api/invoices';
-
-// Get token helper
-const getAuthHeaders = () => {
-  const user = JSON.parse(localStorage.getItem('user'));
-  return {
-    headers: {
-      Authorization: `Bearer ${user?.token}`,
-    },
-  };
-};
+import api from './api';
 
 export const fetchInvoices = async () => {
-  const response = await axios.get(API_URL, getAuthHeaders());
+  const response = await api.get('/invoices/');
+  return response.data;
+};
+
+export const fetchTenantInvoices = async (tenantId) => {
+  const response = await api.get(`/invoices/tenant/?tenantId=${tenantId}`);
   return response.data;
 };
 
 export const generateMonthlyInvoices = async () => {
-  const response = await axios.post(`${API_URL}/generate`, {}, getAuthHeaders());
+  const response = await api.post('/invoices/generate/');
   return response.data;
 };
 
 export const updateInvoiceStatus = async (id, status) => {
-  const response = await axios.put(`${API_URL}/${id}`, { status }, getAuthHeaders());
+  const response = await api.patch(`/invoices/${id}/`, { status });
   return response.data;
 };

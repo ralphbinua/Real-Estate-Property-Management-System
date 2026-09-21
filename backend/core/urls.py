@@ -17,6 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from users.views import CustomTokenObtainPairView
+from properties.views import OwnerPortfolioView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -26,4 +27,5 @@ urlpatterns = [
     path('api/contracts/', include('contracts.urls')),
     path('api/invoices/', include('billing.urls')),
     path('api/maintenance/', include('maintenance.urls')),
-]
+    path('api/owner/portfolio/', OwnerPortfolioView.as_view(), name='owner_portfolio'),
+]

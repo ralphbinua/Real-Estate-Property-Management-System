@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 
 
 class Property(models.Model):
@@ -22,9 +23,8 @@ class Property(models.Model):
     price = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # single-unit rate (e.g. House)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Available')
 
-    # Placeholder FKs until the Users app exists — swap to real ForeignKey(User) later
-    owner_id = models.IntegerField(null=True, blank=True)
-    manager_id = models.IntegerField(null=True, blank=True)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='owned_properties')
+    manager = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='managed_properties')
 
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -63,8 +63,7 @@ class Unit(models.Model):
     monthly_rate = models.DecimalField(max_digits=12, decimal_places=2)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Available')
 
-    # Placeholder until the Users app exists
-    tenant_id = models.IntegerField(null=True, blank=True)
+    tenant = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='rented_units')
 
     def __str__(self):
         return f"{self.property.title} — {self.unit_number}"
