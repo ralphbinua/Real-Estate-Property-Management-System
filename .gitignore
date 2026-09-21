@@ -1,2 +1,10 @@
-node_modules
+# Python / Django
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite3
+
+# Node / React
+node_modules/
+dist/
 .env

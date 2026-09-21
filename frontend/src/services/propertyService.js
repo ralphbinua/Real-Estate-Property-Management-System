@@ -2,8 +2,9 @@ import api from './api';
 
 // Fetch all properties from the backend
 export const fetchProperties = async () => {
-  const response = await api.get('/properties');
-  return response.data;
+  const response = await api.get('/properties/');
+  // DRF returns paginated responses if enabled, or a raw array
+  return Array.isArray(response.data) ? response.data : response.data.results;
 };
 
 // Create a new property
