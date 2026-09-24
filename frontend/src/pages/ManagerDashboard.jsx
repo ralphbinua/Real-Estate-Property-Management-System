@@ -104,13 +104,15 @@ export default function ManagerDashboard() {
   }, []);
 
   const handlePropertySelect = (propertyId) => {
-    const selectedProp = properties.find((p) => p._id === propertyId);
+    const selectedProp = properties.find((p) => (p._id || p.id)?.toString() === propertyId?.toString());
     if (!selectedProp) return;
+
+    const propId = selectedProp._id || selectedProp.id;
 
     if (!selectedProp.units || selectedProp.units.length === 0) {
       setContractData({
         ...contractData,
-        property: propertyId,
+        property: propId,
         unitId: '',
         unitNumber: 'Main Unit',
         rentAmount: selectedProp.price || selectedProp.monthlyRate || ''
@@ -118,7 +120,7 @@ export default function ManagerDashboard() {
     } else {
       setContractData({
         ...contractData,
-        property: propertyId,
+        property: propId,
         unitId: '',
         unitNumber: '',
         rentAmount: ''
@@ -127,14 +129,14 @@ export default function ManagerDashboard() {
   };
 
   const handleUnitSelect = (unitId) => {
-    const selectedProp = properties.find((p) => p._id === contractData.property);
+    const selectedProp = properties.find((p) => (p._id || p.id)?.toString() === contractData.property?.toString());
     if (!selectedProp || !selectedProp.units) return;
 
-    const selectedUnit = selectedProp.units.find((u) => u._id === unitId);
+    const selectedUnit = selectedProp.units.find((u) => (u._id || u.id)?.toString() === unitId?.toString());
     if (selectedUnit) {
       setContractData({
         ...contractData,
-        unitId: selectedUnit._id,
+        unitId: selectedUnit._id || selectedUnit.id,
         unitNumber: selectedUnit.unitNumber,
         rentAmount: selectedUnit.monthlyRate
       });
@@ -144,7 +146,7 @@ export default function ManagerDashboard() {
   const handleOpenLeaseForUnit = (propertyId, unit) => {
     setContractData({
       property: propertyId,
-      unitId: unit._id,
+      unitId: unit._id || unit.id,
       unitNumber: unit.unitNumber,
       tenant: '',
       startDate: '',
@@ -261,7 +263,7 @@ export default function ManagerDashboard() {
   }, [properties]);
 
   const selectedPropertyObj = useMemo(
-    () => properties.find((p) => p._id === selectedPropertyId),
+    () => properties.find((p) => (p._id || p.id)?.toString() === selectedPropertyId?.toString()),
     [properties, selectedPropertyId]
   );
 
@@ -430,17 +432,18 @@ export default function ManagerDashboard() {
                 <tbody>
                   {filteredProperties.length > 0 ? (
                     filteredProperties.map((prop) => {
+                      const propId = prop._id || prop.id;
                       const totalUnits = prop.totalUnits || prop.units?.length || 1;
                       const occupiedCount = prop.occupiedUnits || (prop.units ? prop.units.filter((u) => u.status === 'Occupied').length : 0);
                       const rateDisplay = prop.monthlyRate !== undefined ? prop.monthlyRate : prop.price || 0;
 
                       return (
-                        <tr key={prop._id}>
+                        <tr key={propId}>
                           <td className="pm-cell-title">{prop.title}</td>
                           <td className="pm-cell-muted">{prop.address}</td>
                           <td>{prop.propertyType}</td>
                           <td className="pm-cell-strong">
-                            ₱{rateDisplay.toLocaleString()}{prop.units?.length > 0 ? '/mo up' : ''}
+                            ₱{Number(rateDisplay).toLocaleString()}{prop.units?.length > 0 ? '/mo up' : ''}
                           </td>
                           <td>
                             <StatusPill status={occupiedCount > 0 ? `${occupiedCount}/${totalUnits} Occupied` : prop.status || 'Available'} />
@@ -452,10 +455,10 @@ export default function ManagerDashboard() {
                                 size="sm"
                                 className="pm-btn-edit-outline"
                                 onClick={() =>
-                                  setSelectedPropertyId(selectedPropertyId === prop._id ? null : prop._id)
+                                  setSelectedPropertyId(selectedPropertyId === propId ? null : propId)
                                 }
                               >
-                                {selectedPropertyId === prop._id ? 'Hide Units' : `View Units (${prop.units.length})`}
+                                {selectedPropertyId === propId ? 'Hide Units' : `View Units (${prop.units.length})`}
                               </Button>
                             ) : (
                               <span className="text-muted small">No sub-units</span>
@@ -490,12 +493,13 @@ export default function ManagerDashboard() {
                 <div style={{ padding: '22px' }}>
                   <Row className="g-3">
                     {selectedPropertyObj.units.map((unit) => {
+                      const unitId = unit._id || unit.id;
                       const isOccupied = unit.status === 'Occupied';
                       const isMaintenance = unit.status === 'Maintenance';
                       const isAvailable = unit.status === 'Available';
 
                       return (
-                        <Col key={unit._id || unit.unitNumber} xs={6} sm={4} md={3} lg={2.4}>
+                        <Col key={unitId || unit.unitNumber} xs={6} sm={4} md={3} lg={2.4}>
                           <div
                             className="p-3 rounded border text-center h-100 position-relative"
                             style={{
@@ -503,11 +507,11 @@ export default function ManagerDashboard() {
                               borderColor: isOccupied ? '#bbf7d0' : isMaintenance ? '#fde68a' : '#e5e7eb',
                               cursor: isAvailable ? 'pointer' : 'default',
                             }}
-                            onClick={() => isAvailable && handleOpenLeaseForUnit(selectedPropertyObj._id, unit)}
+                            onClick={() => isAvailable && handleOpenLeaseForUnit(selectedPropertyObj._id || selectedPropertyObj.id, unit)}
                           >
                             <div className="fw-bold fs-6 text-dark">{unit.unitNumber}</div>
                             <div className="fw-bold text-success my-1">
-                              ₱{(unit.monthlyRate || 0).toLocaleString()}
+                              ₱{Number(unit.monthlyRate || 0).toLocaleString()}
                             </div>
                             <Badge
                               bg={isOccupied ? 'success' : isMaintenance ? 'warning' : 'secondary'}
@@ -544,29 +548,35 @@ export default function ManagerDashboard() {
                 </thead>
                 <tbody>
                   {contracts.length > 0 ? (
-                    contracts.map((con) => (
-                      <tr key={con._id}>
-                        <td className="pm-cell-title">
-                          {con.property?.title || con.property}
-                          {con.unitNumber && con.unitNumber !== 'Main Unit' ? ` (${con.unitNumber})` : ''}
-                        </td>
-                        <td>{con.tenant?.name || con.tenant}</td>
-                        <td className="pm-cell-strong">₱{con.rentAmount?.toLocaleString()}</td>
-                        <td><StatusPill status={con.status} /></td>
-                        <td className="text-center">
-                          {con.status === 'Active' && (
-                            <Button
-                              variant="light"
-                              size="sm"
-                              className="pm-btn-end-lease"
-                              onClick={() => handleTerminateContract(con._id)}
-                            >
-                              End lease
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
+                    contracts.map((con) => {
+                      const contractId = con._id || con.id;
+                      const propertyTitle = con.propertyDetails?.title || con.property?.title || con.property;
+                      const tenantName = con.tenantDetails?.name || con.tenant?.name || con.tenant;
+                      const unitLabel = con.unitNumber && con.unitNumber !== 'Main Unit' ? ` (${con.unitNumber})` : '';
+
+                      return (
+                        <tr key={contractId}>
+                          <td className="pm-cell-title">
+                            {propertyTitle}{unitLabel}
+                          </td>
+                          <td>{tenantName}</td>
+                          <td className="pm-cell-strong">₱{Number(con.rentAmount || 0).toLocaleString()}</td>
+                          <td><StatusPill status={con.status} /></td>
+                          <td className="text-center">
+                            {con.status === 'Active' && (
+                              <Button
+                                variant="light"
+                                size="sm"
+                                className="pm-btn-end-lease"
+                                onClick={() => handleTerminateContract(contractId)}
+                              >
+                                End lease
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
                       <td colSpan="5" className="pm-empty-row">No lease contracts recorded.</td>
@@ -683,16 +693,19 @@ export default function ManagerDashboard() {
                   required
                 >
                   <option value="">-- Choose property --</option>
-                  {properties.map((p) => (
-                    <option key={p._id} value={p._id}>
-                      {p.title} ({p.units?.length > 0 ? `${p.units.length} Units` : 'Standalone House'})
-                    </option>
-                  ))}
+                  {properties.map((p) => {
+                    const propId = p._id || p.id;
+                    return (
+                      <option key={propId} value={propId}>
+                        {p.title} ({p.units?.length > 0 ? `${p.units.length} Units` : 'Standalone House'})
+                      </option>
+                    );
+                  })}
                 </Form.Select>
               </Form.Group>
 
               {(() => {
-                const selectedProp = properties.find((p) => p._id === contractData.property);
+                const selectedProp = properties.find((p) => (p._id || p.id)?.toString() === contractData.property?.toString());
                 const availableUnits = selectedProp?.units?.filter((u) => u.status === 'Available') || [];
 
                 if (selectedProp && selectedProp.units?.length > 0) {
@@ -706,11 +719,14 @@ export default function ManagerDashboard() {
                         required
                       >
                         <option value="">-- Choose available unit --</option>
-                        {availableUnits.map((u) => (
-                          <option key={u._id} value={u._id}>
-                            {u.unitNumber} — ₱{u.monthlyRate?.toLocaleString()}/mo
-                          </option>
-                        ))}
+                        {availableUnits.map((u) => {
+                          const unitId = u._id || u.id;
+                          return (
+                            <option key={unitId} value={unitId}>
+                              {u.unitNumber} — ₱{Number(u.monthlyRate || 0).toLocaleString()}/mo
+                            </option>
+                          );
+                        })}
                       </Form.Select>
                     </Form.Group>
                   );
@@ -727,11 +743,14 @@ export default function ManagerDashboard() {
                   required
                 >
                   <option value="">-- Choose tenant --</option>
-                  {userList.map((u) => (
-                    <option key={u._id} value={u._id}>
-                      {u.name} ({u.email})
-                    </option>
-                  ))}
+                  {userList.map((u) => {
+                    const userId = u._id || u.id;
+                    return (
+                      <option key={userId} value={userId}>
+                        {u.name} ({u.email})
+                      </option>
+                    );
+                  })}
                 </Form.Select>
               </Form.Group>
 

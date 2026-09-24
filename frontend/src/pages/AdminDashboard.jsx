@@ -75,7 +75,7 @@ export default function AdminDashboard() {
       ]);
       setProperties(Array.isArray(propData) ? propData : []);
       setContracts(Array.isArray(contractsData) ? contractsData : []);
-      setUserList(usersData.filter((u) => u.role?.toLowerCase() === 'tenant'));
+      setUserList(Array.isArray(usersData) ? usersData : []);
       setError('');
     } catch (err) {
       setError('Failed to fetch dashboard data.');
@@ -93,7 +93,7 @@ export default function AdminDashboard() {
     setSuccess('');
 
     const linkedContracts = contracts.filter((c) => {
-      const propId = c.property?._id || c.property;
+      const propId = c.property?._id || c.property?.id || c.property;
       const isActive = ['active', 'pending'].includes(c.status?.toLowerCase());
       return propId === id && isActive;
     });
@@ -117,7 +117,12 @@ export default function AdminDashboard() {
   };
 
   const handleEditClick = (prop) => {
-    setEditingProperty({ ...prop });
+    setEditingProperty({
+      ...prop,
+      _id: prop._id || prop.id,
+      owner: prop.owner || prop.ownerDetails?._id || prop.ownerDetails?.id || '',
+      manager: prop.manager || prop.managerDetails?._id || prop.managerDetails?.id || '',
+    });
     setShowEditModal(true);
   };
 
@@ -125,8 +130,18 @@ export default function AdminDashboard() {
     e.preventDefault();
     setError('');
     setSuccess('');
+
     try {
-      await updateProperty(editingProperty._id, editingProperty);
+      const payload = {
+        title: editingProperty.title,
+        address: editingProperty.address,
+        propertyType: editingProperty.propertyType,
+        status: editingProperty.status,
+        owner: editingProperty.owner ? Number(editingProperty.owner) : null,
+        manager: editingProperty.manager ? Number(editingProperty.manager) : null,
+      };
+
+      await updateProperty(editingProperty._id || editingProperty.id, payload);
       setSuccess('Property updated successfully!');
       setShowEditModal(false);
       loadData();
@@ -136,10 +151,11 @@ export default function AdminDashboard() {
   };
 
   const handlePropertySelect = (propertyId) => {
-    const selectedProp = properties.find((p) => p._id === propertyId);
+    const selectedProp = properties.find((p) => (p._id || p.id)?.toString() === propertyId?.toString());
+    const propId = selectedProp ? (selectedProp._id || selectedProp.id) : propertyId;
     setContractData({
       ...contractData,
-      property: propertyId,
+      property: propId,
       rentAmount: selectedProp ? selectedProp.monthlyRate || selectedProp.price || '' : ''
     });
   };
@@ -193,7 +209,6 @@ export default function AdminDashboard() {
     });
   }, [properties, search, filterType, filterStatus]);
 
-  // Aggregated Metric Calculations (Unit Array Aware)
   const metrics = useMemo(() => {
     const activeContractsList = contracts.filter((c) => c.status?.toLowerCase() === 'active');
     let totalOccupiedUnits = 0;
@@ -210,13 +225,28 @@ export default function AdminDashboard() {
       totalProperties: properties.length,
       occupiedCount: totalOccupiedUnits,
       activeContracts: activeContractsList.length,
-      totalRevenue: activeContractsList.reduce((acc, curr) => acc + (curr.rentAmount || 0), 0),
+      totalRevenue: activeContractsList.reduce((acc, curr) => acc + Number(curr.rentAmount || 0), 0),
     };
   }, [properties, contracts]);
 
   const selectedPropertyObj = useMemo(
-    () => properties.find((p) => p._id === selectedPropertyId),
+    () => properties.find((p) => (p._id || p.id)?.toString() === selectedPropertyId?.toString()),
     [properties, selectedPropertyId]
+  );
+
+  const tenantUsers = useMemo(
+    () => userList.filter((u) => u.role?.toLowerCase() === 'tenant'),
+    [userList]
+  );
+
+  const ownerUsers = useMemo(
+    () => userList.filter((u) => u.role?.toLowerCase() === 'owner'),
+    [userList]
+  );
+
+  const managerUsers = useMemo(
+    () => userList.filter((u) => ['property manager', 'admin'].includes(u.role?.toLowerCase())),
+    [userList]
   );
 
   return (
@@ -291,7 +321,9 @@ export default function AdminDashboard() {
               </div>
               <div className="pm-metric">
                 <span className="pm-metric-label">Monthly revenue</span>
-                <span className="pm-metric-value">₱{metrics.totalRevenue.toLocaleString()}</span>
+                <span className="pm-metric-value">
+                  ₱{Number(metrics.totalRevenue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
               </div>
             </div>
 
@@ -354,17 +386,18 @@ export default function AdminDashboard() {
                 <tbody>
                   {filteredProperties.length > 0 ? (
                     filteredProperties.map((prop) => {
+                      const propId = prop._id || prop.id;
                       const totalUnits = prop.totalUnits || prop.units?.length || 1;
                       const occupiedCount = prop.occupiedUnits || (prop.units ? prop.units.filter((u) => u.status === 'Occupied').length : 0);
                       const rateDisplay = prop.monthlyRate !== undefined ? prop.monthlyRate : prop.price || 0;
 
                       return (
-                        <tr key={prop._id}>
+                        <tr key={propId}>
                           <td className="pm-cell-title">{prop.title}</td>
                           <td className="pm-cell-muted">{prop.address}</td>
                           <td>{prop.propertyType}</td>
                           <td className="pm-cell-strong">
-                            ₱{rateDisplay.toLocaleString()}{prop.units?.length > 0 ? '/mo up' : ''}
+                            ₱{Number(rateDisplay).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{prop.units?.length > 0 ? '/mo up' : ''}
                           </td>
                           <td>
                             <StatusPill status={occupiedCount > 0 ? `${occupiedCount}/${totalUnits} Occupied` : prop.status || 'Available'} />
@@ -376,10 +409,10 @@ export default function AdminDashboard() {
                                 size="sm"
                                 className="pm-btn-edit-outline me-2"
                                 onClick={() =>
-                                  setSelectedPropertyId(selectedPropertyId === prop._id ? null : prop._id)
+                                  setSelectedPropertyId(selectedPropertyId === propId ? null : propId)
                                 }
                               >
-                                {selectedPropertyId === prop._id ? 'Hide Units' : `View Units (${prop.units.length})`}
+                                {selectedPropertyId === propId ? 'Hide Units' : `View Units (${prop.units.length})`}
                               </Button>
                             )}
                             <Button
@@ -394,7 +427,7 @@ export default function AdminDashboard() {
                               variant="light"
                               size="sm"
                               className="pm-btn-danger-outline"
-                              onClick={() => handleDeleteProperty(prop._id)}
+                              onClick={() => handleDeleteProperty(propId)}
                             >
                               Archive
                             </Button>
@@ -411,7 +444,7 @@ export default function AdminDashboard() {
               </Table>
             </div>
 
-            {/* Interactive 20-Unit Matrix Drawer */}
+            {/* Interactive Room Matrix Drawer */}
             {selectedPropertyObj && selectedPropertyObj.units && (
               <div className="pm-panel mb-4" style={{ backgroundColor: '#fcfcfd' }}>
                 <div className="pm-panel-header d-flex justify-content-between align-items-center">
@@ -428,11 +461,12 @@ export default function AdminDashboard() {
                 <div style={{ padding: '22px' }}>
                   <Row className="g-3">
                     {selectedPropertyObj.units.map((unit) => {
+                      const unitId = unit._id || unit.id;
                       const isOccupied = unit.status === 'Occupied';
                       const isMaintenance = unit.status === 'Maintenance';
 
                       return (
-                        <Col key={unit._id || unit.unitNumber} xs={6} sm={4} md={3} lg={2.4}>
+                        <Col key={unitId || unit.unitNumber} xs={6} sm={4} md={3} lg={2.4}>
                           <div
                             className="p-3 rounded border text-center h-100"
                             style={{
@@ -442,7 +476,7 @@ export default function AdminDashboard() {
                           >
                             <div className="fw-bold fs-6 text-dark">{unit.unitNumber}</div>
                             <div className="fw-bold text-success my-1">
-                              ₱{(unit.monthlyRate || 0).toLocaleString()}
+                              ₱{Number(unit.monthlyRate || 0).toLocaleString()}
                             </div>
                             <Badge
                               bg={isOccupied ? 'success' : isMaintenance ? 'warning' : 'secondary'}
@@ -474,26 +508,32 @@ export default function AdminDashboard() {
                 </thead>
                 <tbody>
                   {contracts.length > 0 ? (
-                    contracts.map((con) => (
-                      <tr key={con._id}>
-                        <td className="pm-cell-title">{con.property?.title || con.property}</td>
-                        <td>{con.tenant?.name || con.tenant}</td>
-                        <td className="pm-cell-strong">₱{con.rentAmount?.toLocaleString()}</td>
-                        <td><StatusPill status={con.status} /></td>
-                        <td className="text-center">
-                          {con.status === 'Active' && (
-                            <Button
-                              variant="light"
-                              size="sm"
-                              className="pm-btn-end-lease"
-                              onClick={() => handleTerminateContract(con._id)}
-                            >
-                              End lease
-                            </Button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
+                    contracts.map((con) => {
+                      const contractId = con._id || con.id;
+                      const propertyTitle = con.propertyDetails?.title || con.property?.title || con.property;
+                      const tenantName = con.tenantDetails?.name || con.tenant?.name || con.tenant;
+
+                      return (
+                        <tr key={contractId}>
+                          <td className="pm-cell-title">{propertyTitle}</td>
+                          <td>{tenantName}</td>
+                          <td className="pm-cell-strong">₱{Number(con.rentAmount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td><StatusPill status={con.status} /></td>
+                          <td className="text-center">
+                            {con.status === 'Active' && (
+                              <Button
+                                variant="light"
+                                size="sm"
+                                className="pm-btn-end-lease"
+                                onClick={() => handleTerminateContract(contractId)}
+                              >
+                                End lease
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   ) : (
                     <tr>
                       <td colSpan="5" className="pm-empty-row">No lease contracts recorded.</td>
@@ -575,6 +615,44 @@ export default function AdminDashboard() {
                     </Form.Select>
                   </Col>
                 </Row>
+                <Row className="mb-3">
+                  <Col md={6}>
+                    <Form.Label className="pm-form-label">Assign Owner</Form.Label>
+                    <Form.Select
+                      className="pm-input"
+                      value={editingProperty.owner || ''}
+                      onChange={(e) => setEditingProperty({ ...editingProperty, owner: e.target.value })}
+                    >
+                      <option value="">-- Optional Owner --</option>
+                      {ownerUsers.map((u) => {
+                        const userId = u._id || u.id;
+                        return (
+                          <option key={userId} value={userId}>
+                            {u.name} ({u.email})
+                          </option>
+                        );
+                      })}
+                    </Form.Select>
+                  </Col>
+                  <Col md={6}>
+                    <Form.Label className="pm-form-label">Assign Manager</Form.Label>
+                    <Form.Select
+                      className="pm-input"
+                      value={editingProperty.manager || ''}
+                      onChange={(e) => setEditingProperty({ ...editingProperty, manager: e.target.value })}
+                    >
+                      <option value="">-- Optional Manager --</option>
+                      {managerUsers.map((u) => {
+                        const userId = u._id || u.id;
+                        return (
+                          <option key={userId} value={userId}>
+                            {u.name} ({u.email})
+                          </option>
+                        );
+                      })}
+                    </Form.Select>
+                  </Col>
+                </Row>
               </Modal.Body>
               <Modal.Footer>
                 <Button variant="light" className="pm-btn-ghost" onClick={() => setShowEditModal(false)}>Cancel</Button>
@@ -600,11 +678,14 @@ export default function AdminDashboard() {
                   required
                 >
                   <option value="">-- Choose property --</option>
-                  {properties.map((p) => (
-                    <option key={p._id} value={p._id}>
-                      {p.title} (₱{(p.monthlyRate || p.price || 0).toLocaleString()}/mo)
-                    </option>
-                  ))}
+                  {properties.map((p) => {
+                    const propId = p._id || p.id;
+                    return (
+                      <option key={propId} value={propId}>
+                        {p.title} (₱{Number(p.monthlyRate || p.price || 0).toLocaleString()}/mo)
+                      </option>
+                    );
+                  })}
                 </Form.Select>
               </Form.Group>
               <Form.Group className="mb-3">
@@ -616,11 +697,14 @@ export default function AdminDashboard() {
                   required
                 >
                   <option value="">-- Choose tenant --</option>
-                  {userList.map((u) => (
-                    <option key={u._id} value={u._id}>
-                      {u.name} ({u.email})
-                    </option>
-                  ))}
+                  {tenantUsers.map((u) => {
+                    const userId = u._id || u.id;
+                    return (
+                      <option key={userId} value={userId}>
+                        {u.name} ({u.email})
+                      </option>
+                    );
+                  })}
                 </Form.Select>
               </Form.Group>
               <Row className="mb-3">

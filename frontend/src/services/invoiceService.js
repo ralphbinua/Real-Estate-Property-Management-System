@@ -10,12 +10,17 @@ export const fetchTenantInvoices = async (tenantId) => {
   return response.data;
 };
 
-export const generateMonthlyInvoices = async () => {
-  const response = await api.post('/invoices/generate/');
+export const triggerMonthlyBilling = async () => {
+  const response = await api.post('/invoices/run-monthly-billing/');
   return response.data;
 };
 
-export const updateInvoiceStatus = async (id, status) => {
-  const response = await api.patch(`/invoices/${id}/`, { status });
+export const recordPayment = async (invoiceId, paymentData) => {
+  const response = await api.patch(`/invoices/${invoiceId}/record-payment/`, paymentData);
+  return response.data;
+};
+
+export const submitTenantPayment = async (invoiceId, paymentPayload) => {
+  const response = await api.patch(`/invoices/${invoiceId}/submit-payment/`, paymentPayload);
   return response.data;
 };

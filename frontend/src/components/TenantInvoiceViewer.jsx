@@ -49,10 +49,11 @@ export default function TenantInvoiceViewer({ tenantId }) {
 
   const handleSubmitPayment = async (e) => {
     e.preventDefault();
-    if (!selectedInvoice?._id) return;
+    const invId = selectedInvoice?._id || selectedInvoice?.id;
+    if (!invId) return;
     setSubmitting(true);
     try {
-      await api.patch(`/invoices/${selectedInvoice._id}/submit-payment/`, {
+      await api.patch(`/invoices/${invId}/submit-payment/`, {
         paymentMethod: paymentForm.paymentMethod,
         remarks: `Ref: ${paymentForm.referenceNumber}`,
         receiptUrl: paymentForm.receiptUrl
@@ -98,7 +99,7 @@ export default function TenantInvoiceViewer({ tenantId }) {
         <tbody>
           {invoices.length > 0 ? (
             invoices.map((inv) => (
-              <tr key={inv._id}>
+              <tr key={inv._id || inv.id}>
                 <td className="pm-cell-title">{inv.property?.title || 'N/A'}</td>
                 <td>{inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : 'N/A'}</td>
                 <td>₱{inv.amount?.toLocaleString()}</td>

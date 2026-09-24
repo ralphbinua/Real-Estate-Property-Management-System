@@ -197,12 +197,12 @@ export default function PropertyForm({ onPropertyCreated }) {
         </Col>
         <Col md={4}>
           <Form.Group>
-            <Form.Label className="fw-bold text-secondary">Assign Owner</Form.Label>
+            <Form.Label className="fw-bold text-secondary">Assign Property Owner</Form.Label>
             <Form.Select 
               value={formData.owner} 
               onChange={(e) => setFormData({ ...formData, owner: e.target.value })}
             >
-              <option value="">-- Optional Owner --</option>
+              <option value="">Optional Owner</option>
               {owners.map((o) => (
                 <option key={o._id} value={o._id}>
                   {o.name} ({o.email})
@@ -213,12 +213,12 @@ export default function PropertyForm({ onPropertyCreated }) {
         </Col>
         <Col md={4}>
           <Form.Group>
-            <Form.Label className="fw-bold text-secondary">Assign Manager</Form.Label>
+            <Form.Label className="fw-bold text-secondary">Assign Property Manager</Form.Label>
             <Form.Select 
               value={formData.manager} 
               onChange={(e) => setFormData({ ...formData, manager: e.target.value })}
             >
-              <option value="">-- Optional Manager --</option>
+              <option value="">Optional Manager</option>
               {managers.map((m) => (
                 <option key={m._id} value={m._id}>
                   {m.name} ({m.email})

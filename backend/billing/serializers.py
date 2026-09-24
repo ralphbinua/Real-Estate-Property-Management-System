@@ -11,16 +11,21 @@ User = get_user_model()
 
 class InvoiceSerializer(serializers.ModelSerializer):
     _id = serializers.IntegerField(source='id', read_only=True)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    rentAmount = serializers.DecimalField(source='amount', max_digits=12, decimal_places=2, read_only=True)
     lateFee = serializers.DecimalField(source='late_fee', max_digits=12, decimal_places=2, required=False, default=0.00)
     totalDue = serializers.DecimalField(source='total_due', max_digits=12, decimal_places=2, required=False)
     dueDate = serializers.DateField(source='due_date')
-    paymentMethod = serializers.CharField(source='payment_method', required=False, default='N/A')
+    paidAt = serializers.DateTimeField(source='paid_at', required=False, allow_null=True, read_only=True)
+    paymentMethod = serializers.CharField(source='payment_method', required=False, allow_blank=True, default='N/A')
     receiptUrl = serializers.CharField(source='receipt_url', required=False, allow_blank=True, default='')
 
-    tenant = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False)
-    property = serializers.PrimaryKeyRelatedField(queryset=Property.objects.all(), required=False)
-    contract = serializers.PrimaryKeyRelatedField(queryset=Contract.objects.all(), required=False)
+    # Primary key write fields
+    tenant = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False, allow_null=True)
+    property = serializers.PrimaryKeyRelatedField(queryset=Property.objects.all(), required=False, allow_null=True)
+    contract = serializers.PrimaryKeyRelatedField(queryset=Contract.objects.all(), required=False, allow_null=True)
 
+    # Nested read-only detail serializers
     tenantDetails = UserSerializer(source='tenant', read_only=True)
     propertyDetails = PropertySerializer(source='property', read_only=True)
     contractDetails = ContractSerializer(source='contract', read_only=True)
@@ -28,9 +33,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Invoice
         fields = [
-            '_id', 'contract', 'tenant', 'property', 'amount', 'lateFee', 
-            'totalDue', 'dueDate', 'status', 'paid_at', 'paymentMethod', 
-            'receiptUrl', 'remarks', 'tenantDetails', 'propertyDetails', 'contractDetails'
+            '_id', 'contract', 'tenant', 'property', 'amount', 'rentAmount', 
+            'lateFee', 'totalDue', 'dueDate', 'status', 'paid_at', 'paidAt', 
+            'paymentMethod', 'receiptUrl', 'remarks', 'tenantDetails', 
+            'propertyDetails', 'contractDetails'
         ]
 
     def create(self, validated_data):

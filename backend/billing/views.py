@@ -28,7 +28,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(invoices, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], url_path='run-monthly-billing')
     def generate(self, request):
         active_contracts = Contract.objects.filter(status='Active', is_deleted=False)
         created_count = 0
@@ -59,12 +59,32 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             "generatedCount": created_count
         })
 
+    @action(detail=True, methods=['put', 'patch'], url_path='record-payment')
+    def record_payment(self, request, pk=None):
+        invoice = self.get_object()
+        payment_method = request.data.get('paymentMethod') or request.data.get('payment_method', 'Cash')
+        remarks = request.data.get('remarks', '')
+        receipt_url = request.data.get('receiptUrl') or request.data.get('receipt_url', '')
+
+        invoice.status = 'Paid'
+        invoice.paid_at = timezone.now()
+        if payment_method:
+            invoice.payment_method = payment_method
+        if remarks:
+            invoice.remarks = remarks
+        if receipt_url:
+            invoice.receipt_url = receipt_url
+        invoice.save()
+
+        serializer = self.get_serializer(invoice)
+        return Response(serializer.data)
+
     @action(detail=True, methods=['put', 'patch'], url_path='submit-payment')
     def submit_payment(self, request, pk=None):
         invoice = self.get_object()
-        payment_method = request.data.get('paymentMethod', 'Bank Transfer')
+        payment_method = request.data.get('paymentMethod') or request.data.get('payment_method', 'Bank Transfer')
         remarks = request.data.get('remarks', '')
-        receipt_url = request.data.get('receiptUrl', '')
+        receipt_url = request.data.get('receiptUrl') or request.data.get('receipt_url', '')
 
         invoice.status = 'Pending Verification'
         invoice.payment_method = payment_method

@@ -52,7 +52,7 @@ export default function OwnerDashboard() {
     loadOwnerData();
   }, []);
 
-  // Advanced Metrics Logic (Unit & Revenue Aware)
+  // Advanced Metrics Logic (Explicit Numeric Conversion)
   const metrics = useMemo(() => {
     const { properties, contracts } = portfolio;
     let totalUnits = 0;
@@ -64,17 +64,23 @@ export default function OwnerDashboard() {
         totalUnits += p.units.length;
         const occupied = p.units.filter((u) => u.status === 'Occupied');
         occupiedUnits += occupied.length;
-        totalMonthlyIncome += occupied.reduce((sum, u) => sum + (u.monthlyRate || 0), 0);
+        totalMonthlyIncome += occupied.reduce((sum, u) => sum + Number(u.monthlyRate || 0), 0);
       } else {
         totalUnits += 1;
         if (['occupied', 'rented'].includes(p.status?.toLowerCase())) {
           occupiedUnits += 1;
-          totalMonthlyIncome += p.price || 0;
+          totalMonthlyIncome += Number(p.price || p.monthlyRate || 0);
         }
       }
     });
 
     const activeContracts = contracts.filter((c) => c.status?.toLowerCase() === 'active');
+    
+    // Fallback: If no direct property income match but active contracts exist
+    if (totalMonthlyIncome === 0 && activeContracts.length > 0) {
+      totalMonthlyIncome = activeContracts.reduce((sum, c) => sum + Number(c.rentAmount || 0), 0);
+    }
+
     const occupancyRate = totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0;
 
     return {
@@ -132,7 +138,12 @@ export default function OwnerDashboard() {
               </div>
               <div className="pm-metric">
                 <span className="pm-metric-label">Est. monthly revenue</span>
-                <span className="pm-metric-value">₱{metrics.totalMonthlyIncome.toLocaleString()}</span>
+                <span className="pm-metric-value">
+                  ₱{Number(metrics.totalMonthlyIncome || 0).toLocaleString('en-PH', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
               </div>
               <div className="pm-metric">
                 <span className="pm-metric-label">Active leases</span>
@@ -161,18 +172,27 @@ export default function OwnerDashboard() {
                       <tbody>
                         {portfolio.properties.length > 0 ? (
                           portfolio.properties.map((prop) => {
+                            const propId = prop._id || prop.id;
                             const totalUnits = prop.units?.length || 1;
                             const occupiedCount = prop.units
                               ? prop.units.filter((u) => u.status === 'Occupied').length
                               : ['occupied', 'rented'].includes(prop.status?.toLowerCase()) ? 1 : 0;
-                            const yieldAmt = prop.units
+                            
+                            let yieldAmt = prop.units
                               ? prop.units
                                   .filter((u) => u.status === 'Occupied')
-                                  .reduce((sum, u) => sum + (u.monthlyRate || 0), 0)
-                              : ['occupied', 'rented'].includes(prop.status?.toLowerCase()) ? prop.price : 0;
+                                  .reduce((sum, u) => sum + Number(u.monthlyRate || 0), 0)
+                              : ['occupied', 'rented'].includes(prop.status?.toLowerCase()) ? Number(prop.price || prop.monthlyRate || 0) : 0;
+
+                            if (yieldAmt === 0 && portfolio.contracts.length > 0) {
+                              const activePropContract = portfolio.contracts.find(
+                                (c) => (c.property?._id || c.property?.id || c.property) === propId && c.status?.toLowerCase() === 'active'
+                              );
+                              if (activePropContract) yieldAmt = Number(activePropContract.rentAmount || 0);
+                            }
 
                             return (
-                              <tr key={prop._id}>
+                              <tr key={propId}>
                                 <td className="pm-cell-title">{prop.title}</td>
                                 <td className="pm-cell-muted">{prop.address}</td>
                                 <td>{prop.propertyType}</td>
@@ -180,7 +200,7 @@ export default function OwnerDashboard() {
                                   <StatusPill status={`${occupiedCount}/${totalUnits} Occupied`} />
                                 </td>
                                 <td className="pm-cell-strong text-success">
-                                  ₱{yieldAmt.toLocaleString()}
+                                  ₱{Number(yieldAmt).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </td>
                               </tr>
                             );
@@ -210,22 +230,30 @@ export default function OwnerDashboard() {
                       </thead>
                       <tbody>
                         {portfolio.contracts.length > 0 ? (
-                          portfolio.contracts.map((con) => (
-                            <tr key={con._id}>
-                              <td className="pm-cell-title">
-                                {con.property?.title || con.property}
-                                {con.unitNumber && con.unitNumber !== 'Main Unit' ? ` (${con.unitNumber})` : ''}
-                              </td>
-                              <td>{con.tenant?.name || con.tenant} ({con.tenant?.email})</td>
-                              <td className="pm-cell-strong">₱{con.rentAmount?.toLocaleString()}</td>
-                              <td className="pm-cell-muted small">
-                                {new Date(con.startDate).toLocaleDateString()} - {new Date(con.endDate).toLocaleDateString()}
-                              </td>
-                              <td>
-                                <StatusPill status={con.status} />
-                              </td>
-                            </tr>
-                          ))
+                          portfolio.contracts.map((con) => {
+                            const contractId = con._id || con.id;
+                            const propTitle = con.propertyDetails?.title || con.property?.title || con.property;
+                            const tenantName = con.tenantDetails?.name || con.tenant?.name || con.tenant;
+
+                            return (
+                              <tr key={contractId}>
+                                <td className="pm-cell-title">
+                                  {propTitle}
+                                  {con.unitNumber && con.unitNumber !== 'Main Unit' ? ` (${con.unitNumber})` : ''}
+                                </td>
+                                <td>{tenantName} {con.tenantDetails?.email || con.tenant?.email ? `(${con.tenantDetails?.email || con.tenant?.email})` : ''}</td>
+                                <td className="pm-cell-strong">
+                                  ₱{Number(con.rentAmount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                                <td className="pm-cell-muted small">
+                                  {con.startDate ? new Date(con.startDate).toLocaleDateString() : '—'} - {con.endDate ? new Date(con.endDate).toLocaleDateString() : '—'}
+                                </td>
+                                <td>
+                                  <StatusPill status={con.status} />
+                                </td>
+                              </tr>
+                            );
+                          })
                         ) : (
                           <tr>
                             <td colSpan="5" className="pm-empty-row">
@@ -250,20 +278,25 @@ export default function OwnerDashboard() {
                       </thead>
                       <tbody>
                         {portfolio.maintenanceRequests.length > 0 ? (
-                          portfolio.maintenanceRequests.map((m) => (
-                            <tr key={m._id}>
-                              <td className="pm-cell-title">{m.property?.title || 'Property Asset'}</td>
-                              <td>{m.title || m.issueDescription}</td>
-                              <td>
-                                <Badge bg={m.priority === 'High' ? 'danger' : 'info'}>
-                                  {m.priority || 'Normal'}
-                                </Badge>
-                              </td>
-                              <td>
-                                <StatusPill status={m.status} />
-                              </td>
-                            </tr>
-                          ))
+                          portfolio.maintenanceRequests.map((m) => {
+                            const reqId = m._id || m.id;
+                            const propTitle = m.propertyDetails?.title || m.property?.title || m.property || 'Property Asset';
+
+                            return (
+                              <tr key={reqId}>
+                                <td className="pm-cell-title">{propTitle}</td>
+                                <td>{m.title || m.issueDescription}</td>
+                                <td>
+                                  <Badge bg={m.priority === 'High' ? 'danger' : 'info'}>
+                                    {m.priority || 'Normal'}
+                                  </Badge>
+                                </td>
+                                <td>
+                                  <StatusPill status={m.status} />
+                                </td>
+                              </tr>
+                            );
+                          })
                         ) : (
                           <tr>
                             <td colSpan="4" className="pm-empty-row">

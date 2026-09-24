@@ -84,7 +84,8 @@ export default function UserManagement() {
     if (!pendingDelete) return;
     setDeleting(true);
     try {
-      await deleteUser(pendingDelete._id);
+      const userId = pendingDelete._id || pendingDelete.id;
+      await deleteUser(userId);
       setSuccess(`${pendingDelete.name} was removed.`);
       setPendingDelete(null);
       await loadUsers();
@@ -146,39 +147,42 @@ export default function UserManagement() {
           </tr>
         </thead>
         <tbody>
-          {filteredUsers.map((user) => (
-            <tr key={user._id}>
-              <td>
-                <div className="d-flex align-items-center gap-2">
-                  <div
-                    className="d-flex align-items-center justify-content-center rounded-circle bg-light text-secondary fw-semibold flex-shrink-0"
-                    style={{ width: 36, height: 36, fontSize: 13 }}
-                  >
-                    {initials(user.name) || '?'}
+          {filteredUsers.map((user) => {
+            const userId = user._id || user.id;
+            return (
+              <tr key={userId}>
+                <td>
+                  <div className="d-flex align-items-center gap-2">
+                    <div
+                      className="d-flex align-items-center justify-content-center rounded-circle bg-light text-secondary fw-semibold flex-shrink-0"
+                      style={{ width: 36, height: 36, fontSize: 13 }}
+                    >
+                      {initials(user.name) || '?'}
+                    </div>
+                    <span className="fw-semibold text-dark">{user.name}</span>
                   </div>
-                  <span className="fw-semibold text-dark">{user.name}</span>
-                </div>
-              </td>
-              <td className="text-secondary">{user.email}</td>
-              <td>
-                <Badge bg={ROLE_COLORS[user.role?.toLowerCase()] || 'secondary'} className="fw-normal">
-                  {user.role}
-                </Badge>
-              </td>
-              <td className="text-muted small">
-                {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
-              </td>
-              <td className="text-end">
-                <Button
-                  variant="outline-danger"
-                  size="sm"
-                  onClick={() => setPendingDelete(user)}
-                >
-                  Delete
-                </Button>
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td className="text-secondary">{user.email}</td>
+                <td>
+                  <Badge bg={ROLE_COLORS[user.role?.toLowerCase()] || 'secondary'} className="fw-normal">
+                    {user.role}
+                  </Badge>
+                </td>
+                <td className="text-muted small">
+                  {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
+                </td>
+                <td className="text-end">
+                  <Button
+                    variant="outline-danger"
+                    size="sm"
+                    onClick={() => setPendingDelete(user)}
+                  >
+                    Delete
+                  </Button>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </Table>
     );
