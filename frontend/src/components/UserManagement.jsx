@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Table, Badge, Alert, Tabs, Tab, Button, Card, Form, Modal, Spinner, InputGroup } from 'react-bootstrap';
-import { fetchUsers, createUserByAdmin, deleteUser } from '../services/userService';
+import { fetchUsers, createUserByAdmin, updateUser, deleteUser } from '../services/userService';
 
 const ROLE_GROUPS = {
   tenants: ['tenant'],
@@ -44,6 +44,17 @@ export default function UserManagement() {
     role: 'Tenant',
   });
 
+  // Edit User Form State
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [editUser, setEditUser] = useState({
+    id: '',
+    name: '',
+    email: '',
+    role: 'Tenant',
+    password: '',
+  });
+
   const loadUsers = async () => {
     setLoading(true);
     try {
@@ -77,6 +88,44 @@ export default function UserManagement() {
       setError(err.response?.data?.message || err.response?.data?.detail || 'Failed to create user account.');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleOpenEditModal = (user) => {
+    setEditUser({
+      id: user._id || user.id,
+      name: user.name || '',
+      email: user.email || '',
+      role: user.role || 'Tenant',
+      password: '',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleUpdateUser = async (e) => {
+    e.preventDefault();
+    setUpdating(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const payload = {
+        name: editUser.name,
+        email: editUser.email,
+        role: editUser.role,
+      };
+      if (editUser.password.trim()) {
+        payload.password = editUser.password.trim();
+      }
+
+      await updateUser(editUser.id, payload);
+      setSuccess(`User ${editUser.name || editUser.email} updated successfully!`);
+      setShowEditModal(false);
+      await loadUsers();
+    } catch (err) {
+      setError(err.response?.data?.message || err.response?.data?.detail || 'Failed to update user account.');
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -142,7 +191,6 @@ export default function UserManagement() {
             <th className="fw-semibold border-0">Name</th>
             <th className="fw-semibold border-0">Email</th>
             <th className="fw-semibold border-0">Role</th>
-            <th className="fw-semibold border-0">Registered</th>
             <th className="fw-semibold border-0 text-end">Action</th>
           </tr>
         </thead>
@@ -168,17 +216,23 @@ export default function UserManagement() {
                     {user.role}
                   </Badge>
                 </td>
-                <td className="text-muted small">
-                  {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}
-                </td>
                 <td className="text-end">
-                  <Button
-                    variant="outline-danger"
-                    size="sm"
-                    onClick={() => setPendingDelete(user)}
-                  >
-                    Delete
-                  </Button>
+                  <div className="d-flex justify-content-end gap-2">
+                    <Button
+                      variant="outline-primary"
+                      size="sm"
+                      onClick={() => handleOpenEditModal(user)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      variant="outline-danger"
+                      size="sm"
+                      onClick={() => setPendingDelete(user)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </td>
               </tr>
             );
@@ -285,6 +339,67 @@ export default function UserManagement() {
             </Button>
             <Button variant="primary" type="submit" disabled={creating}>
               {creating ? <Spinner animation="border" size="sm" /> : 'Create Account'}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      {/* Modal: Edit User Account */}
+      <Modal show={showEditModal} onHide={() => setShowEditModal(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title className="fs-5">Edit User Account</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleUpdateUser}>
+          <Modal.Body>
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-semibold small">Full Name</Form.Label>
+              <Form.Control
+                type="text"
+                placeholder="e.g. John Doe"
+                value={editUser.name}
+                onChange={(e) => setEditUser({ ...editUser, name: e.target.value })}
+                required
+              />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-semibold small">Email Address</Form.Label>
+              <Form.Control
+                type="email"
+                placeholder="john@example.com"
+                value={editUser.email}
+                onChange={(e) => setEditUser({ ...editUser, email: e.target.value })}
+                required
+              />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-semibold small">New Password (optional)</Form.Label>
+              <Form.Control
+                type="password"
+                placeholder="Leave blank to keep current password"
+                value={editUser.password}
+                onChange={(e) => setEditUser({ ...editUser, password: e.target.value })}
+              />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label className="fw-semibold small">Account Role</Form.Label>
+              <Form.Select
+                value={editUser.role}
+                onChange={(e) => setEditUser({ ...editUser, role: e.target.value })}
+              >
+                <option value="Tenant">Tenant</option>
+                <option value="Property Manager">Property Manager</option>
+                <option value="Agent">Agent</option>
+                <option value="Owner">Owner</option>
+                <option value="Admin">Admin</option>
+              </Form.Select>
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="outline-secondary" onClick={() => setShowEditModal(false)} disabled={updating}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" disabled={updating}>
+              {updating ? <Spinner animation="border" size="sm" /> : 'Save Changes'}
             </Button>
           </Modal.Footer>
         </Form>

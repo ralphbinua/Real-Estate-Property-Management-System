@@ -1,0 +1,100 @@
+real-estate-management/
+├── .gitignore
+├── backend/                             # Django Backend Project
+│   ├── manage.py                        # Django management script
+│   ├── core/                            # Main Django configuration app
+│   │   ├── __init__.py
+│   │   ├── asgi.py
+│   │   ├── settings.py
+│   │   ├── urls.py
+│   │   └── wsgi.py
+│   ├── billing/                         # Invoices, payments, financial tracking
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   ├── views.py
+│   │   └── migrations/
+│   ├── contracts/                       # Lease agreements & tenant contracts
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   ├── views.py
+│   │   └── migrations/
+│   ├── maintenance/                     # Maintenance requests & status updates
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   ├── views.py
+│   │   └── migrations/
+│   ├── properties/                      # Property & unit listings
+│   │   ├── admin.py
+│   │   ├── apps.py
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── tests.py
+│   │   ├── urls.py
+│   │   ├── views.py
+│   │   └── migrations/
+│   └── users/                           # User management & authentication models
+│       ├── admin.py
+│       ├── models.py
+│       ├── serializers.py
+│       ├── urls.py
+│       ├── views.py
+│       └── migrations/
+│
+└── frontend/                            # React + Vite Frontend Project
+    ├── .env
+    ├── .gitignore
+    ├── eslint.config.js
+    ├── index.html
+    ├── package.json
+    ├── package-lock.json
+    ├── README.md
+    ├── vite.config.js
+    ├── public/                          # Public static assets
+    │   ├── favicon.svg
+    │   └── icons.svg
+    └── src/
+        ├── App.css
+        ├── App.jsx                      # Main React Router setup
+        ├── index.css
+        ├── main.jsx                     # Vite entry point
+        ├── components/                  # Shared UI components
+        │   ├── AdminMaintenanceManager.jsx
+        │   ├── ManagerInvoiceTracker.jsx
+        │   ├── ManagerReports.jsx
+        │   ├── MetricCard.jsx
+        │   ├── Navbar.jsx
+        │   ├── PropertyFilter.jsx
+        │   ├── PropertyForm.jsx
+        │   ├── RoleProtectedRoute.jsx
+        │   ├── TenantInvoiceViewer.jsx
+        │   └── UserManagement.jsx
+        ├── context/                     # Context providers
+        │   └── AuthContext.jsx          # Auth state & session handler
+        ├── pages/                       # Page components & styles
+        │   ├── AdminDashboard.jsx
+        │   ├── AdminDashboard.css
+        │   ├── AgentDashboard.jsx
+        │   ├── AgentDashboard.css
+        │   ├── Login.jsx
+        │   ├── Login.css
+        │   ├── ManagerDashboard.jsx
+        │   ├── ManagerDashboard.css
+        │   ├── NotFound.jsx
+        │   ├── NotFound.css
+        │   ├── OwnerDashboard.jsx
+        │   ├── OwnerDashboard.css
+        │   ├── TenantDashboard.jsx
+        │   └── TenantDashboard.css
+        ├── services/                    # API communication modules
+        │   ├── api.js                   # Axios base instance & interceptors
+        │   ├── contractService.js
+        │   ├── invoiceService.js
+        │   ├── maintenanceService.js
+        │   ├── ownerService.js
+        │   ├── propertyService.js
+        │   └── userService.js
+        └── utils/                       # Utility helper functions
+            └── badgeUtils.jsx
