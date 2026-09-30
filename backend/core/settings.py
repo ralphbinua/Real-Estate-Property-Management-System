@@ -91,16 +91,24 @@ TEMPLATES = [
 WSGI_APPLICATION = 'core.wsgi.application'
 
 import os
+try:
+    import dotenv
+    dotenv.load_dotenv(BASE_DIR / '.env')
+except ImportError:
+    pass
 
 # Database
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME', 'real_estate_pms'),
+        'NAME': os.getenv('DB_NAME', 'postgres'),
         'USER': os.getenv('DB_USER', 'postgres'),
-        'PASSWORD': os.getenv('DB_PASSWORD', 'admin'),   
+        'PASSWORD': os.getenv('DB_PASSWORD', ''),   
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
+        'OPTIONS': {
+            'sslmode': os.getenv('DB_SSLMODE', 'require') if os.getenv('DB_HOST') and 'supabase' in os.getenv('DB_HOST') else 'prefer',
+        }
     }
 }
 
