@@ -14,6 +14,7 @@ export default function PropertyForm({ onPropertyCreated }) {
     owner: '',
     manager: '',
     assignedAgents: [],
+    units: [{ unitNumber: '101', monthlyRate: '' }],
   });
 
   const [owners, setOwners] = useState([]);
@@ -47,11 +48,14 @@ export default function PropertyForm({ onPropertyCreated }) {
       title: formData.title,
       description: formData.description,
       address: formData.address,
-      price: Number(formData.price),
+      price: Number(formData.price || (['Apartment', 'Condo'].includes(formData.propertyType) ? formData.units[0]?.monthlyRate : 0) || 0),
       propertyType: formData.propertyType,
       status: formData.status,
       assignedAgents: formData.assignedAgents,
     };
+    if (['Apartment', 'Condo'].includes(formData.propertyType)) {
+      payload.units = formData.units.map((unit) => ({ ...unit, monthlyRate: Number(unit.monthlyRate), status: 'Available' }));
+    }
 
     // Only append non-empty ObjectId strings
     if (formData.owner && formData.owner.trim() !== '') {
@@ -102,6 +106,23 @@ export default function PropertyForm({ onPropertyCreated }) {
         </Col>
       </Row>
 
+      {['Apartment', 'Condo'].includes(formData.propertyType) && (
+        <Form.Group className="mb-3">
+          <div className="d-flex justify-content-between align-items-center mb-2">
+            <Form.Label className="fw-bold text-secondary mb-0">Units and monthly rent</Form.Label>
+            <Button type="button" size="sm" variant="outline-primary" onClick={() => setFormData((current) => ({ ...current, units: [...current.units, { unitNumber: '', monthlyRate: '' }] }))}>Add unit</Button>
+          </div>
+          {formData.units.map((unit, index) => (
+            <Row className="g-2 mb-2" key={`unit-${index}`}>
+              <Col><Form.Control placeholder="Unit number (e.g. 101)" value={unit.unitNumber} onChange={(e) => setFormData((current) => ({ ...current, units: current.units.map((item, i) => i === index ? { ...item, unitNumber: e.target.value } : item) }))} required /></Col>
+              <Col><Form.Control type="number" min="0" step="0.01" placeholder="Monthly rent (₱)" value={unit.monthlyRate} onChange={(e) => setFormData((current) => ({ ...current, units: current.units.map((item, i) => i === index ? { ...item, monthlyRate: e.target.value } : item) }))} required /></Col>
+              <Col xs="auto"><Button type="button" variant="outline-danger" disabled={formData.units.length === 1} aria-label={`Remove unit ${index + 1}`} onClick={() => setFormData((current) => ({ ...current, units: current.units.filter((_, i) => i !== index) }))}>Remove</Button></Col>
+            </Row>
+          ))}
+          <Form.Text className="text-muted">Each unit can have a different rent. Add all unit numbers before saving.</Form.Text>
+        </Form.Group>
+      )}
+
       <Form.Group className="mb-3">
         <Form.Label className="fw-bold text-secondary">Description</Form.Label>
         <Form.Control 
@@ -125,7 +146,7 @@ export default function PropertyForm({ onPropertyCreated }) {
             />
           </Form.Group>
         </Col>
-        <Col md={6}>
+        {!['Apartment', 'Condo'].includes(formData.propertyType) && <Col md={6}>
           <Form.Group>
             <Form.Label className="fw-bold text-secondary">Price (₱)</Form.Label>
             <Form.Control 
@@ -136,7 +157,7 @@ export default function PropertyForm({ onPropertyCreated }) {
               required 
             />
           </Form.Group>
-        </Col>
+        </Col>}
       </Row>
 
       <Row className="mb-3">

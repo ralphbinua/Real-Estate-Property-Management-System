@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Container, Row, Col, Card, Form, Spinner, Button, Badge, Modal, Table } from 'react-bootstrap';
 import { fetchProperties } from '../services/propertyService';
 import { createInquiry, fetchInquiries, updateInquiry } from '../services/inquiryService';
+import { createApplication, fetchApplications } from '../services/applicationService';
 import './AgentDashboard.css';
 
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
@@ -13,6 +14,11 @@ const PILL_CLASS = {
   occupied: 'pm-pill-occupied',
   'under maintenance': 'pm-pill-maintenance',
   pending: 'pm-pill-occupied',
+  submitted: 'pm-pill-pending',
+  'under review': 'pm-pill-active',
+  approved: 'pm-pill-available',
+  rejected: 'pm-pill-terminated',
+  converted: 'pm-pill-occupied',
 };
 
 function StatusPill({ status }) {
@@ -27,8 +33,10 @@ function StatusPill({ status }) {
 }
 
 export default function AgentDashboard() {
+  const [activeSection, setActiveSection] = useState('overview');
   const [properties, setProperties] = useState([]);
   const [inquiries, setInquiries] = useState([]);
+  const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -47,11 +55,21 @@ export default function AgentDashboard() {
     notes: '',
   });
   const [savingInquiry, setSavingInquiry] = useState(false);
+  const [showApplicationModal, setShowApplicationModal] = useState(false);
+  const [selectedInquiry, setSelectedInquiry] = useState(null);
+  const [applicationForm, setApplicationForm] = useState({ applicantEmail: '', employment: '', monthlyIncome: '', moveInDate: '', notes: '' });
+  const [savingApplication, setSavingApplication] = useState(false);
 
   // Filter State
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+
+  useEffect(() => {
+    const handleWorkspaceNavigation = (event) => setActiveSection(event.detail);
+    window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
+    return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
+  }, []);
 
   const loadAgentData = async () => {
     setLoading(true);
@@ -62,6 +80,7 @@ export default function AgentDashboard() {
       ]);
       setProperties(Array.isArray(propData) ? propData : []);
       setInquiries(Array.isArray(inquiryData) ? inquiryData : []);
+      setApplications(await fetchApplications());
       setError('');
     } catch (err) {
       setError('Failed to fetch assigned property listings and inquiries.');
@@ -141,6 +160,40 @@ export default function AgentDashboard() {
     }
   };
 
+  const openApplicationForm = (inquiry) => {
+    setSelectedInquiry(inquiry);
+    setApplicationForm({ applicantEmail: inquiry.prospect_email || '', employment: '', monthlyIncome: '', moveInDate: '', notes: '' });
+    setShowApplicationModal(true);
+  };
+
+  const handleApplicationSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedInquiry) return;
+    setSavingApplication(true);
+    setError('');
+    setSuccess('');
+    try {
+      await createApplication({
+        inquiry: selectedInquiry.id,
+        applicantEmail: applicationForm.applicantEmail,
+        employment: applicationForm.employment,
+        monthlyIncome: applicationForm.monthlyIncome || null,
+        moveInDate: applicationForm.moveInDate || null,
+        notes: applicationForm.notes,
+      });
+      setSuccess(`Rental application submitted for ${selectedInquiry.prospect_name}.`);
+      setShowApplicationModal(false);
+      const [updatedInquiries, updatedApplications] = await Promise.all([fetchInquiries(), fetchApplications()]);
+      setInquiries(updatedInquiries);
+      setApplications(updatedApplications);
+    } catch (err) {
+      const apiError = err.response?.data;
+      setError(typeof apiError === 'string' ? apiError : apiError?.detail || apiError?.inquiry?.[0] || 'Failed to submit rental application.');
+    } finally {
+      setSavingApplication(false);
+    }
+  };
+
   const handleInquiryStatusChange = async (inquiry, status) => {
     try {
       const updated = await updateInquiry(inquiry.id, { status });
@@ -151,10 +204,10 @@ export default function AgentDashboard() {
   };
 
   return (
-    <div className="pm-agent">
+    <div className="pm-agent" data-active-section={activeSection}>
       <Container>
         {/* Header */}
-        <div className="pm-header">
+        <div className="pm-header" id="overview">
           <div>
             <h1 className="pm-title">Agent Property Directory</h1>
             <p className="pm-subtitle">
@@ -184,7 +237,7 @@ export default function AgentDashboard() {
         ) : (
           <>
             {/* Metrics Strip */}
-            <div className="pm-metrics">
+            <div className="pm-metrics" data-workspace-section="overview">
               <div className="pm-metric">
                 <span className="pm-metric-label">Assigned listings</span>
                 <span className="pm-metric-value">{metrics.totalListings}</span>
@@ -196,7 +249,7 @@ export default function AgentDashboard() {
             </div>
 
             {/* Filter Toolbar */}
-            <div className="pm-filterbar">
+            <div className="pm-filterbar" data-workspace-section="listings">
               <Form.Control
                 className="pm-input pm-search"
                 placeholder="Search by title or location…"
@@ -282,7 +335,7 @@ export default function AgentDashboard() {
             )}
 
             {/* Property Cards Grid */}
-            <Row>
+            <Row id="listings" data-workspace-section="listings">
               {filteredProperties.length > 0 ? (
                 filteredProperties.map((prop) => {
                   const hasSubUnits = prop.units && prop.units.length > 0;
@@ -346,10 +399,10 @@ export default function AgentDashboard() {
                 </Col>
               )}
             </Row>
-            <div className="pm-panel mt-2">
+            <div className="pm-panel mt-2" id="inquiries" data-workspace-section="inquiries">
               <div className="pm-panel-header">Prospects and viewing inquiries ({inquiries.length})</div>
               <Table responsive className="pm-table mb-0">
-                <thead><tr><th>Prospect</th><th>Property</th><th>Viewing</th><th>Notes</th><th>Status</th></tr></thead>
+                <thead><tr><th>Prospect</th><th>Property</th><th>Viewing</th><th>Notes</th><th>Status</th><th>Application</th></tr></thead>
                 <tbody>
                   {inquiries.map((inquiry) => (
                     <tr key={inquiry.id}>
@@ -362,14 +415,74 @@ export default function AgentDashboard() {
                           {['New', 'Viewing Scheduled', 'Application In Progress', 'Converted', 'Closed'].map((status) => <option key={status}>{status}</option>)}
                         </Form.Select>
                       </td>
+                      <td>
+                        {applications.some((application) => application.inquiry === inquiry.id)
+                          ? <Badge bg="info">Application started</Badge>
+                          : <Button size="sm" variant="outline-primary" onClick={() => openApplicationForm(inquiry)}>Start application</Button>}
+                      </td>
                     </tr>
                   ))}
-                  {inquiries.length === 0 && <tr><td colSpan="5" className="pm-empty-row">No inquiries recorded yet.</td></tr>}
+                  {inquiries.length === 0 && <tr><td colSpan="6" className="pm-empty-row">No inquiries recorded yet.</td></tr>}
+                </tbody>
+              </Table>
+            </div>
+
+            <div className="pm-panel mt-2" data-workspace-section="applications">
+              <div className="pm-panel-header">Rental applications ({applications.length})</div>
+              <Table responsive className="pm-table mb-0">
+                <thead><tr><th>Applicant</th><th>Property / unit</th><th>Employment</th><th>Monthly income</th><th>Move-in date</th><th>Status</th></tr></thead>
+                <tbody>
+                  {applications.map((application) => (
+                    <tr key={application.id}>
+                      <td>{application.applicantName}<div className="small text-muted">{application.applicantEmail}</div></td>
+                      <td>{application.propertyDetails?.title || 'Property'}{application.unitDetails?.unitNumber ? ` · ${application.unitDetails.unitNumber}` : ''}</td>
+                      <td>{application.employment || '—'}</td>
+                      <td>{application.monthlyIncome ? `₱${Number(application.monthlyIncome).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
+                      <td>{application.moveInDate || '—'}</td>
+                      <td><StatusPill status={application.status} /></td>
+                    </tr>
+                  ))}
+                  {applications.length === 0 && <tr><td colSpan="6" className="pm-empty-row">No rental applications have been started.</td></tr>}
                 </tbody>
               </Table>
             </div>
           </>
         )}
+
+        <Modal show={showApplicationModal} onHide={() => !savingApplication && setShowApplicationModal(false)} centered dialogClassName="pm-modal">
+          <Modal.Header closeButton>
+            <Modal.Title>Rental application · {selectedInquiry?.prospect_name}</Modal.Title>
+          </Modal.Header>
+          <Form onSubmit={handleApplicationSubmit}>
+            <Modal.Body>
+              <p className="text-muted small">{selectedInquiry?.prospect_email || 'No email provided'} · {properties.find((property) => Number(property._id) === Number(selectedInquiry?.property))?.title || 'Selected property'}</p>
+              <Form.Group className="mb-3">
+                <Form.Label className="pm-form-label">Applicant email</Form.Label>
+                <Form.Control className="pm-input" type="email" required value={applicationForm.applicantEmail} onChange={(e) => setApplicationForm({ ...applicationForm, applicantEmail: e.target.value })} />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Label className="pm-form-label">Employment / occupation</Form.Label>
+                <Form.Control className="pm-input" value={applicationForm.employment} onChange={(e) => setApplicationForm({ ...applicationForm, employment: e.target.value })} placeholder="Employer or occupation" />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Label className="pm-form-label">Monthly income (₱)</Form.Label>
+                <Form.Control className="pm-input" type="number" min="0" step="0.01" value={applicationForm.monthlyIncome} onChange={(e) => setApplicationForm({ ...applicationForm, monthlyIncome: e.target.value })} />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Label className="pm-form-label">Requested move-in date</Form.Label>
+                <Form.Control className="pm-input" type="date" value={applicationForm.moveInDate} onChange={(e) => setApplicationForm({ ...applicationForm, moveInDate: e.target.value })} />
+              </Form.Group>
+              <Form.Group>
+                <Form.Label className="pm-form-label">Application notes</Form.Label>
+                <Form.Control className="pm-input" as="textarea" rows={3} value={applicationForm.notes} onChange={(e) => setApplicationForm({ ...applicationForm, notes: e.target.value })} />
+              </Form.Group>
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="outline-secondary" onClick={() => setShowApplicationModal(false)} disabled={savingApplication}>Cancel</Button>
+              <Button type="submit" variant="primary" disabled={savingApplication}>{savingApplication ? 'Submitting…' : 'Submit application'}</Button>
+            </Modal.Footer>
+          </Form>
+        </Modal>
 
         {/* Modal: Schedule Viewing / Match Tenant */}
         <Modal show={showViewingModal} onHide={() => setShowViewingModal(false)} centered dialogClassName="pm-modal">

@@ -1,0 +1,454 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #17233f;
+  background: #f5f4ef;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --app-ink: #17233f;
+  --app-ink-soft: #3b4863;
+  --app-paper: #f5f4ef;
+  --app-surface: #fff;
+  --app-line: #e3e0d6;
+  --app-accent: #2f6f5e;
+  --app-accent-soft: #e7f0ec;
+  --app-muted: #6b7280;
+  --app-radius: 12px;
+  --app-shadow: 0 8px 24px rgba(23, 35, 63, 0.055);
+  --bs-primary: #2f6f5e;
+  --bs-primary-rgb: 47, 111, 94;
+  --bs-success: #2f6f5e;
+  --bs-success-rgb: 47, 111, 94;
+  --bs-link-color: #2f6f5e;
+  --bs-link-hover-color: #245749;
+}
+
+* { box-sizing: border-box; }
+
+html { min-width: 320px; background: var(--app-paper); }
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background: var(--app-paper);
+  color: var(--app-ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+button, input, select, textarea { font: inherit; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid rgba(47, 111, 94, 0.28);
+  outline-offset: 2px;
+}
+
+#root { min-height: 100vh; }
+
+.workspace-frame { display: grid; min-height: calc(100vh - 72px); grid-template-columns: 238px minmax(0, 1fr); }
+.workspace-frame-public { display: block; }
+.workspace-main { min-width: 0; }
+.workspace-sidebar {
+  position: sticky;
+  top: 72px;
+  display: flex;
+  height: calc(100vh - 72px);
+  flex-direction: column;
+  padding: 25px 14px 18px;
+  background: #fff;
+  border-right: 1px solid var(--app-line);
+}
+.workspace-sidebar-heading, .workspace-side-note-label {
+  padding: 0 11px;
+  color: #8a91a0;
+  font-size: 0.65rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+}
+.workspace-side-nav { display: grid; gap: 4px; margin-top: 12px; }
+.workspace-side-link {
+  display: flex;
+  min-height: 43px;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 10px;
+  color: #59657a;
+  border-radius: 9px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 130ms ease, color 130ms ease;
+}
+.workspace-side-link:hover { color: var(--app-ink); background: #f5f6f7; }
+.workspace-side-link.is-active { color: #245749; background: #e8f1ed; font-weight: 700; }
+.workspace-side-icon {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
+  place-items: center;
+  color: #728095;
+  background: #f1f3f5;
+  border-radius: 8px;
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.workspace-side-link.is-active .workspace-side-icon { color: #245749; background: #d5e7df; }
+.workspace-sidebar-bottom { margin-top: auto; padding: 15px 4px 0; border-top: 1px solid #ecebe6; }
+.workspace-sidebar-bottom .workspace-side-note-label { padding: 0 7px; }
+.workspace-side-note-name { overflow: hidden; padding: 7px 7px 0; color: var(--app-ink); font-size: 0.79rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-side-note-role { padding: 1px 7px; color: #7d8594; font-size: 0.73rem; }
+
+/* Shared application header */
+.app-navbar {
+  min-height: 72px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid var(--app-line);
+  box-shadow: 0 3px 16px rgba(23, 35, 63, 0.035);
+  backdrop-filter: blur(12px);
+}
+
+.app-navbar .container { min-height: 72px; }
+.app-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  margin: 0;
+  color: var(--app-ink) !important;
+  font-size: 1.1rem;
+  font-weight: 750;
+  letter-spacing: -0.035em;
+}
+
+.app-brand-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  color: white;
+  background: var(--app-accent);
+  border-radius: 11px;
+  box-shadow: 0 4px 10px rgba(47, 111, 94, 0.2);
+}
+
+.app-brand-mark svg { width: 23px; height: 23px; }
+.app-navbar .navbar-collapse { align-items: center; }
+.app-nav-link {
+  position: relative;
+  padding: 25px 13px !important;
+  color: #657086 !important;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.app-nav-link:hover, .app-nav-link.active { color: var(--app-ink) !important; }
+.app-nav-link.active::after {
+  position: absolute;
+  right: 13px;
+  bottom: 0;
+  left: 13px;
+  height: 3px;
+  background: var(--app-accent);
+  border-radius: 3px 3px 0 0;
+  content: "";
+}
+
+.app-account { display: flex; align-items: center; gap: 11px; }
+.app-role-pill {
+  padding: 6px 10px;
+  color: #285d50;
+  background: var(--app-accent-soft);
+  border: 1px solid #d5e6df;
+  border-radius: 999px;
+  font-size: 0.73rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.app-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: var(--app-ink);
+  background: #e9ecf2;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+.app-account-name {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--app-ink-soft);
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-logout {
+  padding: 7px 12px;
+  border-color: #d9dde5;
+  border-radius: 8px;
+  color: var(--app-ink-soft);
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+.app-logout:hover { color: white; background: var(--app-ink); border-color: var(--app-ink); }
+.app-navbar .navbar-toggler { border: 1px solid #d9dde5; border-radius: 9px; }
+
+/* Common dashboard layout across every role */
+.pm-admin, .pm-manager, .pm-agent, .pm-owner, .pm-tenant {
+  min-height: calc(100vh - 72px);
+  padding: 34px 0 60px;
+  color: var(--app-ink);
+  background: var(--app-paper);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.pm-admin .container, .pm-manager .container, .pm-agent .container, .pm-owner .container, .pm-tenant .container {
+  max-width: 1280px;
+}
+.workspace-main .pm-admin .container, .workspace-main .pm-manager .container, .workspace-main .pm-agent .container,
+.workspace-main .pm-owner .container, .workspace-main .pm-tenant .container { width: 100%; }
+.workspace-main [id] { scroll-margin-top: 94px; }
+/* Sidebar navigation swaps dashboard sections instead of scrolling a long page. */
+.pm-admin [data-workspace-section], .pm-manager [data-workspace-section], .pm-agent [data-workspace-section],
+.pm-owner [data-workspace-section], .pm-tenant [data-workspace-section] { display: none !important; }
+.pm-admin[data-active-section="overview"] [data-workspace-section~="overview"],
+.pm-manager[data-active-section="overview"] [data-workspace-section~="overview"],
+.pm-agent[data-active-section="overview"] [data-workspace-section~="overview"],
+.pm-owner[data-active-section="overview"] [data-workspace-section~="overview"],
+.pm-tenant[data-active-section="overview"] [data-workspace-section~="overview"],
+.pm-admin[data-active-section="properties"] [data-workspace-section~="properties"],
+.pm-manager[data-active-section="properties"] [data-workspace-section~="properties"],
+.pm-agent[data-active-section="listings"] [data-workspace-section~="listings"],
+.pm-owner[data-active-section="portfolio"] [data-workspace-section~="portfolio"],
+.pm-admin[data-active-section="users"] [data-workspace-section~="users"],
+.pm-admin[data-active-section="contracts"] [data-workspace-section~="contracts"],
+.pm-manager[data-active-section="contracts"] [data-workspace-section~="contracts"],
+.pm-owner[data-active-section="contracts"] [data-workspace-section~="contracts"],
+.pm-admin[data-active-section="maintenance"] [data-workspace-section~="maintenance"],
+.pm-manager[data-active-section="maintenance"] [data-workspace-section~="maintenance"],
+.pm-owner[data-active-section="maintenance"] [data-workspace-section~="maintenance"],
+.pm-tenant[data-active-section="maintenance"] [data-workspace-section~="maintenance"],
+.pm-admin[data-active-section="reports"] [data-workspace-section~="reports"],
+.pm-manager[data-active-section="reports"] [data-workspace-section~="reports"],
+.pm-admin[data-active-section="billing"] [data-workspace-section~="billing"],
+.pm-manager[data-active-section="billing"] [data-workspace-section~="billing"],
+.pm-owner[data-active-section="billing"] [data-workspace-section~="billing"],
+.pm-tenant[data-active-section="payments"] [data-workspace-section~="payments"],
+.pm-agent[data-active-section="inquiries"] [data-workspace-section~="inquiries"],
+.pm-manager[data-active-section="inquiries"] [data-workspace-section~="inquiries"],
+.pm-agent[data-active-section="applications"] [data-workspace-section~="applications"],
+.pm-manager[data-active-section="applications"] [data-workspace-section~="applications"],
+.pm-admin[data-active-section="activity"] [data-workspace-section~="activity"],
+.pm-admin[data-active-section="settings"] [data-workspace-section~="settings"],
+.pm-tenant[data-active-section="lease"] [data-workspace-section~="lease"] { display: block !important; }
+.pm-agent[data-active-section="listings"] [data-workspace-section~="listings"].row { display: flex !important; }
+.pm-admin[data-active-section="overview"] [data-workspace-section~="overview"].pm-metrics,
+.pm-manager[data-active-section="overview"] [data-workspace-section~="overview"].pm-metrics,
+.pm-agent[data-active-section="overview"] [data-workspace-section~="overview"].pm-metrics,
+.pm-owner[data-active-section="overview"] [data-workspace-section~="overview"].pm-metrics,
+.pm-tenant[data-active-section="overview"] [data-workspace-section~="overview"].pm-metrics,
+.pm-admin[data-active-section="properties"] [data-workspace-section~="properties"].pm-filterbar,
+.pm-manager[data-active-section="properties"] [data-workspace-section~="properties"].pm-filterbar,
+.pm-agent[data-active-section="listings"] [data-workspace-section~="listings"].pm-filterbar { display: flex !important; }
+.pm-admin .pm-header, .pm-manager .pm-header, .pm-agent .pm-header, .pm-owner .pm-header, .pm-tenant .pm-header {
+  align-items: center;
+  gap: 20px;
+  padding: 4px 0 24px;
+  margin-bottom: 25px;
+  border-bottom-color: #deded8;
+}
+.pm-admin .pm-title, .pm-manager .pm-title, .pm-agent .pm-title, .pm-owner .pm-title, .pm-tenant .pm-title {
+  color: var(--app-ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: clamp(1.6rem, 2.2vw, 2rem);
+  font-weight: 720;
+  letter-spacing: -0.045em;
+  line-height: 1.18;
+}
+.pm-admin .pm-subtitle, .pm-manager .pm-subtitle, .pm-agent .pm-subtitle, .pm-owner .pm-subtitle, .pm-tenant .pm-subtitle {
+  max-width: 64ch;
+  margin-top: 7px;
+  color: #687286;
+  font-size: 0.9rem;
+}
+
+.pm-admin .pm-panel, .pm-manager .pm-panel, .pm-agent .pm-panel, .pm-owner .pm-panel, .pm-tenant .pm-panel {
+  overflow: hidden;
+  background: var(--app-surface);
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow);
+}
+.pm-admin .pm-panel-header, .pm-manager .pm-panel-header, .pm-agent .pm-panel-header, .pm-owner .pm-panel-header, .pm-tenant .pm-panel-header {
+  min-height: 60px;
+  padding: 18px 22px;
+  color: var(--app-ink);
+  background: #fff;
+  border-bottom: 1px solid #ecebe6;
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+.pm-admin .pm-metrics, .pm-manager .pm-metrics, .pm-agent .pm-metrics, .pm-owner .pm-metrics, .pm-tenant .pm-metrics {
+  margin-bottom: 24px;
+  background: var(--app-surface);
+  border-color: var(--app-line);
+  border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow);
+}
+.pm-admin .pm-metric, .pm-manager .pm-metric, .pm-agent .pm-metric, .pm-owner .pm-metric, .pm-tenant .pm-metric {
+  padding: 20px 23px;
+  border-right-color: #ecebe6;
+}
+.pm-admin .pm-metric-label, .pm-manager .pm-metric-label, .pm-agent .pm-metric-label, .pm-owner .pm-metric-label, .pm-tenant .pm-metric-label {
+  color: #687286;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.075em;
+}
+.pm-admin .pm-metric-value, .pm-manager .pm-metric-value, .pm-agent .pm-metric-value, .pm-owner .pm-metric-value, .pm-tenant .pm-metric-value {
+  color: var(--app-ink);
+  font-size: 1.65rem;
+  font-weight: 750;
+  letter-spacing: -0.04em;
+}
+
+.pm-admin .pm-table, .pm-manager .pm-table, .pm-agent .pm-table, .pm-owner .pm-table, .pm-tenant .pm-table { --bs-table-bg: transparent; }
+.pm-admin .pm-table thead th, .pm-manager .pm-table thead th, .pm-agent .pm-table thead th, .pm-owner .pm-table thead th, .pm-tenant .pm-table thead th {
+  color: #71798a;
+  background: #fbfbf9;
+  border-bottom-color: #e8e7e1;
+  font-size: 0.69rem;
+  font-weight: 750;
+  letter-spacing: 0.085em;
+  white-space: nowrap;
+}
+.pm-admin .pm-table tbody td, .pm-manager .pm-table tbody td, .pm-agent .pm-table tbody td, .pm-owner .pm-table tbody td, .pm-tenant .pm-table tbody td {
+  color: #344057;
+  border-bottom-color: #efeee9;
+  vertical-align: middle;
+}
+
+.pm-admin .btn.pm-btn-primary, .pm-manager .btn.pm-btn-primary, .pm-agent .btn.pm-btn-primary, .pm-owner .btn.pm-btn-primary, .pm-tenant .btn.pm-btn-primary {
+  min-height: 40px;
+  color: white;
+  background: var(--app-ink);
+  border: 1px solid var(--app-ink);
+  border-radius: 9px;
+  font-weight: 650;
+  box-shadow: 0 3px 7px rgba(23, 35, 63, 0.08);
+}
+.pm-admin .btn.pm-btn-primary:hover, .pm-manager .btn.pm-btn-primary:hover, .pm-agent .btn.pm-btn-primary:hover, .pm-owner .btn.pm-btn-primary:hover, .pm-tenant .btn.pm-btn-primary:hover {
+  color: #fff;
+  background: var(--app-accent);
+  border-color: var(--app-accent);
+}
+.pm-admin .form-control, .pm-admin .form-select, .pm-manager .form-control, .pm-manager .form-select,
+.pm-agent .form-control, .pm-agent .form-select, .pm-owner .form-control, .pm-owner .form-select,
+.pm-tenant .form-control, .pm-tenant .form-select {
+  min-height: 40px;
+  border-color: #dfe2e8;
+  border-radius: 8px;
+  color: var(--app-ink);
+}
+.pm-admin .form-control:focus, .pm-admin .form-select:focus, .pm-manager .form-control:focus, .pm-manager .form-select:focus,
+.pm-agent .form-control:focus, .pm-agent .form-select:focus, .pm-owner .form-control:focus, .pm-owner .form-select:focus,
+.pm-tenant .form-control:focus, .pm-tenant .form-select:focus {
+  border-color: #6b9c8f;
+  box-shadow: 0 0 0 3px rgba(47, 111, 94, 0.12);
+}
+
+.pm-admin .pm-empty-row, .pm-manager .pm-empty-row, .pm-agent .pm-empty-row, .pm-owner .pm-empty-row, .pm-tenant .pm-empty-row {
+  color: #7a8291;
+}
+.pm-admin .nav-tabs, .pm-manager .nav-tabs, .pm-agent .nav-tabs, .pm-owner .nav-tabs, .pm-tenant .nav-tabs {
+  gap: 5px;
+  border-bottom-color: var(--app-line);
+}
+.pm-admin .nav-tabs .nav-link, .pm-manager .nav-tabs .nav-link, .pm-agent .nav-tabs .nav-link, .pm-owner .nav-tabs .nav-link, .pm-tenant .nav-tabs .nav-link {
+  padding: 10px 14px;
+  color: #6c7587;
+  border: 1px solid transparent;
+  border-radius: 8px 8px 0 0;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+.pm-admin .nav-tabs .nav-link.active, .pm-manager .nav-tabs .nav-link.active, .pm-agent .nav-tabs .nav-link.active, .pm-owner .nav-tabs .nav-link.active, .pm-tenant .nav-tabs .nav-link.active {
+  color: var(--app-ink);
+  background: white;
+  border-color: var(--app-line) var(--app-line) white;
+}
+.pm-admin .card, .pm-manager .card, .pm-agent .card, .pm-owner .card, .pm-tenant .card {
+  border-color: var(--app-line);
+  border-radius: var(--app-radius);
+  box-shadow: 0 5px 18px rgba(23, 35, 63, 0.045);
+}
+.pm-agent .pm-card {
+  overflow: hidden;
+  border: 1px solid var(--app-line);
+  border-radius: var(--app-radius);
+  box-shadow: 0 5px 18px rgba(23, 35, 63, 0.045);
+  transition: box-shadow 160ms ease, transform 160ms ease;
+}
+.pm-agent .pm-card:hover { box-shadow: 0 12px 26px rgba(23, 35, 63, 0.09); transform: translateY(-2px); }
+.pm-admin-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 18px 22px 22px; }
+.pm-admin-summary-item { display: flex; min-height: 112px; flex-direction: column; gap: 5px; padding: 15px; background: #f8f9f8; border: 1px solid #ecebe6; border-radius: 10px; }
+.pm-admin-summary-item > span { color: #687286; font-size: .74rem; font-weight: 650; }
+.pm-admin-summary-item > strong { color: var(--app-ink); font-size: 1.5rem; font-weight: 750; line-height: 1.2; }
+.pm-admin-summary-item > small { color: #7a8291; font-size: .69rem; line-height: 1.45; }
+.pm-user-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+.pm-user-toolbar-copy h4 { font-size: 1.05rem; }
+.pm-user-toolbar-copy p { margin-top: 4px; font-size: .78rem; }
+.pm-user-toolbar-actions { display: flex; align-items: center; gap: 10px; }
+.pm-user-search { width: min(280px, 28vw); }
+.pm-user-search .form-control { min-height: 40px; }
+.pm-user-add { min-height: 40px; flex: 0 0 auto; padding: 7px 14px; white-space: nowrap; }
+.pm-users-table { min-width: 700px; }
+.pm-users-table thead th { padding: 13px 18px; }
+.pm-users-table tbody td { padding: 14px 18px; }
+.pm-users-table tbody td:nth-child(2) { overflow-wrap: anywhere; }
+.pm-users-table .badge { padding: 6px 9px; border-radius: 999px; }
+.modal-content { border: 1px solid var(--app-line); border-radius: 14px; box-shadow: 0 18px 55px rgba(23, 35, 63, 0.18); }
+.modal-header { border-bottom-color: #ecebe6; }
+.modal-footer { border-top-color: #ecebe6; }
+
+@media (max-width: 991.98px) {
+  .workspace-frame { grid-template-columns: 206px minmax(0, 1fr); }
+  .workspace-sidebar { padding-right: 10px; padding-left: 10px; }
+  .app-navbar .container { padding-top: 10px; padding-bottom: 10px; }
+  .app-navbar .navbar-collapse { padding: 8px 0 4px; }
+  .app-nav-link { padding: 11px 0 !important; }
+  .app-nav-link.active::after { right: auto; bottom: 3px; left: 0; width: 34px; height: 2px; }
+  .app-account { flex-wrap: wrap; padding-top: 13px; border-top: 1px solid var(--app-line); }
+  .pm-admin, .pm-manager, .pm-agent, .pm-owner, .pm-tenant { padding-top: 26px; }
+}
+
+@media (max-width: 575.98px) {
+  .workspace-frame { display: block; }
+  .workspace-sidebar { position: static; display: block; height: auto; padding: 10px 14px; border-right: 0; border-bottom: 1px solid var(--app-line); }
+  .workspace-sidebar-heading, .workspace-sidebar-bottom { display: none; }
+  .workspace-side-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+  .workspace-side-link { min-height: 38px; flex: 0 1 auto; gap: 7px; padding: 5px 8px; font-size: 0.75rem; white-space: nowrap; }
+  .workspace-side-icon { width: 23px; height: 23px; flex-basis: 23px; font-size: 0.52rem; }
+  .app-account-name { max-width: 135px; }
+  .app-role-pill { order: 4; width: 100%; text-align: center; }
+  .pm-admin .pm-header, .pm-manager .pm-header, .pm-agent .pm-header, .pm-owner .pm-header, .pm-tenant .pm-header {
+    align-items: flex-start;
+    padding-bottom: 18px;
+    margin-bottom: 18px;
+  }
+  .pm-admin .pm-metric, .pm-manager .pm-metric, .pm-agent .pm-metric, .pm-owner .pm-metric, .pm-tenant .pm-metric {
+    flex-basis: 50%;
+    padding: 16px;
+  }
+  .pm-admin .pm-panel-header, .pm-manager .pm-panel-header, .pm-agent .pm-panel-header, .pm-owner .pm-panel-header, .pm-tenant .pm-panel-header {
+    padding: 16px;
+  }
+  .pm-admin-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 14px; }
+  .pm-user-toolbar { align-items: stretch; flex-direction: column; }
+  .pm-user-toolbar-actions { width: 100%; }
+  .pm-user-search { width: auto; flex: 1 1 auto; }
+  .pm-user-add { flex: 0 0 auto; }
+}

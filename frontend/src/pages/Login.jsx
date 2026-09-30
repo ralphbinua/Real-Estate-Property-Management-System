@@ -40,14 +40,10 @@ export default function Login() {
 
   return (
     <div className="pm-login-page">
-      <div className="pm-login-card">
-        <div className="pm-login-brand">
-          🏢 PropManage
-        </div>
+      <section className="pm-login-card">
+        <div className="pm-login-overline">WORKSPACE ACCESS</div>
         <h1 className="pm-login-title">Sign in</h1>
-        <p className="pm-login-subtitle">
-          Enter your credentials to access your portal account
-        </p>
+        <p className="pm-login-subtitle">Enter your account details to continue.</p>
 
         {error && (
           <div className="pm-alert" role="alert">
@@ -63,6 +59,7 @@ export default function Login() {
               className="pm-input"
               type="email"
               name="email"
+              autoComplete="username"
               placeholder="name@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -76,23 +73,19 @@ export default function Login() {
               className="pm-input"
               type="password"
               name="password"
-              placeholder="••••••••"
+              autoComplete="current-password"
+              placeholder="Enter your password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
           </Form.Group>
 
-          <Button
-            variant="light"
-            type="submit"
-            className="pm-btn-primary w-100"
-            disabled={loading}
-          >
-            {loading ? 'Authenticating…' : 'Sign in'}
+          <Button variant="light" type="submit" className="pm-btn-primary w-100" disabled={loading}>
+            {loading ? 'Signing in…' : 'Sign in'}
           </Button>
         </Form>
-      </div>
+      </section>
     </div>
   );
 }

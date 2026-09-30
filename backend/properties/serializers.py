@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Property, Unit, PropertyInquiry
+from .models import Property, Unit, PropertyInquiry, RentalApplication
 from users.serializers import UserSerializer
 from django.contrib.auth import get_user_model
 
@@ -9,7 +9,7 @@ class UnitSerializer(serializers.ModelSerializer):
     _id = serializers.IntegerField(source='id', read_only=True)
     propertyId = serializers.IntegerField(source='property_id', read_only=True)
     unitNumber = serializers.CharField(source='unit_number')
-    monthlyRate = serializers.DecimalField(source='monthly_rate', max_digits=10, decimal_places=2)
+    monthlyRate = serializers.DecimalField(source='monthly_rate', max_digits=10, decimal_places=2, min_value=0.01)
     tenantId = serializers.IntegerField(source='tenant_id', read_only=True, allow_null=True)
     tenantDetails = UserSerializer(source='tenant', read_only=True)
 
@@ -92,6 +92,14 @@ class PropertySerializer(serializers.ModelSerializer):
         if self.instance is not None:
             self.fields['units'].read_only = True
 
+    def validate_units(self, units):
+        unit_numbers = [str(unit.get('unit_number', '')).strip().casefold() for unit in units]
+        if any(not number for number in unit_numbers):
+            raise serializers.ValidationError('Every unit must have a unit number.')
+        if len(unit_numbers) != len(set(unit_numbers)):
+            raise serializers.ValidationError('Unit numbers must be unique within the property.')
+        return units
+
     def create(self, validated_data):
         units_data = validated_data.pop('units', [])
         assigned_agents = validated_data.pop('assigned_agents', [])
@@ -135,6 +143,64 @@ class PropertyInquirySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'unit': 'Choose an available unit for this property.'})
         if property_obj and not property_obj.units.exists() and property_obj.status != 'Available':
             raise serializers.ValidationError({'property': 'Viewings can only be scheduled for available properties.'})
+        requested_status = attrs.get('status')
+        if requested_status == 'Application In Progress' and self.instance and not RentalApplication.objects.filter(inquiry=self.instance).exists():
+            raise serializers.ValidationError({'status': 'Start a rental application before changing this inquiry to application in progress.'})
+        if requested_status == 'Converted' and self.instance:
+            application = RentalApplication.objects.filter(inquiry=self.instance).first()
+            if not application or application.status != 'Converted':
+                raise serializers.ValidationError({'status': 'Convert this inquiry by creating a lease from its approved application.'})
         if 'status' in attrs and attrs['status'] == 'Viewing Scheduled' and not attrs.get('viewing_at', getattr(self.instance, 'viewing_at', None)):
             raise serializers.ValidationError({'viewing_at': 'Set a viewing date and time before marking this inquiry as scheduled.'})
         return attrs
+
+
+class RentalApplicationSerializer(serializers.ModelSerializer):
+    inquiryDetails = PropertyInquirySerializer(source='inquiry', read_only=True)
+    applicantName = serializers.CharField(source='inquiry.prospect_name', read_only=True)
+    applicantEmail = serializers.EmailField(source='applicant_email')
+    propertyDetails = PropertySerializer(source='inquiry.property', read_only=True)
+    unitDetails = UnitSerializer(source='inquiry.unit', read_only=True, allow_null=True)
+    monthlyIncome = serializers.DecimalField(source='monthly_income', max_digits=12, decimal_places=2, required=False, allow_null=True)
+    moveInDate = serializers.DateField(source='move_in_date', required=False, allow_null=True)
+    reviewNotes = serializers.CharField(source='review_notes', required=False, allow_blank=True)
+    createdBy = UserSerializer(source='created_by', read_only=True)
+    reviewedBy = UserSerializer(source='reviewed_by', read_only=True)
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    reviewedAt = serializers.DateTimeField(source='reviewed_at', read_only=True, allow_null=True)
+
+    class Meta:
+        model = RentalApplication
+        fields = [
+            'id', 'inquiry', 'inquiryDetails', 'applicantName', 'applicantEmail',
+            'propertyDetails', 'unitDetails', 'employment', 'monthlyIncome',
+            'moveInDate', 'notes', 'status', 'reviewNotes', 'createdBy',
+            'reviewedBy', 'createdAt', 'reviewedAt',
+        ]
+        read_only_fields = ['id', 'createdBy', 'reviewedBy', 'createdAt', 'reviewedAt']
+
+    def validate_inquiry(self, inquiry):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user and user.role == User.Role.AGENT:
+            if inquiry.agent_id != user.pk or not inquiry.property.assigned_agents.filter(pk=user.pk).exists():
+                raise serializers.ValidationError('You may only apply for an inquiry assigned to you.')
+        elif user and user.role == User.Role.PROPERTY_MANAGER and inquiry.property.manager_id != user.pk:
+            raise serializers.ValidationError('You may only apply for inquiries on properties you manage.')
+        if RentalApplication.objects.filter(inquiry=inquiry).exclude(pk=getattr(self.instance, 'pk', None)).exists():
+            raise serializers.ValidationError('An application already exists for this inquiry.')
+        return inquiry
+
+    def validate_status(self, status):
+        if self.instance is None:
+            raise serializers.ValidationError('New applications must be submitted through the application workflow.')
+        transitions = {
+            'Submitted': {'Under Review', 'Approved', 'Rejected'},
+            'Under Review': {'Approved', 'Rejected'},
+            'Approved': set(),
+            'Rejected': set(),
+            'Converted': set(),
+        }
+        if status not in transitions.get(self.instance.status, set()):
+            raise serializers.ValidationError(f'An application in {self.instance.status} cannot move to {status}.')
+        return status

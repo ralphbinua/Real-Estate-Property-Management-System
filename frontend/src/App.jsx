@@ -1,6 +1,7 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useAuth } from './context/AuthContext';
 import NavigationBar from './components/Navbar';
+import WorkspaceSidebar from './components/WorkspaceSidebar';
 import Login from './pages/Login';
 import AdminDashboard from './pages/AdminDashboard';
 import TenantDashboard from './pages/TenantDashboard';
@@ -24,10 +25,24 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
 
 export default function App() {
   return (
-    <AuthProvider>
       <Router>
+        <AppLayout />
+      </Router>
+  );
+}
+
+function AppLayout() {
+  const { user } = useAuth();
+  const location = useLocation();
+  const showWorkspace = Boolean(user && location.pathname !== '/login');
+
+  return (
+    <>
         <NavigationBar />
-        <Routes>
+        <div className={`workspace-frame${showWorkspace ? '' : ' workspace-frame-public'}`}>
+          {showWorkspace && <WorkspaceSidebar />}
+          <main className="workspace-main">
+            <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<Navigate to="/login" replace />} />
@@ -76,8 +91,9 @@ export default function App() {
 
           {/* Fallback route */}
           <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </Router>
-    </AuthProvider>
+            </Routes>
+          </main>
+        </div>
+    </>
   );
 }

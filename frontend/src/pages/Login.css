@@ -1,119 +1,31 @@
 .pm-login-page {
-  --ink: #17233F;
-  --ink-soft: #3B4863;
-  --paper: #F5F4EF;
-  --surface: #FFFFFF;
-  --line: #E3E0D6;
-  --accent: #2F6F5E;
-  --accent-soft: #E7F0EC;
-  --rose: #A6414B;
-  --rose-soft: #F7E9EA;
-  --muted: #6B7280;
-  --slate: #4A5568;
-
-  background: var(--paper);
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  color: var(--ink);
-  padding: 24px;
+  min-height: calc(100vh - 72px);
+  display: grid;
+  place-items: center;
+  padding: 28px 18px;
+  color: #17233f;
+  background: #f5f4ef;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .pm-login-card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  width: 100%;
-  max-width: 420px;
-  padding: 40px 32px;
-  box-shadow: 0 4px 16px rgba(23, 35, 63, 0.04);
+  width: min(100%, 460px);
+  padding: 42px;
+  background: #fff;
+  border: 1px solid #e3e0d6;
+  border-radius: 16px;
+  box-shadow: 0 18px 50px rgba(23, 35, 63, 0.09);
 }
 
-.pm-login-brand {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--ink);
-  margin-bottom: 24px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+.pm-login-overline { margin-bottom: 10px; color: #2f6f5e; font-size: .68rem; font-weight: 750; letter-spacing: .15em; }
+.pm-login-title { margin: 0 0 7px; color: #17233f; font-size: 2rem; font-weight: 730; letter-spacing: -.05em; }
+.pm-login-subtitle { margin-bottom: 28px; color: #6b7280; font-size: .9rem; line-height: 1.6; }
+.pm-login-page .pm-form-label { margin-bottom: 7px; color: #47536b; font-size: .79rem; font-weight: 680; }
+.pm-login-page .pm-input { min-height: 46px; padding: 11px 14px; color: #17233f; background: #fff; border: 1px solid #e3e6e1; border-radius: 9px; font-size: .89rem; }
+.pm-login-page .pm-input:focus { border-color: #6b9c8f; box-shadow: 0 0 0 3px rgba(47, 111, 94, .13); }
+.pm-login-page .btn.pm-btn-primary { min-height: 46px; margin-top: 4px; color: #fff; background: #17233f; border-color: #17233f; border-radius: 9px; font-size: .9rem; font-weight: 680; }
+.pm-login-page .btn.pm-btn-primary:hover { background: #2f6f5e; border-color: #2f6f5e; }
+.pm-login-page .pm-alert { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin-bottom: 18px; color: #6b2530; background: #f7e9ea; border-left: 3px solid #a6414b; border-radius: 7px; font-size: .84rem; }
+.pm-login-page .pm-alert-close { color: inherit; background: transparent; border: 0; cursor: pointer; }
 
-.pm-login-title {
-  font-family: 'Fraunces', Georgia, serif;
-  font-size: 1.75rem;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-  margin-bottom: 6px;
-}
-
-.pm-login-subtitle {
-  color: var(--muted);
-  font-size: 0.875rem;
-  margin-bottom: 28px;
-}
-
-/* Alert */
-.pm-login-page .pm-alert {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border-left: 3px solid var(--rose);
-  background: var(--rose-soft);
-  color: #6B2530;
-  border-radius: 4px;
-  margin-bottom: 20px;
-  font-size: 0.875rem;
-}
-.pm-login-page .pm-alert-close {
-  background: none;
-  border: none;
-  font-size: 1rem;
-  line-height: 1;
-  cursor: pointer;
-  color: inherit;
-  opacity: 0.6;
-}
-.pm-login-page .pm-alert-close:hover { opacity: 1; }
-
-/* Form Inputs */
-.pm-login-page .pm-form-label {
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--slate);
-  margin-bottom: 6px;
-}
-
-.pm-login-page .pm-input {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 10px 14px;
-  font-size: 0.9rem;
-  background: var(--surface);
-  color: var(--ink);
-}
-.pm-login-page .pm-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-/* Primary Button */
-.pm-login-page .btn.pm-btn-primary {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: #fff;
-  font-weight: 500;
-  padding: 10px;
-  border-radius: 6px;
-  font-size: 0.95rem;
-  margin-top: 8px;
-}
-.pm-login-page .btn.pm-btn-primary:hover {
-  background: var(--accent);
-  border-color: var(--accent);
-}
+@media (max-width: 575px) { .pm-login-card { padding: 32px 25px; } }

@@ -185,7 +185,7 @@ export default function UserManagement() {
     }
 
     return (
-      <Table hover responsive className="mb-0 align-middle bg-white">
+      <Table hover responsive className="pm-users-table mb-0 align-middle bg-white">
         <thead>
           <tr className="text-muted small text-uppercase">
             <th className="fw-semibold border-0">Name</th>
@@ -243,11 +243,14 @@ export default function UserManagement() {
   };
 
   return (
-    <div>
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h4 className="fw-bold text-dark mb-0">User Directory</h4>
-        <div className="d-flex gap-2">
-          <InputGroup style={{ width: 240 }}>
+    <div className="pm-user-management">
+      <div className="pm-user-toolbar">
+        <div className="pm-user-toolbar-copy">
+          <h4 className="fw-bold text-dark mb-0">User Directory</h4>
+          <p className="text-muted mb-0">Create, search, and update staff and tenant accounts.</p>
+        </div>
+        <div className="pm-user-toolbar-actions">
+          <InputGroup className="pm-user-search">
             <Form.Control
               placeholder="Search name or email…"
               value={search}
@@ -255,7 +258,7 @@ export default function UserManagement() {
               size="sm"
             />
           </InputGroup>
-          <Button variant="primary" size="sm" onClick={() => setShowAddModal(true)}>
+          <Button variant="primary" className="pm-user-add" onClick={() => setShowAddModal(true)}>
             + Add User
           </Button>
         </div>

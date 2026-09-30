@@ -1,38 +1,36 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Navbar, Nav, Container, Button } from 'react-bootstrap';
+import { Button, Container, Navbar, Nav } from 'react-bootstrap';
 import { useAuth } from '../context/AuthContext';
 import { fetchSystemSettings } from '../services/systemSettingsService';
+
+const ROLE_ROUTES = {
+  Admin: { path: '/admin', label: 'Administrator' },
+  'Property Manager': { path: '/manager', label: 'Property manager' },
+  Agent: { path: '/agent', label: 'Agent' },
+  Owner: { path: '/owner', label: 'Property owner' },
+  Tenant: { path: '/tenant', label: 'Tenant' },
+};
+
+function initials(name = '') {
+  return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'U';
+}
 
 export default function AppNavbar() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [systemName, setSystemName] = useState('PropManage');
+  const role = ROLE_ROUTES[user?.role] || ROLE_ROUTES.Tenant;
 
   useEffect(() => {
-    if (!user) return;
-    const loadSettings = () => fetchSystemSettings().then((settings) => setSystemName(settings.system_name || 'PropManage')).catch(() => {});
+    if (!user) return undefined;
+    const loadSettings = () => fetchSystemSettings()
+      .then((settings) => setSystemName(settings.system_name || 'PropManage'))
+      .catch(() => {});
     loadSettings();
     window.addEventListener('system-settings-updated', loadSettings);
     return () => window.removeEventListener('system-settings-updated', loadSettings);
   }, [user]);
-
-  // Get home route dynamically based on active session role
-  const getHomeRoute = () => {
-    if (!user) return '/login';
-    switch (user.role?.toLowerCase()) {
-      case 'admin':
-        return '/admin';
-      case 'property manager':
-        return '/manager';
-      case 'agent':
-        return '/agent';
-      case 'owner':
-        return '/owner';
-      default:
-        return '/tenant';
-    }
-  };
 
   const handleLogout = () => {
     logout();
@@ -40,37 +38,31 @@ export default function AppNavbar() {
   };
 
   return (
-    <Navbar bg="dark" variant="dark" expand="lg">
+    <Navbar expand="lg" className="app-navbar sticky-top">
       <Container>
-        {/* Brand logo routes to current role dashboard */}
-        <Navbar.Brand as={Link} to={getHomeRoute()} className="fw-bold fs-4">
-          🏢 {systemName}
+        <Navbar.Brand as={Link} to={user ? role.path : '/login'} className="app-brand">
+          <span className="app-brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M4 20V8.5L12 4l8 4.5V20M2.5 20h19M8 10h2v2H8zm6 0h2v2h-2zm-6 4h2v2H8zm6 0h2v2h-2zM11 20v-3h2v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+          <span>{systemName}</span>
         </Navbar.Brand>
 
-        <Navbar.Toggle aria-controls="basic-navbar-nav" />
-        <Navbar.Collapse id="basic-navbar-nav">
-          <Nav className="me-auto">
-            {user?.role === 'Admin' && (
-              <Nav.Link as={Link} to="/admin">
-                Admin Dashboard
-              </Nav.Link>
-            )}
-            {user?.role === 'Property Manager' && (
-              <Nav.Link as={Link} to="/manager">
-                Manager Portal
-              </Nav.Link>
-            )}
-          </Nav>
-
-          {user && (
-            <div className="d-flex align-items-center gap-2">
-              <span className="text-light me-2">{user.name}</span>
-              <Button variant="outline-danger" size="sm" onClick={handleLogout}>
-                Logout
-              </Button>
+        {user && <Navbar.Toggle aria-controls="app-primary-navigation" aria-label="Toggle navigation" />}
+        {user && (
+          <Navbar.Collapse id="app-primary-navigation">
+            <Nav className="me-auto ms-lg-5">
+              <Nav.Link as={Link} to={role.path} className="app-nav-link active">Dashboard</Nav.Link>
+            </Nav>
+            <div className="app-account">
+              <span className="app-role-pill">{role.label}</span>
+              <span className="app-avatar" aria-hidden="true">{initials(user.name || user.email)}</span>
+              <span className="app-account-name">{user.name || user.email}</span>
+              <Button variant="outline-secondary" size="sm" className="app-logout" onClick={handleLogout}>Sign out</Button>
             </div>
-          )}
-        </Navbar.Collapse>
+          </Navbar.Collapse>
+        )}
       </Container>
     </Navbar>
   );

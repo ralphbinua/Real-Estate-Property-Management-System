@@ -8,6 +8,7 @@ import { createUnit, deleteUnit, updateUnit } from '../services/unitService';
 import { fetchSystemSettings } from '../services/systemSettingsService';
 import { addMonthsToDate } from '../utils/dateUtils';
 import { fetchInquiries, updateInquiry } from '../services/inquiryService';
+import { createLeaseFromApplication, fetchApplications, reviewApplication } from '../services/applicationService';
 import AdminMaintenanceManager from '../components/AdminMaintenanceManager';
 import ManagerInvoiceTracker from '../components/ManagerInvoiceTracker';
 import ManagerReports from '../components/ManagerReports';
@@ -24,6 +25,11 @@ const PILL_CLASS = {
   pending: 'pm-pill-occupied',
   active: 'pm-pill-active',
   terminated: 'pm-pill-terminated',
+  submitted: 'pm-pill-pending',
+  'under review': 'pm-pill-active',
+  approved: 'pm-pill-available',
+  rejected: 'pm-pill-terminated',
+  converted: 'pm-pill-occupied',
 };
 
 function StatusPill({ status }) {
@@ -38,11 +44,13 @@ function StatusPill({ status }) {
 }
 
 export default function ManagerDashboard() {
+  const [activeSection, setActiveSection] = useState('overview');
   const [properties, setProperties] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [userList, setUserList] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [inquiries, setInquiries] = useState([]);
+  const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -57,6 +65,7 @@ export default function ManagerDashboard() {
 
   // New Lease Contract Modal State
   const [showContractModal, setShowContractModal] = useState(false);
+  const [applicationForLease, setApplicationForLease] = useState(null);
   const [contractData, setContractData] = useState({
     property: '',
     unitId: '',
@@ -79,8 +88,7 @@ export default function ManagerDashboard() {
     address: '',
     propertyType: 'Apartment',
     price: '',
-    unitCount: 10,
-    defaultUnitRate: 8500,
+    units: [{ unitNumber: '101', monthlyRate: '' }],
   });
 
   // Filter State
@@ -96,16 +104,18 @@ export default function ManagerDashboard() {
       fetchAssignableTenants(),
       fetchInvoices(),
       fetchInquiries(),
+      fetchApplications(),
     ]);
-    const [propResult, contractResult, tenantResult, invoiceResult, inquiryResult] = results;
+    const [propResult, contractResult, tenantResult, invoiceResult, inquiryResult, applicationResult] = results;
     if (propResult.status === 'fulfilled') setProperties(Array.isArray(propResult.value) ? propResult.value : []);
     if (contractResult.status === 'fulfilled') setContracts(Array.isArray(contractResult.value) ? contractResult.value : []);
     if (tenantResult.status === 'fulfilled') setUserList(Array.isArray(tenantResult.value) ? tenantResult.value : []);
     if (invoiceResult.status === 'fulfilled') setInvoices(Array.isArray(invoiceResult.value) ? invoiceResult.value : []);
     if (inquiryResult.status === 'fulfilled') setInquiries(Array.isArray(inquiryResult.value) ? inquiryResult.value : []);
+    if (applicationResult.status === 'fulfilled') setApplications(Array.isArray(applicationResult.value) ? applicationResult.value : []);
 
     const failedSections = results.flatMap((result, index) => result.status === 'rejected'
-      ? [['properties', 'leases', 'tenant list', 'invoices', 'inquiries'][index]]
+      ? [['properties', 'leases', 'tenant list', 'invoices', 'inquiries', 'applications'][index]]
       : []);
     setError(failedSections.length
       ? `Could not load: ${failedSections.join(', ')}. Other manager records are still available.`
@@ -116,6 +126,17 @@ export default function ManagerDashboard() {
   useEffect(() => {
     loadManagerData();
     fetchSystemSettings().then((settings) => setLeaseTermMonths(settings.default_lease_term_months || 12)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const handleWorkspaceNavigation = (event) => {
+      setActiveSection(event.detail);
+      if (event.detail === 'reports') setShowReports(true);
+      if (event.detail === 'billing') setShowInvoices(true);
+      if (event.detail === 'maintenance') setShowMaintenanceQueue(true);
+    };
+    window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
+    return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
   }, []);
 
   const handlePropertySelect = (propertyId) => {
@@ -190,14 +211,53 @@ export default function ManagerDashboard() {
     delete payload.unitNumber;
 
     try {
-      await createContract(payload);
-      setSuccess('Lease contract created successfully!');
+      if (applicationForLease) {
+        await createLeaseFromApplication(applicationForLease.id, {
+          tenant: Number(contractData.tenant),
+          startDate: contractData.startDate,
+          endDate: contractData.endDate,
+        });
+        setSuccess(`Lease created from the approved application for ${applicationForLease.applicantName}.`);
+        setApplicationForLease(null);
+      } else {
+        await createContract(payload);
+        setSuccess('Lease contract created successfully!');
+      }
       setContractData({ property: '', unitId: '', unitNumber: '', tenant: '', startDate: '', endDate: '', rentAmount: '' });
       setShowContractModal(false);
       loadManagerData();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to create lease contract.');
     }
+  };
+
+  const handleApplicationReview = async (application, status) => {
+    setError('');
+    setSuccess('');
+    try {
+      await reviewApplication(application.id, { status });
+      setSuccess(`Application ${status.toLowerCase()}.`);
+      setApplications(await fetchApplications());
+    } catch (err) {
+      setError(err.response?.data?.status?.[0] || err.response?.data?.detail || `Unable to ${status.toLowerCase()} this application.`);
+    }
+  };
+
+  const openLeaseForApplication = (application) => {
+    const propertyId = application.propertyDetails?._id;
+    const unitId = application.unitDetails?._id || '';
+    const matchingTenant = userList.find((tenant) => tenant.email?.toLowerCase() === application.applicantEmail?.toLowerCase());
+    setApplicationForLease(application);
+    setContractData({
+      property: propertyId || '',
+      unitId,
+      unitNumber: application.unitDetails?.unitNumber || '',
+      tenant: matchingTenant?._id || matchingTenant?.id || '',
+      startDate: application.moveInDate || '',
+      endDate: application.moveInDate ? addMonthsToDate(application.moveInDate, leaseTermMonths) : '',
+      rentAmount: application.unitDetails?.monthlyRate || application.propertyDetails?.monthlyRate || '',
+    });
+    setShowContractModal(true);
   };
 
   const openUnitEditor = (property, unit = null) => {
@@ -258,28 +318,26 @@ export default function ManagerDashboard() {
     setSuccess('');
 
     try {
-      let units = [];
-      if (['Apartment', 'Condo'].includes(propertyFormData.propertyType)) {
-        for (let i = 1; i <= Number(propertyFormData.unitCount); i++) {
-          units.push({
-            unitNumber: `Room ${100 + i}`,
-            monthlyRate: Number(propertyFormData.defaultUnitRate),
+      const hasUnits = ['Apartment', 'Condo'].includes(propertyFormData.propertyType);
+      const units = hasUnits
+        ? propertyFormData.units.map((unit) => ({
+            unitNumber: unit.unitNumber.trim(),
+            monthlyRate: Number(unit.monthlyRate),
             status: 'Available',
-          });
-        }
-      }
+          }))
+        : [];
 
       const payload = {
         title: propertyFormData.title,
         address: propertyFormData.address,
         propertyType: propertyFormData.propertyType,
-        price: Number(propertyFormData.price || propertyFormData.defaultUnitRate),
+        price: Number(propertyFormData.price || (hasUnits ? propertyFormData.units[0]?.monthlyRate : 0) || 0),
         units,
       };
 
       await createProperty(payload);
       setSuccess('New property listing created successfully!');
-      setPropertyFormData({ title: '', address: '', propertyType: 'Apartment', price: '', unitCount: 10, defaultUnitRate: 8500 });
+      setPropertyFormData({ title: '', address: '', propertyType: 'Apartment', price: '', units: [{ unitNumber: '101', monthlyRate: '' }] });
       setShowPropertyModal(false);
       loadManagerData();
     } catch (err) {
@@ -382,10 +440,10 @@ export default function ManagerDashboard() {
   );
 
   return (
-    <div className="pm-manager">
+    <div className="pm-manager" data-active-section={activeSection}>
       <Container>
         {/* Header */}
-        <div className="pm-header">
+        <div className="pm-header" id="overview">
           <div>
             <h1 className="pm-title">Property Manager Dashboard</h1>
             <p className="pm-subtitle">
@@ -400,10 +458,10 @@ export default function ManagerDashboard() {
             >
               Add property
             </Button>
-            <Button
+          <Button
               variant="light"
               className="pm-btn-ghost"
-              onClick={() => setShowContractModal(true)}
+            onClick={() => { setApplicationForLease(null); setShowContractModal(true); }}
             >
               New lease
             </Button>
@@ -452,7 +510,7 @@ export default function ManagerDashboard() {
         ) : (
           <>
             {/* Metrics Strip */}
-            <div className="pm-metrics">
+            <div className="pm-metrics" data-workspace-section="overview">
               <div className="pm-metric">
                 <span className="pm-metric-label">Assigned properties</span>
                 <span className="pm-metric-value">{metrics.totalAssigned}</span>
@@ -469,7 +527,7 @@ export default function ManagerDashboard() {
 
             {/* Performance Analytics & Revenue Reports Panel */}
             {showReports && (
-              <div className="pm-panel mb-4">
+              <div className="pm-panel mb-4" id="reports" data-workspace-section="reports">
                 <div className="pm-panel-header">Performance & Revenue Analytics</div>
                 <div style={{ padding: '22px' }}>
                   <ManagerReports properties={properties} invoices={invoices} />
@@ -479,7 +537,7 @@ export default function ManagerDashboard() {
 
             {/* Invoicing Ledger Panel */}
             {showInvoices && (
-              <div className="pm-panel mb-4">
+              <div className="pm-panel mb-4" id="billing" data-workspace-section="billing">
                 <div className="pm-panel-header">Financial Ledger & Rent Collection</div>
                 <div style={{ padding: '22px' }}>
                   <ManagerInvoiceTracker />
@@ -489,7 +547,7 @@ export default function ManagerDashboard() {
 
             {/* Maintenance Queue Panel */}
             {showMaintenanceQueue && (
-              <div className="pm-panel mb-4">
+              <div className="pm-panel mb-4" id="maintenance" data-workspace-section="maintenance">
                 <div className="pm-panel-header">Maintenance & repair requests</div>
                 <div style={{ padding: '22px' }}>
                   <AdminMaintenanceManager />
@@ -498,7 +556,7 @@ export default function ManagerDashboard() {
             )}
 
             {/* Filter Toolbar */}
-            <div className="pm-filterbar">
+            <div className="pm-filterbar" data-workspace-section="properties">
               <Form.Control
                 className="pm-input pm-search"
                 placeholder="Search by title or location…"
@@ -528,7 +586,7 @@ export default function ManagerDashboard() {
             </div>
 
             {/* Property Directory */}
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="properties" data-workspace-section="properties">
               <div className="pm-panel-header">
                 Managed properties overview ({filteredProperties.length})
               </div>
@@ -563,7 +621,7 @@ export default function ManagerDashboard() {
                             <StatusPill status={occupiedCount > 0 ? `${occupiedCount}/${totalUnits} Occupied` : prop.status || 'Available'} />
                           </td>
                           <td className="text-center">
-                            {prop.units && prop.units.length > 0 ? (
+                            {['Apartment', 'Condo'].includes(prop.propertyType) || prop.units?.length > 0 ? (
                               <Button
                                 variant="light"
                                 size="sm"
@@ -572,7 +630,7 @@ export default function ManagerDashboard() {
                                   setSelectedPropertyId(selectedPropertyId === propId ? null : propId)
                                 }
                               >
-                                {selectedPropertyId === propId ? 'Hide Units' : `View Units (${prop.units.length})`}
+                                {selectedPropertyId === propId ? 'Hide Units' : `Manage Units (${prop.units?.length || 0})`}
                               </Button>
                             ) : (
                               <span className="text-muted small me-2">No sub-units</span>
@@ -593,10 +651,10 @@ export default function ManagerDashboard() {
             </div>
 
             {/* Interactive Room Matrix Drawer */}
-            {selectedPropertyObj && selectedPropertyObj.units && (
-              <div className="pm-panel mb-4" style={{ backgroundColor: '#fcfcfd' }}>
+            {selectedPropertyObj && Array.isArray(selectedPropertyObj.units) && (
+              <div className="pm-panel mb-4" data-workspace-section="properties" style={{ backgroundColor: '#fcfcfd' }}>
                 <div className="pm-panel-header d-flex justify-content-between align-items-center">
-                  <span>Unit breakdown — {selectedPropertyObj.title} ({selectedPropertyObj.units.length} Rooms)</span>
+                  <span>Unit breakdown — {selectedPropertyObj.title} ({selectedPropertyObj.units.length} Units)</span>
                   <Button size="sm" variant="primary" onClick={() => openUnitEditor(selectedPropertyObj)}>Add unit</Button>
                   <Button
                     variant="link"
@@ -608,7 +666,7 @@ export default function ManagerDashboard() {
                   </Button>
                 </div>
                 <div style={{ padding: '22px' }}>
-                  <Row className="g-3">
+                  {selectedPropertyObj.units.length === 0 ? <div className="text-muted py-4 text-center">No units yet. Add the first unit to start managing unit availability and rent.</div> : <Row className="g-3">
                     {selectedPropertyObj.units.map((unit) => {
                       const unitId = unit._id || unit.id;
                       const isOccupied = unit.status === 'Occupied';
@@ -646,13 +704,13 @@ export default function ManagerDashboard() {
                         </Col>
                       );
                     })}
-                  </Row>
+                  </Row>}
                 </div>
               </div>
             )}
 
             {/* Active Lease Contracts */}
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="contracts" data-workspace-section="contracts">
               <div className="pm-panel-header">Active lease contracts ({contracts.length})</div>
               <Table responsive className="pm-table mb-0">
                 <thead>
@@ -704,7 +762,7 @@ export default function ManagerDashboard() {
               </Table>
             </div>
 
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="inquiries" data-workspace-section="inquiries">
               <div className="pm-panel-header">Agent inquiries and applications ({inquiries.length})</div>
               <Table responsive className="pm-table mb-0">
                 <thead><tr><th>Prospect</th><th>Property</th><th>Viewing</th><th>Agent</th><th>Progress</th></tr></thead>
@@ -719,6 +777,37 @@ export default function ManagerDashboard() {
                     </tr>
                   ))}
                   {inquiries.length === 0 && <tr><td colSpan="5" className="pm-empty-row">No agent inquiries for your managed properties.</td></tr>}
+                </tbody>
+              </Table>
+            </div>
+
+            <div className="pm-panel mb-4" data-workspace-section="applications">
+              <div className="pm-panel-header">Rental applications ({applications.length})</div>
+              <Table responsive className="pm-table mb-0">
+                <thead><tr><th>Applicant</th><th>Property / unit</th><th>Employment</th><th>Income</th><th>Move-in</th><th>Status</th><th>Review</th></tr></thead>
+                <tbody>
+                  {applications.map((application) => (
+                    <tr key={application.id}>
+                      <td>{application.applicantName}<div className="small text-muted">{application.applicantEmail}</div></td>
+                      <td>{application.propertyDetails?.title || 'Property'}{application.unitDetails?.unitNumber ? ` · ${application.unitDetails.unitNumber}` : ''}</td>
+                      <td>{application.employment || '—'}</td>
+                      <td>{application.monthlyIncome ? `₱${Number(application.monthlyIncome).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
+                      <td>{application.moveInDate || '—'}</td>
+                      <td><StatusPill status={application.status} />{application.reviewNotes && <div className="small text-muted mt-1">{application.reviewNotes}</div>}</td>
+                      <td>
+                        {application.status === 'Approved' ? (
+                          <Button size="sm" variant="primary" onClick={() => openLeaseForApplication(application)}>Create lease</Button>
+                        ) : ['Submitted', 'Under Review'].includes(application.status) ? (
+                          <div className="d-flex flex-wrap gap-1">
+                            {application.status === 'Submitted' && <Button size="sm" variant="outline-secondary" onClick={() => handleApplicationReview(application, 'Under Review')}>Review</Button>}
+                            <Button size="sm" variant="outline-success" onClick={() => handleApplicationReview(application, 'Approved')}>Approve</Button>
+                            <Button size="sm" variant="outline-danger" onClick={() => handleApplicationReview(application, 'Rejected')}>Reject</Button>
+                          </div>
+                        ) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                  {applications.length === 0 && <tr><td colSpan="7" className="pm-empty-row">No rental applications are awaiting review.</td></tr>}
                 </tbody>
               </Table>
             </div>
@@ -783,18 +872,7 @@ export default function ManagerDashboard() {
                   </Form.Select>
                 </Col>
 
-                {['Apartment', 'Condo'].includes(propertyFormData.propertyType) ? (
-                  <Col md={6}>
-                    <Form.Label className="pm-form-label">Number of Units</Form.Label>
-                    <Form.Control
-                      className="pm-input"
-                      type="number"
-                      value={propertyFormData.unitCount}
-                      onChange={(e) => setPropertyFormData({ ...propertyFormData, unitCount: e.target.value })}
-                      required
-                    />
-                  </Col>
-                ) : (
+                {!['Apartment', 'Condo'].includes(propertyFormData.propertyType) && (
                   <Col md={6}>
                     <Form.Label className="pm-form-label">Monthly Rate (₱)</Form.Label>
                     <Form.Control
@@ -810,14 +888,18 @@ export default function ManagerDashboard() {
 
               {['Apartment', 'Condo'].includes(propertyFormData.propertyType) && (
                 <Form.Group className="mb-4">
-                  <Form.Label className="pm-form-label">Default Rent per Unit (₱)</Form.Label>
-                  <Form.Control
-                    className="pm-input"
-                    type="number"
-                    value={propertyFormData.defaultUnitRate}
-                    onChange={(e) => setPropertyFormData({ ...propertyFormData, defaultUnitRate: e.target.value })}
-                    required
-                  />
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <Form.Label className="pm-form-label mb-0">Units and monthly rent</Form.Label>
+                    <Button type="button" size="sm" variant="outline-primary" onClick={() => setPropertyFormData((current) => ({ ...current, units: [...current.units, { unitNumber: '', monthlyRate: '' }] }))}>Add unit</Button>
+                  </div>
+                  {propertyFormData.units.map((unit, index) => (
+                    <Row className="g-2 mb-2" key={`property-unit-${index}`}>
+                      <Col><Form.Control className="pm-input" placeholder="Unit number (e.g. 101)" value={unit.unitNumber} onChange={(e) => setPropertyFormData((current) => ({ ...current, units: current.units.map((item, i) => i === index ? { ...item, unitNumber: e.target.value } : item) }))} required /></Col>
+                      <Col><Form.Control className="pm-input" type="number" min="0" step="0.01" placeholder="Monthly rent (₱)" value={unit.monthlyRate} onChange={(e) => setPropertyFormData((current) => ({ ...current, units: current.units.map((item, i) => i === index ? { ...item, monthlyRate: e.target.value } : item) }))} required /></Col>
+                      <Col xs="auto"><Button type="button" variant="outline-danger" disabled={propertyFormData.units.length === 1} onClick={() => setPropertyFormData((current) => ({ ...current, units: current.units.filter((_, i) => i !== index) }))}>Remove</Button></Col>
+                    </Row>
+                  ))}
+                  <Form.Text className="text-muted">Set a separate rent amount for each unit.</Form.Text>
                 </Form.Group>
               )}
 
@@ -860,18 +942,20 @@ export default function ManagerDashboard() {
         </Modal>
 
         {/* Modal: Unit-Aware New Lease Contract */}
-        <Modal show={showContractModal} onHide={() => setShowContractModal(false)} centered dialogClassName="pm-modal">
+        <Modal show={showContractModal} onHide={() => { setShowContractModal(false); setApplicationForLease(null); }} centered dialogClassName="pm-modal">
           <Modal.Header closeButton>
-            <Modal.Title>Create lease contract</Modal.Title>
+            <Modal.Title>{applicationForLease ? `Create lease · ${applicationForLease.applicantName}` : 'Create lease contract'}</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             <Form onSubmit={handleContractSubmit}>
+              {applicationForLease && <p className="text-muted small">Create the lease for the approved applicant. The tenant account email must match {applicationForLease.applicantEmail || 'the applicant email'}.</p>}
               <Form.Group className="mb-3">
                 <Form.Label className="pm-form-label">Select property</Form.Label>
                 <Form.Select
                   className="pm-input"
                   value={contractData.property}
                   onChange={(e) => handlePropertySelect(e.target.value)}
+                  disabled={Boolean(applicationForLease)}
                   required
                 >
                   <option value="">-- Choose property --</option>
@@ -898,6 +982,7 @@ export default function ManagerDashboard() {
                         className="pm-input"
                         value={contractData.unitId}
                         onChange={(e) => handleUnitSelect(e.target.value)}
+                        disabled={Boolean(applicationForLease)}
                         required
                       >
                         <option value="">-- Choose available unit --</option>
@@ -970,6 +1055,7 @@ export default function ManagerDashboard() {
                   type="number"
                   value={contractData.rentAmount}
                   onChange={(e) => setContractData({ ...contractData, rentAmount: e.target.value })}
+                  disabled={Boolean(applicationForLease)}
                   required
                 />
               </Form.Group>

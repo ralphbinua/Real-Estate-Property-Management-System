@@ -1,6 +1,11 @@
 import React, { useMemo } from 'react';
 import { Row, Col, Card, ProgressBar, Table, Badge } from 'react-bootstrap';
 
+const formatCurrency = (value) => `₱${Number(value || 0).toLocaleString('en-PH', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})}`;
+
 export default function ManagerReports({ properties = [], invoices = [] }) {
   const reportData = useMemo(() => {
     let totalRooms = 0;
@@ -66,10 +71,10 @@ export default function ManagerReports({ properties = [], invoices = [] }) {
           <Card className="p-3 border-0 bg-light shadow-sm">
             <span className="text-muted small fw-semibold">Collected Rent (Paid)</span>
             <h3 className="fw-bold text-success mt-1">
-              ₱{reportData.collectedRevenue.toLocaleString()}
+              {formatCurrency(reportData.collectedRevenue)}
             </h3>
             <span className="text-muted text-xs mt-2 d-block" style={{ fontSize: '12px' }}>
-              Target Expected: ₱{reportData.expectedRevenue.toLocaleString()}
+              Target Expected: {formatCurrency(reportData.expectedRevenue)}
             </span>
           </Card>
         </Col>
@@ -78,7 +83,7 @@ export default function ManagerReports({ properties = [], invoices = [] }) {
           <Card className="p-3 border-0 bg-light shadow-sm">
             <span className="text-muted small fw-semibold">Pending / Overdue Balance</span>
             <h3 className="fw-bold text-danger mt-1">
-              ₱{reportData.pendingRevenue.toLocaleString()}
+              {formatCurrency(reportData.pendingRevenue)}
             </h3>
             <span className="text-muted text-xs mt-2 d-block" style={{ fontSize: '12px' }}>
               Uncollected monthly ledgers
@@ -126,7 +131,7 @@ export default function ManagerReports({ properties = [], invoices = [] }) {
                     </div>
                   </td>
                   <td className="pm-cell-strong text-success">
-                    ₱{yieldAmt.toLocaleString()}/mo
+                    {formatCurrency(yieldAmt)}/mo
                   </td>
                 </tr>
               );

@@ -27,9 +27,11 @@ function StatusPill({ status }) {
 
 export default function OwnerDashboard() {
   const { user } = useAuth();
+  const [activeSection, setActiveSection] = useState('overview');
   const [portfolio, setPortfolio] = useState({ properties: [], contracts: [], maintenanceRequests: [], invoices: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [activePortfolioTab, setActivePortfolioTab] = useState('properties');
 
   const loadOwnerData = async () => {
     setLoading(true);
@@ -51,6 +53,17 @@ export default function OwnerDashboard() {
 
   useEffect(() => {
     loadOwnerData();
+  }, []);
+
+  useEffect(() => {
+    const handleWorkspaceNavigation = (event) => {
+      setActiveSection(event.detail);
+      const tab = event.detail === 'billing' ? 'payments' : event.detail;
+      if (event.detail === 'portfolio') setActivePortfolioTab('properties');
+      if (['properties', 'contracts', 'maintenance', 'payments'].includes(tab)) setActivePortfolioTab(tab);
+    };
+    window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
+    return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
   }, []);
 
   // Advanced Metrics Logic (Explicit Numeric Conversion)
@@ -95,10 +108,10 @@ export default function OwnerDashboard() {
   }, [portfolio]);
 
   return (
-    <div className="pm-owner">
+    <div className="pm-owner" data-active-section={activeSection}>
       <Container>
         {/* Header */}
-        <div className="pm-header">
+        <div className="pm-header" id="overview">
           <div>
             <h1 className="pm-title">Owner Portfolio Overview</h1>
             <p className="pm-subtitle">
@@ -153,10 +166,10 @@ export default function OwnerDashboard() {
             </div>
 
             {/* Tabbed Portfolio Views */}
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="portfolio" data-workspace-section="portfolio contracts maintenance billing">
               <div className="pm-panel-header">Portfolio Details</div>
               <div style={{ padding: '20px' }}>
-                <Tabs defaultActiveKey="properties" id="owner-tabs" className="mb-3">
+                <Tabs activeKey={activePortfolioTab} onSelect={(key) => setActivePortfolioTab(key || 'properties')} id="owner-tabs" className="mb-3">
                   
                   {/* Tab 1: Owned Properties */}
                   <Tab eventKey="properties" title={`Assets (${portfolio.properties.length})`}>

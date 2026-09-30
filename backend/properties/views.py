@@ -1,10 +1,13 @@
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from .models import Property, Unit, PropertyInquiry
-from .serializers import PropertySerializer, UnitManagementSerializer, PropertyInquirySerializer
+from .models import Property, Unit, PropertyInquiry, RentalApplication
+from .serializers import PropertySerializer, UnitManagementSerializer, PropertyInquirySerializer, RentalApplicationSerializer
 from contracts.models import Contract
 from contracts.serializers import ContractSerializer
 from maintenance.models import MaintenanceRequest
@@ -194,6 +197,84 @@ class IsAdminOrPropertyManagerOrAssignedAgent(IsAdminOrPropertyManagerOrAgent):
             return True
         return obj.agent_id == user.id and obj.property.assigned_agents.filter(pk=user.pk).exists()
 
+
+class RentalApplicationViewSet(viewsets.ModelViewSet):
+    serializer_class = RentalApplicationSerializer
+    http_method_names = ['get', 'post', 'patch', 'head', 'options']
+
+    def get_queryset(self):
+        user = self.request.user
+        applications = RentalApplication.objects.select_related(
+            'inquiry', 'inquiry__property', 'inquiry__unit', 'inquiry__agent', 'created_by', 'reviewed_by'
+        ).prefetch_related('inquiry__property__assigned_agents')
+        if user.role == 'Admin':
+            return applications.order_by('-created_at')
+        if user.role == 'Property Manager':
+            return applications.filter(inquiry__property__manager=user).order_by('-created_at')
+        if user.role == 'Agent':
+            return applications.filter(inquiry__agent=user, created_by=user).order_by('-created_at')
+        return applications.none()
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [IsAdminOrPropertyManagerOrAgent()]
+        if self.action in ('partial_update', 'update', 'create_lease'):
+            return [IsAdminOrPropertyManager()]
+        return [permissions.IsAuthenticated()]
+
+    def perform_create(self, serializer):
+        application = serializer.save(created_by=self.request.user, status='Submitted')
+        inquiry = application.inquiry
+        inquiry.status = 'Application In Progress'
+        inquiry.prospect_email = application.applicant_email
+        inquiry.save(update_fields=['status', 'prospect_email'])
+        record_activity(self.request.user, 'CREATE', 'Rental application', application.pk, f'Submitted an application for {inquiry.prospect_name} at {inquiry.property.title}.')
+
+    def perform_update(self, serializer):
+        application = serializer.save(reviewed_by=self.request.user, reviewed_at=timezone.now())
+        record_activity(self.request.user, 'REVIEW', 'Rental application', application.pk, f'Changed application status to {application.status}.')
+
+    @action(detail=True, methods=['post'], url_path='create-lease')
+    @transaction.atomic
+    def create_lease(self, request, pk=None):
+        application = self.get_object()
+        if application.status != 'Approved':
+            raise ValidationError({'status': 'Only approved applications can be converted into a lease.'})
+
+        inquiry = application.inquiry
+        unit = inquiry.unit
+        rent_amount = unit.monthly_rate if unit else inquiry.property.price
+        lease_payload = {
+            'property': inquiry.property_id,
+            'unit': unit.pk if unit else None,
+            'tenant': request.data.get('tenant'),
+            'startDate': request.data.get('startDate') or application.move_in_date,
+            'endDate': request.data.get('endDate'),
+            'rentAmount': rent_amount,
+            'depositAmount': request.data.get('depositAmount', 0),
+            'status': 'Active',
+        }
+        lease_serializer = ContractSerializer(data=lease_payload, context={'request': request})
+        lease_serializer.is_valid(raise_exception=True)
+        tenant = lease_serializer.validated_data['tenant']
+        if tenant.email.strip().casefold() != application.applicant_email.strip().casefold():
+            raise ValidationError({'tenant': 'Select or create a tenant account using the applicant email address.'})
+        contract = lease_serializer.save()
+
+        application.status = 'Converted'
+        application.reviewed_by = request.user
+        application.reviewed_at = timezone.now()
+        application.save(update_fields=['status', 'reviewed_by', 'reviewed_at'])
+        inquiry.status = 'Converted'
+        inquiry.save(update_fields=['status'])
+        record_activity(request.user, 'CREATE', 'Contract', contract.pk, f'Created a lease from rental application {application.pk}.')
+        record_activity(request.user, 'CONVERT', 'Rental application', application.pk, f'Converted application to lease {contract.pk}.')
+
+        return Response({
+            'application': RentalApplicationSerializer(application, context={'request': request}).data,
+            'contract': ContractSerializer(contract, context={'request': request}).data,
+        }, status=status.HTTP_201_CREATED)
+
 class OwnerPortfolioView(APIView):
     permission_classes = [IsAdminOrOwner]
 
@@ -216,4 +297,4 @@ class OwnerPortfolioView(APIView):
             "contracts": ContractSerializer(contracts, many=True).data,
             "maintenanceRequests": MaintenanceRequestSerializer(maintenance, many=True).data,
             "invoices": InvoiceSerializer(invoices, many=True).data,
-        })
+        })

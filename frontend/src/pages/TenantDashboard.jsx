@@ -28,6 +28,7 @@ function TicketStatusPill({ status }) {
 }
 
 export default function TenantDashboard() {
+  const [activeSection, setActiveSection] = useState('overview');
   const { user, updateUser } = useAuth();
   const [requests, setRequests] = useState([]);
   const [contracts, setContracts] = useState([]);
@@ -39,6 +40,12 @@ export default function TenantDashboard() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileData, setProfileData] = useState({ first_name: '', last_name: '', email: '' });
   const [supportEmail, setSupportEmail] = useState('');
+
+  useEffect(() => {
+    const handleWorkspaceNavigation = (event) => setActiveSection(event.detail);
+    window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
+    return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
+  }, []);
 
   const [formData, setFormData] = useState({
     property: '',
@@ -135,10 +142,10 @@ export default function TenantDashboard() {
   const resolvedTickets = requests.filter((r) => r.status?.toLowerCase() === 'resolved').length;
 
   return (
-    <div className="pm-tenant">
+    <div className="pm-tenant" data-active-section={activeSection}>
       <Container>
         {/* Header */}
-        <div className="pm-header">
+        <div className="pm-header" id="overview">
           <div>
             <h1 className="pm-title">Welcome back, {user?.name || 'Tenant'}</h1>
             <p className="pm-subtitle">
@@ -179,7 +186,7 @@ export default function TenantDashboard() {
         ) : (
           <>
             {/* Metrics Strip */}
-            <div className="pm-metrics">
+            <div className="pm-metrics" data-workspace-section="overview">
               <div className="pm-metric">
                 <span className="pm-metric-label">Total tickets</span>
                 <span className="pm-metric-value">{totalTickets}</span>
@@ -199,14 +206,14 @@ export default function TenantDashboard() {
             </div>
 
             {/* 2. INVOICING & BILLING PANEL ADDED HERE */}
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="payments" data-workspace-section="payments">
               <div className="pm-panel-header">My rent billing statements</div>
               <div style={{ padding: '22px' }}>
                 <TenantInvoiceViewer tenantId={user?._id} />
               </div>
             </div>
 
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="lease" data-workspace-section="lease">
               <div className="pm-panel-header">My property and lease</div>
               <Table responsive className="pm-table mb-0">
                 <thead><tr><th>Property / unit</th><th>Rent</th><th>Lease period</th><th>Status</th><th>Expires</th></tr></thead>
@@ -226,7 +233,7 @@ export default function TenantDashboard() {
             </div>
 
             {/* Maintenance Log Table */}
-            <div className="pm-panel">
+            <div className="pm-panel" id="maintenance" data-workspace-section="maintenance">
               <div className="pm-panel-header">
                 My maintenance & repair log ({requests.length})
               </div>

@@ -42,6 +42,7 @@ function StatusPill({ status }) {
 }
 
 export default function AdminDashboard() {
+  const [activeSection, setActiveSection] = useState('overview');
   const [properties, setProperties] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [userList, setUserList] = useState([]);
@@ -102,6 +103,15 @@ export default function AdminDashboard() {
   useEffect(() => {
     loadData();
     fetchSystemSettings().then((settings) => setLeaseTermMonths(settings.default_lease_term_months || 12)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const handleWorkspaceNavigation = (event) => {
+      setActiveSection(event.detail);
+      if (event.detail === 'users') setShowUserManagement(true);
+    };
+    window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
+    return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
   }, []);
 
   const handleDeleteProperty = async (id) => {
@@ -263,22 +273,29 @@ export default function AdminDashboard() {
   const metrics = useMemo(() => {
     const activeContractsList = contracts.filter((c) => c.status?.toLowerCase() === 'active');
     let totalOccupiedUnits = 0;
+    let totalUnits = 0;
 
     properties.forEach((p) => {
       if (Array.isArray(p.units) && p.units.length > 0) {
+        totalUnits += p.units.length;
         totalOccupiedUnits += p.units.filter((u) => u.status === 'Occupied').length;
-      } else if (['occupied', 'rented'].includes(p.status?.toLowerCase())) {
-        totalOccupiedUnits += 1;
+      } else {
+        totalUnits += 1;
+        if (['occupied', 'rented'].includes(p.status?.toLowerCase())) totalOccupiedUnits += 1;
       }
     });
 
     return {
       totalProperties: properties.length,
       occupiedCount: totalOccupiedUnits,
+      totalUnits,
+      vacantUnits: Math.max(0, totalUnits - totalOccupiedUnits),
+      occupancyRate: totalUnits ? Math.round((totalOccupiedUnits / totalUnits) * 100) : 0,
       activeContracts: activeContractsList.length,
       totalRevenue: activeContractsList.reduce((acc, curr) => acc + Number(curr.rentAmount || 0), 0),
+      pendingInvoices: invoices.filter((invoice) => ['pending', 'overdue'].includes(invoice.status?.toLowerCase())).length,
     };
-  }, [properties, contracts]);
+  }, [properties, contracts, invoices]);
 
   const selectedPropertyObj = useMemo(
     () => properties.find((p) => (p._id || p.id)?.toString() === selectedPropertyId?.toString()),
@@ -305,10 +322,10 @@ export default function AdminDashboard() {
   );
 
   return (
-    <div className="pm-admin">
+    <div className="pm-admin" data-active-section={activeSection}>
       <Container>
         {/* Header */}
-        <div className="pm-header">
+        <div className="pm-header" id="overview">
           <div>
             <h1 className="pm-title">Admin Portal</h1>
             <p className="pm-subtitle">
@@ -316,27 +333,16 @@ export default function AdminDashboard() {
             </p>
           </div>
           <div className="pm-header-actions">
-            <Button
-              variant="light"
-              className="pm-btn-ghost"
-              onClick={() => setShowUserManagement(!showUserManagement)}
-            >
-              {showUserManagement ? 'Hide users' : 'Manage users'}
-            </Button>
-            <Button
-              variant="light"
-              className="pm-btn-outline"
-              onClick={() => setShowContractModal(true)}
-            >
-              New lease
-            </Button>
-            <Button
-              variant="light"
-              className="pm-btn-primary"
-              onClick={() => setShowPropertyModal(true)}
-            >
-              Add property
-            </Button>
+            {(activeSection === 'overview' || activeSection === 'contracts') && (
+              <Button variant="light" className="pm-btn-outline" onClick={() => setShowContractModal(true)}>
+                New lease
+              </Button>
+            )}
+            {(activeSection === 'overview' || activeSection === 'properties') && (
+              <Button variant="light" className="pm-btn-primary" onClick={() => setShowPropertyModal(true)}>
+                Add property
+              </Button>
+            )}
           </div>
         </div>
 
@@ -361,7 +367,7 @@ export default function AdminDashboard() {
         ) : (
           <>
             {/* Metrics Strip */}
-            <div className="pm-metrics">
+            <div className="pm-metrics" data-workspace-section="overview">
               <div className="pm-metric">
                 <span className="pm-metric-label">Total properties</span>
                 <span className="pm-metric-value">{metrics.totalProperties}</span>
@@ -382,9 +388,35 @@ export default function AdminDashboard() {
               </div>
             </div>
 
+            <section className="pm-panel pm-admin-overview-summary mb-4" data-workspace-section="overview" aria-label="Admin dashboard summary">
+              <div className="pm-panel-header">Portfolio and operations summary</div>
+              <div className="pm-admin-summary-grid">
+                <div className="pm-admin-summary-item">
+                  <span>Portfolio occupancy</span>
+                  <strong>{metrics.occupancyRate}%</strong>
+                  <small>{metrics.occupiedCount} of {metrics.totalUnits} units occupied</small>
+                </div>
+                <div className="pm-admin-summary-item">
+                  <span>Vacant units</span>
+                  <strong>{metrics.vacantUnits}</strong>
+                  <small>Across {metrics.totalProperties} properties</small>
+                </div>
+                <div className="pm-admin-summary-item">
+                  <span>Active accounts</span>
+                  <strong>{userList.filter((account) => account.isActive).length}</strong>
+                  <small>{tenantUsers.length} tenants · {ownerUsers.length} owners · {managerUsers.length} managers · {agentUsers.length} agents</small>
+                </div>
+                <div className="pm-admin-summary-item">
+                  <span>Invoices needing attention</span>
+                  <strong>{metrics.pendingInvoices}</strong>
+                  <small>Pending or overdue</small>
+                </div>
+              </div>
+            </section>
+
             {/* User Management Panel */}
             {showUserManagement && (
-              <div className="pm-panel">
+              <div className="pm-panel" id="users" data-workspace-section="users">
                 <div className="pm-panel-header">User accounts</div>
                 <div style={{ padding: '22px' }}>
                   <UserManagement />
@@ -393,7 +425,7 @@ export default function AdminDashboard() {
             )}
 
             {/* Toolbar */}
-            <div className="pm-filterbar">
+            <div className="pm-filterbar" data-workspace-section="properties">
               <Form.Control
                 className="pm-input pm-search"
                 placeholder="Search by title or location…"
@@ -423,7 +455,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* Property Directory */}
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="properties" data-workspace-section="properties">
               <div className="pm-panel-header">
                 Property directory ({filteredProperties.length})
               </div>
@@ -458,7 +490,7 @@ export default function AdminDashboard() {
                             <StatusPill status={occupiedCount > 0 ? `${occupiedCount}/${totalUnits} Occupied` : prop.status || 'Available'} />
                           </td>
                           <td className="text-center">
-                            {prop.units && prop.units.length > 0 && (
+                            {(['Apartment', 'Condo'].includes(prop.propertyType) || prop.units?.length > 0) && (
                               <Button
                                 variant="light"
                                 size="sm"
@@ -467,7 +499,7 @@ export default function AdminDashboard() {
                                   setSelectedPropertyId(selectedPropertyId === propId ? null : propId)
                                 }
                               >
-                                {selectedPropertyId === propId ? 'Hide Units' : `View Units (${prop.units.length})`}
+                                {selectedPropertyId === propId ? 'Hide Units' : `Manage Units (${prop.units?.length || 0})`}
                               </Button>
                             )}
                             <Button
@@ -500,10 +532,10 @@ export default function AdminDashboard() {
             </div>
 
             {/* Interactive Room Matrix Drawer */}
-            {selectedPropertyObj && selectedPropertyObj.units && (
-              <div className="pm-panel mb-4" style={{ backgroundColor: '#fcfcfd' }}>
+            {selectedPropertyObj && Array.isArray(selectedPropertyObj.units) && (
+              <div className="pm-panel mb-4" data-workspace-section="properties" style={{ backgroundColor: '#fcfcfd' }}>
                 <div className="pm-panel-header d-flex justify-content-between align-items-center">
-                  <span>Unit breakdown — {selectedPropertyObj.title} ({selectedPropertyObj.units.length} Rooms)</span>
+                  <span>Unit breakdown — {selectedPropertyObj.title} ({selectedPropertyObj.units.length} Units)</span>
                   <Button size="sm" variant="primary" onClick={() => openUnitEditor(selectedPropertyObj)}>Add unit</Button>
                   <Button
                     variant="link"
@@ -515,7 +547,7 @@ export default function AdminDashboard() {
                   </Button>
                 </div>
                 <div style={{ padding: '22px' }}>
-                  <Row className="g-3">
+                  {selectedPropertyObj.units.length === 0 ? <div className="text-muted py-4 text-center">No units yet. Add the first unit to start managing unit availability and rent.</div> : <Row className="g-3">
                     {selectedPropertyObj.units.map((unit) => {
                       const unitId = unit._id || unit.id;
                       const isOccupied = unit.status === 'Occupied';
@@ -545,34 +577,34 @@ export default function AdminDashboard() {
                         </Col>
                       );
                     })}
-                  </Row>
+                  </Row>}
                 </div>
               </div>
             )}
 
             {/* Active Contracts */}
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="reports" data-workspace-section="reports">
               <div className="pm-panel-header">System-wide property and financial reports</div>
               <div style={{ padding: '22px' }}><ManagerReports properties={properties} invoices={invoices} /></div>
             </div>
 
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="billing" data-workspace-section="billing">
               <div className="pm-panel-header">System-wide rent payments</div>
               <div style={{ padding: '22px' }}><ManagerInvoiceTracker /></div>
             </div>
 
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="activity" data-workspace-section="activity">
               <div className="pm-panel-header">System activity</div>
               <div style={{ padding: '22px' }}><AdminActivityLog /></div>
             </div>
 
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="settings" data-workspace-section="settings">
               <div className="pm-panel-header">System settings</div>
               <div style={{ padding: '22px', maxWidth: 640 }}><AdminSystemSettings /></div>
             </div>
 
             {/* Active Contracts */}
-            <div className="pm-panel mb-4">
+            <div className="pm-panel mb-4" id="contracts" data-workspace-section="contracts">
               <div className="pm-panel-header">Active lease contracts</div>
               <Table responsive className="pm-table mb-0">
                 <thead>
@@ -622,7 +654,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* Maintenance Manager */}
-            <div className="pm-panel">
+            <div className="pm-panel" id="maintenance" data-workspace-section="maintenance">
               <div className="pm-panel-header">Maintenance queue</div>
               <div style={{ padding: '22px' }}>
                 <AdminMaintenanceManager />
