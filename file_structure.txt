@@ -1,6 +1,7 @@
 real-estate-management/
 ├── .gitignore
 ├── backend/                             # Django Backend Project
+│   ├── .env                             # Supabase PostgreSQL database configuration
 │   ├── manage.py                        # Django management script
 │   ├── core/                            # Main Django configuration app
 │   │   ├── __init__.py

@@ -39,6 +39,23 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'propertyDetails', 'contractDetails'
         ]
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        if request and getattr(request.user, 'role', None) != User.Role.ADMIN:
+            for field_name in ('tenant', 'property', 'contract'):
+                self.fields[field_name].read_only = True
+
+    def validate(self, attrs):
+        contract = attrs.get('contract', getattr(self.instance, 'contract', None))
+        tenant = attrs.get('tenant', getattr(self.instance, 'tenant', None))
+        property_obj = attrs.get('property', getattr(self.instance, 'property', None))
+        if contract and tenant and contract.tenant_id != tenant.id:
+            raise serializers.ValidationError({'tenant': 'Invoice tenant must match its lease contract.'})
+        if contract and property_obj and contract.property_id != property_obj.id:
+            raise serializers.ValidationError({'property': 'Invoice property must match its lease contract.'})
+        return attrs
+
     def create(self, validated_data):
         if 'total_due' not in validated_data:
             amount = validated_data.get('amount', 0)

@@ -5,6 +5,16 @@ export const fetchUsers = async () => {
   return response.data;
 };
 
+export const fetchAssignableTenants = async () => {
+  const response = await api.get('/users/tenants/');
+  return response.data;
+};
+
+export const fetchSystemActivity = async () => {
+  const response = await api.get('/users/activity/');
+  return response.data;
+};
+
 export const createUserByAdmin = async (userData) => {
   const response = await api.post('/users/', userData);
   return response.data;

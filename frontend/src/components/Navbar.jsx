@@ -1,25 +1,41 @@
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Navbar, Nav, Container, Button } from 'react-bootstrap';
+import { useAuth } from '../context/AuthContext';
+import { fetchSystemSettings } from '../services/systemSettingsService';
 
 export default function AppNavbar() {
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem('user'));
+  const { user, logout } = useAuth();
+  const [systemName, setSystemName] = useState('PropManage');
+
+  useEffect(() => {
+    if (!user) return;
+    const loadSettings = () => fetchSystemSettings().then((settings) => setSystemName(settings.system_name || 'PropManage')).catch(() => {});
+    loadSettings();
+    window.addEventListener('system-settings-updated', loadSettings);
+    return () => window.removeEventListener('system-settings-updated', loadSettings);
+  }, [user]);
 
   // Get home route dynamically based on active session role
   const getHomeRoute = () => {
     if (!user) return '/login';
-    switch (user.role) {
-      case 'Admin':
+    switch (user.role?.toLowerCase()) {
+      case 'admin':
         return '/admin';
-      case 'Property Manager':
+      case 'property manager':
         return '/manager';
+      case 'agent':
+        return '/agent';
+      case 'owner':
+        return '/owner';
       default:
         return '/tenant';
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('user');
+    logout();
     navigate('/login');
   };
 
@@ -28,7 +44,7 @@ export default function AppNavbar() {
       <Container>
         {/* Brand logo routes to current role dashboard */}
         <Navbar.Brand as={Link} to={getHomeRoute()} className="fw-bold fs-4">
-          🏢 PropManage
+          🏢 {systemName}
         </Navbar.Brand>
 
         <Navbar.Toggle aria-controls="basic-navbar-nav" />

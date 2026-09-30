@@ -1,9 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Container, Table, Form, Spinner, Button, Row, Col, Badge, Modal } from 'react-bootstrap';
-import { fetchProperties, createProperty } from '../services/propertyService';
+import { fetchProperties, createProperty, updateProperty, deleteProperty } from '../services/propertyService';
 import { fetchContracts, createContract, terminateContract } from '../services/contractService';
-import { fetchUsers } from '../services/userService';
+import { fetchAssignableTenants } from '../services/userService';
 import { fetchInvoices } from '../services/invoiceService';
+import { createUnit, deleteUnit, updateUnit } from '../services/unitService';
+import { fetchSystemSettings } from '../services/systemSettingsService';
+import { addMonthsToDate } from '../utils/dateUtils';
+import { fetchInquiries, updateInquiry } from '../services/inquiryService';
 import AdminMaintenanceManager from '../components/AdminMaintenanceManager';
 import ManagerInvoiceTracker from '../components/ManagerInvoiceTracker';
 import ManagerReports from '../components/ManagerReports';
@@ -38,6 +42,7 @@ export default function ManagerDashboard() {
   const [contracts, setContracts] = useState([]);
   const [userList, setUserList] = useState([]);
   const [invoices, setInvoices] = useState([]);
+  const [inquiries, setInquiries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -64,6 +69,11 @@ export default function ManagerDashboard() {
 
   // New Property Modal State
   const [showPropertyModal, setShowPropertyModal] = useState(false);
+  const [showPropertyEditModal, setShowPropertyEditModal] = useState(false);
+  const [editingProperty, setEditingProperty] = useState(null);
+  const [showUnitModal, setShowUnitModal] = useState(false);
+  const [unitData, setUnitData] = useState({ id: null, property: '', unitNumber: '', monthlyRate: '', status: 'Available' });
+  const [leaseTermMonths, setLeaseTermMonths] = useState(12);
   const [propertyFormData, setPropertyFormData] = useState({
     title: '',
     address: '',
@@ -80,27 +90,32 @@ export default function ManagerDashboard() {
 
   const loadManagerData = async () => {
     setLoading(true);
-    try {
-      const [propData, contractList, usersData, invoiceData] = await Promise.all([
-        fetchProperties(),
-        fetchContracts(),
-        fetchUsers(),
-        fetchInvoices(),
-      ]);
-      setProperties(Array.isArray(propData) ? propData : []);
-      setContracts(Array.isArray(contractList) ? contractList : []);
-      setUserList(usersData.filter((u) => u.role?.toLowerCase() === 'tenant'));
-      setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
-      setError('');
-    } catch (err) {
-      setError('Failed to fetch manager dashboard records.');
-    } finally {
-      setLoading(false);
-    }
+    const results = await Promise.allSettled([
+      fetchProperties(),
+      fetchContracts(),
+      fetchAssignableTenants(),
+      fetchInvoices(),
+      fetchInquiries(),
+    ]);
+    const [propResult, contractResult, tenantResult, invoiceResult, inquiryResult] = results;
+    if (propResult.status === 'fulfilled') setProperties(Array.isArray(propResult.value) ? propResult.value : []);
+    if (contractResult.status === 'fulfilled') setContracts(Array.isArray(contractResult.value) ? contractResult.value : []);
+    if (tenantResult.status === 'fulfilled') setUserList(Array.isArray(tenantResult.value) ? tenantResult.value : []);
+    if (invoiceResult.status === 'fulfilled') setInvoices(Array.isArray(invoiceResult.value) ? invoiceResult.value : []);
+    if (inquiryResult.status === 'fulfilled') setInquiries(Array.isArray(inquiryResult.value) ? inquiryResult.value : []);
+
+    const failedSections = results.flatMap((result, index) => result.status === 'rejected'
+      ? [['properties', 'leases', 'tenant list', 'invoices', 'inquiries'][index]]
+      : []);
+    setError(failedSections.length
+      ? `Could not load: ${failedSections.join(', ')}. Other manager records are still available.`
+      : '');
+    setLoading(false);
   };
 
   useEffect(() => {
     loadManagerData();
+    fetchSystemSettings().then((settings) => setLeaseTermMonths(settings.default_lease_term_months || 12)).catch(() => {});
   }, []);
 
   const handlePropertySelect = (propertyId) => {
@@ -168,10 +183,11 @@ export default function ManagerDashboard() {
 
     const payload = {
       ...contractData,
-      unitId: contractData.unitId || null,
-      unitNumber: contractData.unitNumber || 'Main Unit',
+      unit: contractData.unitId ? Number(contractData.unitId) : null,
       rentAmount: Number(contractData.rentAmount),
     };
+    delete payload.unitId;
+    delete payload.unitNumber;
 
     try {
       await createContract(payload);
@@ -181,6 +197,58 @@ export default function ManagerDashboard() {
       loadManagerData();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to create lease contract.');
+    }
+  };
+
+  const openUnitEditor = (property, unit = null) => {
+    setUnitData({
+      id: unit?._id || null,
+      property: property._id || property.id,
+      unitNumber: unit?.unitNumber || '',
+      monthlyRate: unit?.monthlyRate || '',
+      status: unit?.status || 'Available',
+    });
+    setShowUnitModal(true);
+  };
+
+  const handleUnitSave = async (e) => {
+    e.preventDefault();
+    setError('');
+    try {
+      const payload = {
+        property: Number(unitData.property),
+        unitNumber: unitData.unitNumber,
+        monthlyRate: Number(unitData.monthlyRate),
+        status: unitData.status,
+      };
+      if (unitData.id) await updateUnit(unitData.id, payload);
+      else await createUnit(payload);
+      setShowUnitModal(false);
+      setSuccess(unitData.id ? 'Unit updated.' : 'Unit added.');
+      await loadManagerData();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to save unit.');
+    }
+  };
+
+  const handleUnitDelete = async () => {
+    if (!unitData.id || !window.confirm('Remove this unit? Units with an active lease cannot be removed.')) return;
+    try {
+      await deleteUnit(unitData.id);
+      setShowUnitModal(false);
+      setSuccess('Unit removed.');
+      await loadManagerData();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to remove unit.');
+    }
+  };
+
+  const handleInquiryStatusChange = async (inquiry, status) => {
+    try {
+      const updated = await updateInquiry(inquiry.id, { status });
+      setInquiries((items) => items.map((item) => item.id === updated.id ? updated : item));
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to update prospect inquiry.');
     }
   };
 
@@ -216,6 +284,52 @@ export default function ManagerDashboard() {
       loadManagerData();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to add property listing.');
+    }
+  };
+
+  const openPropertyEditor = (property) => {
+    setEditingProperty({
+      id: property._id || property.id,
+      title: property.title,
+      address: property.address,
+      propertyType: property.propertyType,
+      status: property.status,
+      price: property.price || property.monthlyRate || 0,
+    });
+    setShowPropertyEditModal(true);
+  };
+
+  const handlePropertyEdit = async (e) => {
+    e.preventDefault();
+    try {
+      await updateProperty(editingProperty.id, {
+        title: editingProperty.title,
+        address: editingProperty.address,
+        propertyType: editingProperty.propertyType,
+        status: editingProperty.status,
+        price: Number(editingProperty.price),
+      });
+      setShowPropertyEditModal(false);
+      setSuccess('Property details updated.');
+      await loadManagerData();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to update property.');
+    }
+  };
+
+  const handlePropertyArchive = async (property) => {
+    const id = property._id || property.id;
+    if (contracts.some((contract) => Number(contract.property) === Number(id) && ['Active', 'Pending'].includes(contract.status))) {
+      setError('End or reassign active lease contracts before archiving this property.');
+      return;
+    }
+    if (!window.confirm(`Archive ${property.title}? Its records will be retained.`)) return;
+    try {
+      await deleteProperty(id);
+      setSuccess('Property archived.');
+      await loadManagerData();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to archive property.');
     }
   };
 
@@ -461,8 +575,10 @@ export default function ManagerDashboard() {
                                 {selectedPropertyId === propId ? 'Hide Units' : `View Units (${prop.units.length})`}
                               </Button>
                             ) : (
-                              <span className="text-muted small">No sub-units</span>
+                              <span className="text-muted small me-2">No sub-units</span>
                             )}
+                            <Button size="sm" variant="outline-primary" className="ms-2" onClick={() => openPropertyEditor(prop)}>Edit</Button>
+                            <Button size="sm" variant="outline-danger" className="ms-2" onClick={() => handlePropertyArchive(prop)}>Archive</Button>
                           </td>
                         </tr>
                       );
@@ -481,6 +597,7 @@ export default function ManagerDashboard() {
               <div className="pm-panel mb-4" style={{ backgroundColor: '#fcfcfd' }}>
                 <div className="pm-panel-header d-flex justify-content-between align-items-center">
                   <span>Unit breakdown — {selectedPropertyObj.title} ({selectedPropertyObj.units.length} Rooms)</span>
+                  <Button size="sm" variant="primary" onClick={() => openUnitEditor(selectedPropertyObj)}>Add unit</Button>
                   <Button
                     variant="link"
                     size="sm"
@@ -519,6 +636,7 @@ export default function ManagerDashboard() {
                             >
                               {unit.status}
                             </Badge>
+                            <Button size="sm" variant="outline-primary" className="mt-2 d-block mx-auto" onClick={(event) => { event.stopPropagation(); openUnitEditor(selectedPropertyObj, unit); }}>Manage</Button>
                             {isAvailable && (
                               <div className="text-muted text-xs mt-2" style={{ fontSize: '11px' }}>
                                 Click to create lease
@@ -585,8 +703,41 @@ export default function ManagerDashboard() {
                 </tbody>
               </Table>
             </div>
+
+            <div className="pm-panel mb-4">
+              <div className="pm-panel-header">Agent inquiries and applications ({inquiries.length})</div>
+              <Table responsive className="pm-table mb-0">
+                <thead><tr><th>Prospect</th><th>Property</th><th>Viewing</th><th>Agent</th><th>Progress</th></tr></thead>
+                <tbody>
+                  {inquiries.map((inquiry) => (
+                    <tr key={inquiry.id}>
+                      <td>{inquiry.prospect_name}<div className="text-muted small">{inquiry.prospect_email}</div></td>
+                      <td>{properties.find((property) => Number(property._id || property.id) === Number(inquiry.property))?.title || inquiry.property}</td>
+                      <td>{inquiry.viewing_at ? new Date(inquiry.viewing_at).toLocaleString() : '—'}</td>
+                      <td>{inquiry.agentDetails?.name || '—'}</td>
+                      <td><Form.Select size="sm" value={inquiry.status} onChange={(e) => handleInquiryStatusChange(inquiry, e.target.value)}>{['New', 'Viewing Scheduled', 'Application In Progress', 'Converted', 'Closed'].map((status) => <option key={status}>{status}</option>)}</Form.Select></td>
+                    </tr>
+                  ))}
+                  {inquiries.length === 0 && <tr><td colSpan="5" className="pm-empty-row">No agent inquiries for your managed properties.</td></tr>}
+                </tbody>
+              </Table>
+            </div>
           </>
         )}
+
+        <Modal show={showPropertyEditModal} onHide={() => setShowPropertyEditModal(false)} centered>
+          <Modal.Header closeButton><Modal.Title>Edit property</Modal.Title></Modal.Header>
+          {editingProperty && <Form onSubmit={handlePropertyEdit}>
+            <Modal.Body>
+              <Form.Group className="mb-3"><Form.Label>Property title</Form.Label><Form.Control value={editingProperty.title} onChange={(e) => setEditingProperty({ ...editingProperty, title: e.target.value })} required /></Form.Group>
+              <Form.Group className="mb-3"><Form.Label>Address</Form.Label><Form.Control value={editingProperty.address} onChange={(e) => setEditingProperty({ ...editingProperty, address: e.target.value })} required /></Form.Group>
+              <Form.Group className="mb-3"><Form.Label>Property type</Form.Label><Form.Select value={editingProperty.propertyType} onChange={(e) => setEditingProperty({ ...editingProperty, propertyType: e.target.value })}>{PROPERTY_TYPES.map((type) => <option key={type}>{type}</option>)}</Form.Select></Form.Group>
+              <Form.Group className="mb-3"><Form.Label>Status</Form.Label><Form.Select value={editingProperty.status} onChange={(e) => setEditingProperty({ ...editingProperty, status: e.target.value })}>{PROPERTY_STATUSES.map((status) => <option key={status}>{status}</option>)}</Form.Select></Form.Group>
+              <Form.Group><Form.Label>Monthly rate (₱)</Form.Label><Form.Control type="number" min="0" step="0.01" value={editingProperty.price} onChange={(e) => setEditingProperty({ ...editingProperty, price: e.target.value })} required /></Form.Group>
+            </Modal.Body>
+            <Modal.Footer><Button variant="light" onClick={() => setShowPropertyEditModal(false)}>Cancel</Button><Button type="submit">Save changes</Button></Modal.Footer>
+          </Form>}
+        </Modal>
 
         {/* Modal: New Property Listing */}
         <Modal show={showPropertyModal} onHide={() => setShowPropertyModal(false)} centered dialogClassName="pm-modal">
@@ -677,6 +828,37 @@ export default function ManagerDashboard() {
           </Modal.Body>
         </Modal>
 
+        <Modal show={showUnitModal} onHide={() => setShowUnitModal(false)} centered>
+          <Modal.Header closeButton>
+            <Modal.Title>{unitData.id ? 'Manage unit' : 'Add unit'}</Modal.Title>
+          </Modal.Header>
+          <Form onSubmit={handleUnitSave}>
+            <Modal.Body>
+              <Form.Group className="mb-3">
+                <Form.Label className="pm-form-label">Unit number</Form.Label>
+                <Form.Control className="pm-input" value={unitData.unitNumber} onChange={(e) => setUnitData({ ...unitData, unitNumber: e.target.value })} required />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Label className="pm-form-label">Monthly rent (₱)</Form.Label>
+                <Form.Control className="pm-input" type="number" min="0" step="0.01" value={unitData.monthlyRate} onChange={(e) => setUnitData({ ...unitData, monthlyRate: e.target.value })} required />
+              </Form.Group>
+              <Form.Group>
+                <Form.Label className="pm-form-label">Availability</Form.Label>
+                <Form.Select className="pm-input" value={unitData.status} onChange={(e) => setUnitData({ ...unitData, status: e.target.value })}>
+                  {['Available', 'Occupied', 'Maintenance', 'Reserved'].map((status) => <option key={status}>{status}</option>)}
+                </Form.Select>
+              </Form.Group>
+            </Modal.Body>
+            <Modal.Footer className="justify-content-between">
+              {unitData.id && <Button variant="outline-danger" onClick={handleUnitDelete}>Remove unit</Button>}
+              <div className="ms-auto d-flex gap-2">
+                <Button variant="light" onClick={() => setShowUnitModal(false)}>Cancel</Button>
+                <Button variant="primary" type="submit">Save unit</Button>
+              </div>
+            </Modal.Footer>
+          </Form>
+        </Modal>
+
         {/* Modal: Unit-Aware New Lease Contract */}
         <Modal show={showContractModal} onHide={() => setShowContractModal(false)} centered dialogClassName="pm-modal">
           <Modal.Header closeButton>
@@ -761,7 +943,11 @@ export default function ManagerDashboard() {
                     className="pm-input"
                     type="date"
                     value={contractData.startDate}
-                    onChange={(e) => setContractData({ ...contractData, startDate: e.target.value })}
+                    onChange={(e) => setContractData({
+                      ...contractData,
+                      startDate: e.target.value,
+                      endDate: addMonthsToDate(e.target.value, leaseTermMonths),
+                    })}
                     required
                   />
                 </Col>

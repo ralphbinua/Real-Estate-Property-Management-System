@@ -27,7 +27,7 @@ function StatusPill({ status }) {
 
 export default function OwnerDashboard() {
   const { user } = useAuth();
-  const [portfolio, setPortfolio] = useState({ properties: [], contracts: [], maintenanceRequests: [] });
+  const [portfolio, setPortfolio] = useState({ properties: [], contracts: [], maintenanceRequests: [], invoices: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -39,6 +39,7 @@ export default function OwnerDashboard() {
         properties: Array.isArray(data.properties) ? data.properties : [],
         contracts: Array.isArray(data.contracts) ? data.contracts : [],
         maintenanceRequests: Array.isArray(data.maintenanceRequests) ? data.maintenanceRequests : [],
+        invoices: Array.isArray(data.invoices) ? data.invoices : [],
       });
       setError('');
     } catch (err) {
@@ -272,7 +273,6 @@ export default function OwnerDashboard() {
                         <tr>
                           <th>Property</th>
                           <th>Issue Description</th>
-                          <th>Priority</th>
                           <th>Status</th>
                         </tr>
                       </thead>
@@ -287,11 +287,6 @@ export default function OwnerDashboard() {
                                 <td className="pm-cell-title">{propTitle}</td>
                                 <td>{m.title || m.issueDescription}</td>
                                 <td>
-                                  <Badge bg={m.priority === 'High' ? 'danger' : 'info'}>
-                                    {m.priority || 'Normal'}
-                                  </Badge>
-                                </td>
-                                <td>
                                   <StatusPill status={m.status} />
                                 </td>
                               </tr>
@@ -299,11 +294,30 @@ export default function OwnerDashboard() {
                           })
                         ) : (
                           <tr>
-                            <td colSpan="4" className="pm-empty-row">
+                            <td colSpan="3" className="pm-empty-row">
                               No maintenance requests on record for your properties.
                             </td>
                           </tr>
                         )}
+                      </tbody>
+                    </Table>
+                  </Tab>
+
+                  <Tab eventKey="payments" title={`Payment Status (${portfolio.invoices.length})`}>
+                    <Table responsive className="pm-table mb-0">
+                      <thead><tr><th>Property</th><th>Tenant</th><th>Amount due</th><th>Due date</th><th>Status</th><th>Paid</th></tr></thead>
+                      <tbody>
+                        {portfolio.invoices.map((invoice) => (
+                          <tr key={invoice._id}>
+                            <td>{invoice.propertyDetails?.title || 'Property'}</td>
+                            <td>{invoice.tenantDetails?.name || 'Tenant'}</td>
+                            <td>₱{Number(invoice.totalDue || invoice.amount || 0).toLocaleString()}</td>
+                            <td>{invoice.dueDate}</td>
+                            <td><StatusPill status={invoice.status} /></td>
+                            <td>{invoice.paidAt ? new Date(invoice.paidAt).toLocaleDateString() : '—'}</td>
+                          </tr>
+                        ))}
+                        {portfolio.invoices.length === 0 && <tr><td colSpan="6" className="text-center text-muted py-4">No payment records found for your properties.</td></tr>}
                       </tbody>
                     </Table>
                   </Tab>

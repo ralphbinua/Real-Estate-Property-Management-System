@@ -4,17 +4,24 @@ Django settings for core project.
 
 from pathlib import Path
 from datetime import timedelta
+import os
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-4@0g8bn)+hy(-p)$#0*xm9)-5eb4ux^y0#v##a3u=a45&hvsy#'
+try:
+    import dotenv
+    dotenv.load_dotenv(BASE_DIR / '.env')
+except ImportError:
+    pass
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY') or ('development-only-insecure-key' if DEBUG else '')
+if not SECRET_KEY:
+    raise ImproperlyConfigured('Set DJANGO_SECRET_KEY when DJANGO_DEBUG is disabled.')
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [host.strip() for host in os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if host.strip()]
 
 # Application definition
 INSTALLED_APPS = [
@@ -53,8 +60,10 @@ MIDDLEWARE = [
 ]
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    origin.strip() for origin in os.getenv(
+        'DJANGO_CORS_ALLOWED_ORIGINS',
+        'http://localhost:5173,http://127.0.0.1:5173',
+    ).split(',') if origin.strip()
 ]
 
 # REST Framework Configuration
@@ -89,13 +98,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'core.wsgi.application'
-
-import os
-try:
-    import dotenv
-    dotenv.load_dotenv(BASE_DIR / '.env')
-except ImportError:
-    pass
 
 # Database
 DATABASES = {
@@ -139,6 +141,12 @@ USE_TZ = True
 
 # Static files
 STATIC_URL = 'static/'
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
 
 # Email
 MAILERS = {

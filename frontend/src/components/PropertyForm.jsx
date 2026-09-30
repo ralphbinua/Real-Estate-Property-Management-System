@@ -11,15 +11,14 @@ export default function PropertyForm({ onPropertyCreated }) {
     price: '',
     propertyType: 'Apartment',
     status: 'Available',
-    bedrooms: 1,
-    bathrooms: 1,
-    squareMeters: '',
     owner: '',
-    manager: ''
+    manager: '',
+    assignedAgents: [],
   });
 
   const [owners, setOwners] = useState([]);
   const [managers, setManagers] = useState([]);
+  const [agents, setAgents] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -28,9 +27,9 @@ export default function PropertyForm({ onPropertyCreated }) {
       try {
         const users = await fetchUsers();
         // Filter users to show only those with the role 'Owner'
-        setOwners(users.filter(u => u.role?.toLowerCase() === 'owner'));
-        // Filter users to show only those with the role 'Manager'
-        setManagers(users.filter(u => u.role?.toLowerCase() === 'manager'));
+        setOwners(users.filter(u => u.isActive && u.role?.toLowerCase() === 'owner'));
+        setManagers(users.filter(u => u.isActive && u.role?.toLowerCase() === 'property manager'));
+        setAgents(users.filter(u => u.isActive && u.role?.toLowerCase() === 'agent'));
       } catch (err) {
         setError('Failed to load owners/managers list.');
       }
@@ -51,11 +50,7 @@ export default function PropertyForm({ onPropertyCreated }) {
       price: Number(formData.price),
       propertyType: formData.propertyType,
       status: formData.status,
-      features: {
-        bedrooms: Number(formData.bedrooms),
-        bathrooms: Number(formData.bathrooms),
-        squareMeters: Number(formData.squareMeters),
-      },
+      assignedAgents: formData.assignedAgents,
     };
 
     // Only append non-empty ObjectId strings
@@ -147,43 +142,6 @@ export default function PropertyForm({ onPropertyCreated }) {
       <Row className="mb-3">
         <Col md={4}>
           <Form.Group>
-            <Form.Label className="fw-bold text-secondary">Bedrooms</Form.Label>
-            <Form.Control 
-              type="number" 
-              min="0"
-              value={formData.bedrooms} 
-              onChange={(e) => setFormData({ ...formData, bedrooms: e.target.value })} 
-            />
-          </Form.Group>
-        </Col>
-        <Col md={4}>
-          <Form.Group>
-            <Form.Label className="fw-bold text-secondary">Bathrooms</Form.Label>
-            <Form.Control 
-              type="number" 
-              min="0"
-              value={formData.bathrooms} 
-              onChange={(e) => setFormData({ ...formData, bathrooms: e.target.value })} 
-            />
-          </Form.Group>
-        </Col>
-        <Col md={4}>
-          <Form.Group>
-            <Form.Label className="fw-bold text-secondary">Square Meters</Form.Label>
-            <Form.Control 
-              type="number" 
-              min="0"
-              placeholder="e.g. 45"
-              value={formData.squareMeters} 
-              onChange={(e) => setFormData({ ...formData, squareMeters: e.target.value })} 
-            />
-          </Form.Group>
-        </Col>
-      </Row>
-
-      <Row className="mb-3">
-        <Col md={4}>
-          <Form.Group>
             <Form.Label className="fw-bold text-secondary">Status</Form.Label>
             <Form.Select 
               value={formData.status} 
@@ -225,6 +183,26 @@ export default function PropertyForm({ onPropertyCreated }) {
                 </option>
               ))}
             </Form.Select>
+          </Form.Group>
+        </Col>
+        <Col md={12} className="mt-3">
+          <Form.Group>
+            <Form.Label className="fw-bold text-secondary">Assign Agents</Form.Label>
+            <Form.Select
+              multiple
+              value={formData.assignedAgents.map(String)}
+              onChange={(e) => setFormData({
+                ...formData,
+                assignedAgents: Array.from(e.target.selectedOptions, (option) => Number(option.value)),
+              })}
+            >
+              {agents.map((agent) => (
+                <option key={agent._id} value={agent._id}>
+                  {agent.name} ({agent.email})
+                </option>
+              ))}
+            </Form.Select>
+            <Form.Text className="text-muted">Hold Ctrl (Windows) or Command (Mac) to select multiple agents.</Form.Text>
           </Form.Group>
         </Col>
       </Row>

@@ -25,7 +25,11 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       return { 
         success: false, 
-        message: error.response?.data?.message || 'Login failed' 
+        message: error.response?.data?.detail
+          || error.response?.data?.message
+          || (error.code === 'ERR_NETWORK'
+            ? 'Cannot reach the server. Start the Django backend and try again.'
+            : 'Login failed. Check your email and password.')
       };
     }
   };
@@ -35,8 +39,16 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('user');
   };
 
+  const updateUser = (updates) => {
+    setUser((current) => {
+      const updated = { ...current, ...updates };
+      localStorage.setItem('user', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Container, Row, Col, Card, Form, Spinner, Button, Badge, Modal } from 'react-bootstrap';
+import { Container, Row, Col, Card, Form, Spinner, Button, Badge, Modal, Table } from 'react-bootstrap';
 import { fetchProperties } from '../services/propertyService';
-import { fetchUsers } from '../services/userService';
+import { createInquiry, fetchInquiries, updateInquiry } from '../services/inquiryService';
 import './AgentDashboard.css';
 
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
@@ -28,7 +28,7 @@ function StatusPill({ status }) {
 
 export default function AgentDashboard() {
   const [properties, setProperties] = useState([]);
-  const [tenantList, setTenantList] = useState([]);
+  const [inquiries, setInquiries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -40,11 +40,13 @@ export default function AgentDashboard() {
   const [showViewingModal, setShowViewingModal] = useState(false);
   const [viewingData, setViewingData] = useState({
     propertyId: '',
-    unitNumber: '',
-    tenantId: '',
-    viewingDate: '',
+    unitId: '',
+    prospectName: '',
+    prospectEmail: '',
+    viewingAt: '',
     notes: '',
   });
+  const [savingInquiry, setSavingInquiry] = useState(false);
 
   // Filter State
   const [search, setSearch] = useState('');
@@ -54,15 +56,15 @@ export default function AgentDashboard() {
   const loadAgentData = async () => {
     setLoading(true);
     try {
-      const [propData, userData] = await Promise.all([
+      const [propData, inquiryData] = await Promise.all([
         fetchProperties(),
-        fetchUsers(),
+        fetchInquiries(),
       ]);
       setProperties(Array.isArray(propData) ? propData : []);
-      setTenantList(Array.isArray(userData) ? userData.filter((u) => u.role?.toLowerCase() === 'tenant') : []);
+      setInquiries(Array.isArray(inquiryData) ? inquiryData : []);
       setError('');
     } catch (err) {
-      setError('Failed to fetch property listings and tenant directory.');
+      setError('Failed to fetch assigned property listings and inquiries.');
     } finally {
       setLoading(false);
     }
@@ -104,21 +106,48 @@ export default function AgentDashboard() {
     [properties, selectedPropertyId]
   );
 
-  const handleOpenViewingModal = (propertyId, unitNumber = 'Main Unit') => {
+  const handleOpenViewingModal = (propertyId, unitId = '') => {
     setViewingData({
       propertyId,
-      unitNumber,
-      tenantId: '',
-      viewingDate: '',
+      unitId,
+      prospectName: '',
+      prospectEmail: '',
+      viewingAt: '',
       notes: '',
     });
     setShowViewingModal(true);
   };
 
-  const handleScheduleSubmit = (e) => {
+  const handleScheduleSubmit = async (e) => {
     e.preventDefault();
-    setSuccess('Viewing inquiry & tenant application schedule logged!');
-    setShowViewingModal(false);
+    setSavingInquiry(true);
+    setError('');
+    try {
+      await createInquiry({
+        property: Number(viewingData.propertyId),
+        unit: viewingData.unitId ? Number(viewingData.unitId) : null,
+        prospect_name: viewingData.prospectName,
+        prospect_email: viewingData.prospectEmail,
+        viewing_at: viewingData.viewingAt ? new Date(viewingData.viewingAt).toISOString() : null,
+        notes: viewingData.notes,
+      });
+      setSuccess('Prospect inquiry saved.');
+      setShowViewingModal(false);
+      setInquiries(await fetchInquiries());
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to save prospect inquiry.');
+    } finally {
+      setSavingInquiry(false);
+    }
+  };
+
+  const handleInquiryStatusChange = async (inquiry, status) => {
+    try {
+      const updated = await updateInquiry(inquiry.id, { status });
+      setInquiries((items) => items.map((item) => item.id === updated.id ? updated : item));
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to update inquiry status.');
+    }
   };
 
   return (
@@ -157,7 +186,7 @@ export default function AgentDashboard() {
             {/* Metrics Strip */}
             <div className="pm-metrics">
               <div className="pm-metric">
-                <span className="pm-metric-label">Total system listings</span>
+                <span className="pm-metric-label">Assigned listings</span>
                 <span className="pm-metric-value">{metrics.totalListings}</span>
               </div>
               <div className="pm-metric">
@@ -226,7 +255,7 @@ export default function AgentDashboard() {
                               borderColor: isOccupied ? '#bbf7d0' : isMaintenance ? '#fde68a' : '#e5e7eb',
                               cursor: isAvailable ? 'pointer' : 'default',
                             }}
-                            onClick={() => isAvailable && handleOpenViewingModal(selectedPropertyObj._id, unit.unitNumber)}
+                            onClick={() => isAvailable && handleOpenViewingModal(selectedPropertyObj._id, unit._id)}
                           >
                             <div className="fw-bold fs-6 text-dark">{unit.unitNumber}</div>
                             <div className="fw-bold text-success my-1">
@@ -296,6 +325,7 @@ export default function AgentDashboard() {
                                   variant="light"
                                   size="sm"
                                   className="pm-btn-primary w-100"
+                                  disabled={prop.status?.toLowerCase() !== 'available'}
                                   onClick={() => handleOpenViewingModal(prop._id)}
                                 >
                                   Book Viewing
@@ -316,6 +346,28 @@ export default function AgentDashboard() {
                 </Col>
               )}
             </Row>
+            <div className="pm-panel mt-2">
+              <div className="pm-panel-header">Prospects and viewing inquiries ({inquiries.length})</div>
+              <Table responsive className="pm-table mb-0">
+                <thead><tr><th>Prospect</th><th>Property</th><th>Viewing</th><th>Notes</th><th>Status</th></tr></thead>
+                <tbody>
+                  {inquiries.map((inquiry) => (
+                    <tr key={inquiry.id}>
+                      <td>{inquiry.prospect_name}<div className="text-muted small">{inquiry.prospect_email}</div></td>
+                      <td>{properties.find((property) => Number(property._id) === Number(inquiry.property))?.title || inquiry.property}</td>
+                      <td>{inquiry.viewing_at ? new Date(inquiry.viewing_at).toLocaleString() : 'Not scheduled'}</td>
+                      <td>{inquiry.notes}</td>
+                      <td>
+                        <Form.Select size="sm" value={inquiry.status} onChange={(e) => handleInquiryStatusChange(inquiry, e.target.value)}>
+                          {['New', 'Viewing Scheduled', 'Application In Progress', 'Converted', 'Closed'].map((status) => <option key={status}>{status}</option>)}
+                        </Form.Select>
+                      </td>
+                    </tr>
+                  ))}
+                  {inquiries.length === 0 && <tr><td colSpan="5" className="pm-empty-row">No inquiries recorded yet.</td></tr>}
+                </tbody>
+              </Table>
+            </div>
           </>
         )}
 
@@ -327,30 +379,26 @@ export default function AgentDashboard() {
           <Modal.Body>
             <Form onSubmit={handleScheduleSubmit}>
               <Form.Group className="mb-3">
-                <Form.Label className="pm-form-label">Select Prospective Tenant</Form.Label>
-                <Form.Select
+                <Form.Label className="pm-form-label">Prospect name</Form.Label>
+                <Form.Control
                   className="pm-input"
-                  value={viewingData.tenantId}
-                  onChange={(e) => setViewingData({ ...viewingData, tenantId: e.target.value })}
+                  value={viewingData.prospectName}
+                  onChange={(e) => setViewingData({ ...viewingData, prospectName: e.target.value })}
                   required
-                >
-                  <option value="">-- Select registered tenant --</option>
-                  {tenantList.map((t) => (
-                    <option key={t._id} value={t._id}>
-                      {t.name} ({t.email})
-                    </option>
-                  ))}
-                </Form.Select>
+                />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Label className="pm-form-label">Prospect email</Form.Label>
+                <Form.Control className="pm-input" type="email" value={viewingData.prospectEmail} onChange={(e) => setViewingData({ ...viewingData, prospectEmail: e.target.value })} />
               </Form.Group>
 
               <Form.Group className="mb-3">
                 <Form.Label className="pm-form-label">Proposed Viewing Date</Form.Label>
                 <Form.Control
                   className="pm-input"
-                  type="date"
-                  value={viewingData.viewingDate}
-                  onChange={(e) => setViewingData({ ...viewingData, viewingDate: e.target.value })}
-                  required
+                  type="datetime-local"
+                  value={viewingData.viewingAt}
+                  onChange={(e) => setViewingData({ ...viewingData, viewingAt: e.target.value })}
                 />
               </Form.Group>
 
@@ -367,7 +415,7 @@ export default function AgentDashboard() {
               </Form.Group>
 
               <Button variant="light" className="pm-btn-primary w-100 py-2" type="submit">
-                Log Schedule Inquiry
+                {savingInquiry ? 'Saving…' : 'Save inquiry'}
               </Button>
             </Form>
           </Modal.Body>

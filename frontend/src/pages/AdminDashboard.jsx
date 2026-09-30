@@ -3,9 +3,17 @@ import { Container, Table, Form, Row, Col, Modal, Spinner, Button, Badge } from 
 import { fetchProperties, updateProperty, deleteProperty } from '../services/propertyService';
 import { fetchContracts, createContract, terminateContract } from '../services/contractService';
 import { fetchUsers } from '../services/userService';
+import { fetchInvoices } from '../services/invoiceService';
 import PropertyForm from '../components/PropertyForm';
 import UserManagement from '../components/UserManagement';
 import AdminMaintenanceManager from '../components/AdminMaintenanceManager';
+import ManagerInvoiceTracker from '../components/ManagerInvoiceTracker';
+import ManagerReports from '../components/ManagerReports';
+import AdminActivityLog from '../components/AdminActivityLog';
+import AdminSystemSettings from '../components/AdminSystemSettings';
+import { fetchSystemSettings } from '../services/systemSettingsService';
+import { addMonthsToDate } from '../utils/dateUtils';
+import { createUnit, deleteUnit, updateUnit } from '../services/unitService';
 import './AdminDashboard.css';
 
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
@@ -37,6 +45,10 @@ export default function AdminDashboard() {
   const [properties, setProperties] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [userList, setUserList] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [leaseTermMonths, setLeaseTermMonths] = useState(12);
+  const [showUnitModal, setShowUnitModal] = useState(false);
+  const [unitData, setUnitData] = useState({ id: null, property: '', unitNumber: '', monthlyRate: '', status: 'Available' });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -59,6 +71,7 @@ export default function AdminDashboard() {
   const [editingProperty, setEditingProperty] = useState(null);
   const [contractData, setContractData] = useState({
     property: '',
+    unit: '',
     tenant: '',
     startDate: '',
     endDate: '',
@@ -68,14 +81,16 @@ export default function AdminDashboard() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [propData, contractsData, usersData] = await Promise.all([
+      const [propData, contractsData, usersData, invoiceData] = await Promise.all([
         fetchProperties(),
         fetchContracts(),
         fetchUsers(),
+        fetchInvoices(),
       ]);
       setProperties(Array.isArray(propData) ? propData : []);
       setContracts(Array.isArray(contractsData) ? contractsData : []);
       setUserList(Array.isArray(usersData) ? usersData : []);
+      setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
       setError('');
     } catch (err) {
       setError('Failed to fetch dashboard data.');
@@ -86,6 +101,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     loadData();
+    fetchSystemSettings().then((settings) => setLeaseTermMonths(settings.default_lease_term_months || 12)).catch(() => {});
   }, []);
 
   const handleDeleteProperty = async (id) => {
@@ -95,7 +111,7 @@ export default function AdminDashboard() {
     const linkedContracts = contracts.filter((c) => {
       const propId = c.property?._id || c.property?.id || c.property;
       const isActive = ['active', 'pending'].includes(c.status?.toLowerCase());
-      return propId === id && isActive;
+      return Number(propId) === Number(id) && isActive;
     });
 
     if (linkedContracts.length > 0) {
@@ -122,6 +138,7 @@ export default function AdminDashboard() {
       _id: prop._id || prop.id,
       owner: prop.owner || prop.ownerDetails?._id || prop.ownerDetails?.id || '',
       manager: prop.manager || prop.managerDetails?._id || prop.managerDetails?.id || '',
+      assignedAgents: prop.assignedAgents || [],
     });
     setShowEditModal(true);
   };
@@ -139,6 +156,7 @@ export default function AdminDashboard() {
         status: editingProperty.status,
         owner: editingProperty.owner ? Number(editingProperty.owner) : null,
         manager: editingProperty.manager ? Number(editingProperty.manager) : null,
+        assignedAgents: editingProperty.assignedAgents.map(Number),
       };
 
       await updateProperty(editingProperty._id || editingProperty.id, payload);
@@ -156,8 +174,40 @@ export default function AdminDashboard() {
     setContractData({
       ...contractData,
       property: propId,
+      unit: '',
       rentAmount: selectedProp ? selectedProp.monthlyRate || selectedProp.price || '' : ''
     });
+  };
+
+  const openUnitEditor = (property, unit = null) => {
+    setUnitData({ id: unit?._id || null, property: property._id || property.id, unitNumber: unit?.unitNumber || '', monthlyRate: unit?.monthlyRate || '', status: unit?.status || 'Available' });
+    setShowUnitModal(true);
+  };
+
+  const handleUnitSave = async (e) => {
+    e.preventDefault();
+    const payload = { property: Number(unitData.property), unitNumber: unitData.unitNumber, monthlyRate: Number(unitData.monthlyRate), status: unitData.status };
+    try {
+      if (unitData.id) await updateUnit(unitData.id, payload);
+      else await createUnit(payload);
+      setShowUnitModal(false);
+      setSuccess(unitData.id ? 'Unit updated.' : 'Unit added.');
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to save unit.');
+    }
+  };
+
+  const handleUnitDelete = async () => {
+    if (!unitData.id || !window.confirm('Remove this unit? Units with an active lease cannot be removed.')) return;
+    try {
+      await deleteUnit(unitData.id);
+      setShowUnitModal(false);
+      setSuccess('Unit removed.');
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to remove unit.');
+    }
   };
 
   const handleContractSubmit = async (e) => {
@@ -173,6 +223,7 @@ export default function AdminDashboard() {
     try {
       await createContract({
         ...contractData,
+        unit: contractData.unit ? Number(contractData.unit) : null,
         rentAmount: Number(contractData.rentAmount)
       });
       setSuccess('Lease contract created successfully!');
@@ -235,17 +286,21 @@ export default function AdminDashboard() {
   );
 
   const tenantUsers = useMemo(
-    () => userList.filter((u) => u.role?.toLowerCase() === 'tenant'),
+    () => userList.filter((u) => u.isActive && u.role?.toLowerCase() === 'tenant'),
     [userList]
   );
 
   const ownerUsers = useMemo(
-    () => userList.filter((u) => u.role?.toLowerCase() === 'owner'),
+    () => userList.filter((u) => u.isActive && u.role?.toLowerCase() === 'owner'),
     [userList]
   );
 
   const managerUsers = useMemo(
-    () => userList.filter((u) => ['property manager', 'admin'].includes(u.role?.toLowerCase())),
+    () => userList.filter((u) => u.isActive && u.role?.toLowerCase() === 'property manager'),
+    [userList]
+  );
+  const agentUsers = useMemo(
+    () => userList.filter((u) => u.isActive && u.role?.toLowerCase() === 'agent'),
     [userList]
   );
 
@@ -449,6 +504,7 @@ export default function AdminDashboard() {
               <div className="pm-panel mb-4" style={{ backgroundColor: '#fcfcfd' }}>
                 <div className="pm-panel-header d-flex justify-content-between align-items-center">
                   <span>Unit breakdown — {selectedPropertyObj.title} ({selectedPropertyObj.units.length} Rooms)</span>
+                  <Button size="sm" variant="primary" onClick={() => openUnitEditor(selectedPropertyObj)}>Add unit</Button>
                   <Button
                     variant="link"
                     size="sm"
@@ -484,6 +540,7 @@ export default function AdminDashboard() {
                             >
                               {unit.status}
                             </Badge>
+                            <Button size="sm" variant="outline-primary" className="mt-2 d-block mx-auto" onClick={() => openUnitEditor(selectedPropertyObj, unit)}>Manage</Button>
                           </div>
                         </Col>
                       );
@@ -492,6 +549,27 @@ export default function AdminDashboard() {
                 </div>
               </div>
             )}
+
+            {/* Active Contracts */}
+            <div className="pm-panel mb-4">
+              <div className="pm-panel-header">System-wide property and financial reports</div>
+              <div style={{ padding: '22px' }}><ManagerReports properties={properties} invoices={invoices} /></div>
+            </div>
+
+            <div className="pm-panel mb-4">
+              <div className="pm-panel-header">System-wide rent payments</div>
+              <div style={{ padding: '22px' }}><ManagerInvoiceTracker /></div>
+            </div>
+
+            <div className="pm-panel mb-4">
+              <div className="pm-panel-header">System activity</div>
+              <div style={{ padding: '22px' }}><AdminActivityLog /></div>
+            </div>
+
+            <div className="pm-panel mb-4">
+              <div className="pm-panel-header">System settings</div>
+              <div style={{ padding: '22px', maxWidth: 640 }}><AdminSystemSettings /></div>
+            </div>
 
             {/* Active Contracts */}
             <div className="pm-panel mb-4">
@@ -653,6 +731,24 @@ export default function AdminDashboard() {
                     </Form.Select>
                   </Col>
                 </Row>
+                <Form.Group className="mb-3">
+                  <Form.Label className="pm-form-label">Assign Agents</Form.Label>
+                  <Form.Select
+                    className="pm-input"
+                    multiple
+                    value={(editingProperty.assignedAgents || []).map(String)}
+                    onChange={(e) => setEditingProperty({
+                      ...editingProperty,
+                      assignedAgents: Array.from(e.target.selectedOptions, (option) => Number(option.value)),
+                    })}
+                  >
+                    {agentUsers.map((u) => {
+                      const userId = u._id || u.id;
+                      return <option key={userId} value={userId}>{u.name} ({u.email})</option>;
+                    })}
+                  </Form.Select>
+                  <Form.Text className="text-muted">Hold Ctrl (Windows) or Command (Mac) to select multiple agents.</Form.Text>
+                </Form.Group>
               </Modal.Body>
               <Modal.Footer>
                 <Button variant="light" className="pm-btn-ghost" onClick={() => setShowEditModal(false)}>Cancel</Button>
@@ -661,6 +757,21 @@ export default function AdminDashboard() {
             </Form>
           </Modal>
         )}
+
+        <Modal show={showUnitModal} onHide={() => setShowUnitModal(false)} centered>
+          <Modal.Header closeButton><Modal.Title>{unitData.id ? 'Manage unit' : 'Add unit'}</Modal.Title></Modal.Header>
+          <Form onSubmit={handleUnitSave}>
+            <Modal.Body>
+              <Form.Group className="mb-3"><Form.Label>Unit number</Form.Label><Form.Control value={unitData.unitNumber} onChange={(e) => setUnitData({ ...unitData, unitNumber: e.target.value })} required /></Form.Group>
+              <Form.Group className="mb-3"><Form.Label>Monthly rent (₱)</Form.Label><Form.Control type="number" min="0" step="0.01" value={unitData.monthlyRate} onChange={(e) => setUnitData({ ...unitData, monthlyRate: e.target.value })} required /></Form.Group>
+              <Form.Group><Form.Label>Status</Form.Label><Form.Select value={unitData.status} onChange={(e) => setUnitData({ ...unitData, status: e.target.value })}>{['Available', 'Occupied', 'Maintenance', 'Reserved'].map((status) => <option key={status}>{status}</option>)}</Form.Select></Form.Group>
+            </Modal.Body>
+            <Modal.Footer className="justify-content-between">
+              {unitData.id && <Button variant="outline-danger" onClick={handleUnitDelete}>Remove unit</Button>}
+              <div className="ms-auto d-flex gap-2"><Button variant="light" onClick={() => setShowUnitModal(false)}>Cancel</Button><Button type="submit">Save unit</Button></div>
+            </Modal.Footer>
+          </Form>
+        </Modal>
 
         {/* Modal: New Lease Contract */}
         <Modal show={showContractModal} onHide={() => setShowContractModal(false)} centered dialogClassName="pm-modal">
@@ -688,6 +799,21 @@ export default function AdminDashboard() {
                   })}
                 </Form.Select>
               </Form.Group>
+              {properties.find((property) => String(property._id || property.id) === String(contractData.property))?.units?.length > 1 && (
+                <Form.Group className="mb-3">
+                  <Form.Label className="pm-form-label">Select available unit</Form.Label>
+                  <Form.Select className="pm-input" value={contractData.unit} onChange={(e) => {
+                    const property = properties.find((item) => String(item._id || item.id) === String(contractData.property));
+                    const unit = property?.units?.find((item) => String(item._id) === e.target.value);
+                    setContractData({ ...contractData, unit: e.target.value, rentAmount: unit?.monthlyRate || contractData.rentAmount });
+                  }} required>
+                    <option value="">-- Choose available unit --</option>
+                    {properties.find((property) => String(property._id || property.id) === String(contractData.property))?.units?.filter((unit) => unit.status === 'Available').map((unit) => (
+                      <option key={unit._id} value={unit._id}>{unit.unitNumber} — ₱{Number(unit.monthlyRate || 0).toLocaleString()}/mo</option>
+                    ))}
+                  </Form.Select>
+                </Form.Group>
+              )}
               <Form.Group className="mb-3">
                 <Form.Label className="pm-form-label">Select tenant account</Form.Label>
                 <Form.Select
@@ -714,7 +840,11 @@ export default function AdminDashboard() {
                     className="pm-input"
                     type="date"
                     value={contractData.startDate}
-                    onChange={(e) => setContractData({ ...contractData, startDate: e.target.value })}
+                    onChange={(e) => setContractData({
+                      ...contractData,
+                      startDate: e.target.value,
+                      endDate: addMonthsToDate(e.target.value, leaseTermMonths),
+                    })}
                     required
                   />
                 </Col>

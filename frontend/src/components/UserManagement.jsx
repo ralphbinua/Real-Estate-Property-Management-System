@@ -135,7 +135,7 @@ export default function UserManagement() {
     try {
       const userId = pendingDelete._id || pendingDelete.id;
       await deleteUser(userId);
-      setSuccess(`${pendingDelete.name} was removed.`);
+      setSuccess(`${pendingDelete.name} was deactivated.`);
       setPendingDelete(null);
       await loadUsers();
     } catch (err) {
@@ -230,7 +230,7 @@ export default function UserManagement() {
                       size="sm"
                       onClick={() => setPendingDelete(user)}
                     >
-                      Delete
+                      Deactivate
                     </Button>
                   </div>
                 </td>
@@ -405,20 +405,20 @@ export default function UserManagement() {
         </Form>
       </Modal>
 
-      {/* Modal: Delete User Account */}
+      {/* Modal: Deactivate User Account */}
       <Modal show={!!pendingDelete} onHide={() => setPendingDelete(null)} centered>
         <Modal.Header closeButton>
-          <Modal.Title className="fs-5">Delete user account</Modal.Title>
+          <Modal.Title className="fs-5">Deactivate user account</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          Remove <strong>{pendingDelete?.name}</strong> ({pendingDelete?.email})? This can't be undone.
+          Deactivate <strong>{pendingDelete?.name}</strong> ({pendingDelete?.email})? They will no longer be able to sign in. Their records will be retained.
         </Modal.Body>
         <Modal.Footer>
           <Button variant="outline-secondary" onClick={() => setPendingDelete(null)} disabled={deleting}>
             Cancel
           </Button>
           <Button variant="danger" onClick={confirmDelete} disabled={deleting}>
-            {deleting ? <Spinner animation="border" size="sm" /> : 'Delete'}
+            {deleting ? <Spinner animation="border" size="sm" /> : 'Deactivate'}
           </Button>
         </Modal.Footer>
       </Modal>

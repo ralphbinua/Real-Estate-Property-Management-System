@@ -25,6 +25,12 @@ class Property(models.Model):
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='owned_properties')
     manager = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='managed_properties')
+    assigned_agents = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name='assigned_properties',
+        limit_choices_to={'role': 'Agent'},
+    )
 
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -67,3 +73,29 @@ class Unit(models.Model):
 
     def __str__(self):
         return f"{self.property.title} — {self.unit_number}"
+
+
+class PropertyInquiry(models.Model):
+    STATUS_CHOICES = [
+        ('New', 'New'),
+        ('Viewing Scheduled', 'Viewing Scheduled'),
+        ('Application In Progress', 'Application In Progress'),
+        ('Converted', 'Converted'),
+        ('Closed', 'Closed'),
+    ]
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='inquiries')
+    unit = models.ForeignKey(Unit, null=True, blank=True, on_delete=models.SET_NULL, related_name='inquiries')
+    agent = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='property_inquiries',
+    )
+    prospect_name = models.CharField(max_length=255)
+    prospect_email = models.EmailField(blank=True, default='')
+    viewing_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='New')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.prospect_name} — {self.property.title} ({self.status})"

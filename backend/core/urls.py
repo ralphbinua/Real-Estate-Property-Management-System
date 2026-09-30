@@ -16,12 +16,13 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from users.views import CustomTokenObtainPairView
+from users.views import CustomTokenObtainPairView, SystemSettingsView
 from properties.views import OwnerPortfolioView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/login/', CustomTokenObtainPairView.as_view(), name='token_login'),
+    path('api/settings/', SystemSettingsView.as_view(), name='system_settings'),
     path('api/users/', include('users.urls')),
     path('api/properties/', include('properties.urls')),
     path('api/contracts/', include('contracts.urls')),
