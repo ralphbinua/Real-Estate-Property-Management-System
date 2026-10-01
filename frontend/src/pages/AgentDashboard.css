@@ -194,6 +194,62 @@
 .pm-agent .pm-pill-default { background: #EEEEEA; color: #6B7280; }
 .pm-agent .pm-pill-default .pm-pill-dot { background: #9CA3AF; }
 
+/* Prospect pipeline */
+.pm-agent #inquiries { overflow: hidden; }
+.pm-agent .pm-prospects-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 26px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+.pm-agent .pm-prospects-header h2 { margin: 0; color: var(--ink); font-size: 1.12rem; font-weight: 650; }
+.pm-agent .pm-prospects-header p { margin: 5px 0 0; color: var(--muted); font-size: 0.86rem; }
+.pm-agent .pm-prospects-count { padding: 7px 11px; border: 1px solid #dce8e3; border-radius: 999px; background: #edf4f0; color: #285b4e; font-size: 0.78rem; font-weight: 650; }
+.pm-agent #inquiries .pm-table { min-width: 980px; }
+.pm-agent #inquiries .pm-table thead th { padding: 13px 16px; background: #fafaf8; color: #687387; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.075em; text-transform: uppercase; white-space: nowrap; }
+.pm-agent #inquiries .pm-table tbody td { padding: 14px 16px; }
+.pm-agent .pm-prospect-name, .pm-agent .pm-prospect-email { display: block; }
+.pm-agent .pm-prospect-name { color: var(--ink); font-size: 0.9rem; font-weight: 600; }
+.pm-agent .pm-prospect-email { margin-top: 3px; color: var(--muted); font-size: 0.78rem; }
+.pm-agent .pm-prospect-notes { max-width: 160px; overflow: hidden; color: var(--ink-soft); font-size: 0.84rem; text-overflow: ellipsis; white-space: nowrap; }
+.pm-agent .pm-viewing-cell { min-width: 175px; }
+.pm-agent .pm-prospect-status { min-width: 185px; border-radius: 8px; font-size: 0.82rem; font-weight: 600; }
+.pm-agent .pm-prospect-status.status-new { border-color: #d9dee6; background-color: #f7f8fa; color: #525f70; }
+.pm-agent .pm-prospect-status.status-viewing-scheduled { border-color: #c7e2d8; background-color: #eef7f2; color: #28624f; }
+.pm-agent .pm-prospect-status.status-application-in-progress { border-color: #cbd9f2; background-color: #f0f4fc; color: #345887; }
+.pm-agent .pm-prospect-status.status-converted { border-color: #c7e2d8; background-color: #e8f3ed; color: #245844; }
+.pm-agent .pm-prospect-status.status-closed { border-color: #ead4d6; background-color: #fbf1f1; color: #87434b; }
+.pm-agent .pm-prospect-action { border-radius: 7px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
+.pm-agent .pm-application-badge { border-radius: 999px; font-size: 0.74rem; font-weight: 600; }
+.pm-agent .pm-no-action { color: #9aa1ad; }
+.pm-modal .pm-required-marker { color: #a6414b; font-weight: 700; }
+.pm-modal .pm-optional-marker { margin-left: 5px; color: #7b8492; font-size: 0.76rem; font-weight: 500; }
+.pm-application-modal .modal-header { padding: 20px 26px 15px; }
+.pm-application-modal .modal-title { font-size: 1.5rem; }
+.pm-application-modal .pm-application-subtitle { margin-top: 4px; color: #6b7280; font-size: 0.86rem; }
+.pm-application-modal .modal-body { padding: 17px 26px 14px; }
+.pm-application-modal .modal-footer { padding: 12px 26px 20px; }
+.pm-application-modal textarea.form-control { min-height: 66px; }
+.pm-viewing-modal .modal-header { padding: 20px 26px 15px; }
+.pm-viewing-modal .modal-title { font-size: 1.5rem; }
+.pm-viewing-modal .pm-viewing-subtitle { margin-top: 4px; color: #6b7280; font-size: 0.86rem; }
+.pm-viewing-modal .modal-body { padding: 20px 26px 26px; }
+.pm-viewing-modal .modal-footer { padding: 12px 26px 20px; }
+.pm-viewing-modal .form-control.pm-input { min-height: 44px; padding: 10px 13px; border-color: #d9dee6; border-radius: 8px; color: #17233f; font-size: 0.92rem; }
+.pm-viewing-modal textarea.form-control.pm-input { min-height: 84px; }
+.pm-viewing-modal .form-control.pm-input:focus { border-color: #2f6f5e; box-shadow: 0 0 0 3px rgba(47, 111, 94, 0.12); }
+.pm-viewing-modal .btn.pm-btn-primary { min-height: 46px; margin-top: 2px; border: 1px solid #17233f; border-radius: 8px; background: #17233f; color: #fff; font-weight: 650; }
+.pm-viewing-modal .btn.pm-btn-primary:hover:not(:disabled) { border-color: #2f6f5e; background: #2f6f5e; color: #fff; }
+.pm-viewing-modal .btn.pm-btn-primary:disabled { border-color: #aeb6c3; background: #aeb6c3; color: #fff; }
+.pm-modal .pm-modal-error { display: block; background: #f7e9ea; border-left-color: #a6414b; color: #6b2530; }
+.pm-agent #inquiries .pm-empty-row { padding: 38px 16px; text-align: center; }
+.pm-agent #inquiries .pm-empty-row strong, .pm-agent #inquiries .pm-empty-row span { display: block; }
+.pm-agent #inquiries .pm-empty-row strong { color: var(--ink); font-size: 0.94rem; }
+.pm-agent #inquiries .pm-empty-row span { margin-top: 4px; color: var(--muted); font-size: 0.84rem; }
+
 /* Loading & Empty State */
 .pm-agent .pm-loading, .pm-agent .pm-empty-grid {
   text-align: center;

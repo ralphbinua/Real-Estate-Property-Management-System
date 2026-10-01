@@ -59,7 +59,14 @@ class ContractSerializer(serializers.ModelSerializer):
                 and unit.pk == self.instance.unit_id
                 and unit.contracts.filter(pk=self.instance.pk).exists()
             )
-            if not is_current_reservation:
+            approved_application = self.context.get('approved_application')
+            is_application_reservation = bool(
+                approved_application
+                and approved_application.status == 'Approved'
+                and approved_application.inquiry.unit_id == unit.pk
+                and unit.status == 'Reserved'
+            )
+            if not is_current_reservation and not is_application_reservation:
                 raise serializers.ValidationError({'unit': 'The selected unit is not available.'})
         if requested_status in ('Active', 'Pending') and unit and unit.contracts.filter(status__in=['Active', 'Pending'], is_deleted=False).exclude(pk=getattr(self.instance, 'pk', None)).exists():
             raise serializers.ValidationError({'unit': 'The selected unit already has an active or pending lease.'})

@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Container, Table, Spinner, Badge, Tab, Tabs } from 'react-bootstrap';
+import { Container, Table, Spinner, Badge, Tab, Tabs, Button, Form, Modal, Row, Col } from 'react-bootstrap';
 import { useAuth } from '../context/AuthContext';
 import { fetchOwnerPortfolio } from '../services/ownerService';
+import { fetchApplications, reviewApplication } from '../services/applicationService';
+import { createProperty } from '../services/propertyService';
 import './OwnerDashboard.css';
 
 const PILL_CLASS = {
@@ -29,25 +31,107 @@ export default function OwnerDashboard() {
   const { user } = useAuth();
   const [activeSection, setActiveSection] = useState('overview');
   const [portfolio, setPortfolio] = useState({ properties: [], contracts: [], maintenanceRequests: [], invoices: [] });
+  const [ownerApprovals, setOwnerApprovals] = useState([]);
+  const [ownerReviewNotes, setOwnerReviewNotes] = useState({});
+  const [savingOwnerDecisionId, setSavingOwnerDecisionId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [activePortfolioTab, setActivePortfolioTab] = useState('properties');
+  const [showPropertyModal, setShowPropertyModal] = useState(false);
+  const [savingProperty, setSavingProperty] = useState(false);
+  const [propertyDraft, setPropertyDraft] = useState({
+    title: '',
+    address: '',
+    propertyType: 'Apartment',
+    price: '',
+    units: [{ unitNumber: '101', monthlyRate: '' }],
+  });
 
   const loadOwnerData = async () => {
     setLoading(true);
     try {
-      const data = await fetchOwnerPortfolio();
+      const [portfolioResult, approvalsResult] = await Promise.allSettled([fetchOwnerPortfolio(), fetchApplications()]);
+      if (portfolioResult.status === 'rejected') throw portfolioResult.reason;
+      const data = portfolioResult.value;
       setPortfolio({
         properties: Array.isArray(data.properties) ? data.properties : [],
         contracts: Array.isArray(data.contracts) ? data.contracts : [],
         maintenanceRequests: Array.isArray(data.maintenanceRequests) ? data.maintenanceRequests : [],
         invoices: Array.isArray(data.invoices) ? data.invoices : [],
       });
-      setError('');
+      if (approvalsResult.status === 'fulfilled') {
+        setOwnerApprovals(Array.isArray(approvalsResult.value) ? approvalsResult.value : []);
+        setError('');
+      } else {
+        setOwnerApprovals([]);
+        setError('Your portfolio loaded, but application approvals could not be fetched. Please refresh or contact an administrator.');
+      }
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch portfolio data.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOwnerDecision = async (application, status) => {
+    setError('');
+    setSuccess('');
+    setSavingOwnerDecisionId(application.id);
+    try {
+      await reviewApplication(application.id, {
+        status,
+        ownerReviewNotes: ownerReviewNotes[application.id]?.trim() || '',
+      });
+      setOwnerReviewNotes((current) => {
+        const next = { ...current };
+        delete next[application.id];
+        return next;
+      });
+      setSuccess(status === 'Approved'
+        ? 'Application approved. The selected unit is reserved while the lease is prepared.'
+        : 'Application declined. The prospect inquiry has been closed.');
+      await loadOwnerData();
+    } catch (err) {
+      const responseData = err.response?.data;
+      setError(responseData?.status?.[0] || responseData?.detail || `Unable to ${status.toLowerCase()} this application.`);
+    } finally {
+      setSavingOwnerDecisionId(null);
+    }
+  };
+
+  const handlePropertyCreate = async (event) => {
+    event.preventDefault();
+    setError('');
+    setSuccess('');
+    setSavingProperty(true);
+
+    const hasUnits = ['Apartment', 'Condo'].includes(propertyDraft.propertyType);
+    const units = hasUnits
+      ? propertyDraft.units.map((unit) => ({
+          unitNumber: unit.unitNumber.trim(),
+          monthlyRate: Number(unit.monthlyRate),
+          status: 'Available',
+        }))
+      : [];
+
+    try {
+      await createProperty({
+        title: propertyDraft.title.trim(),
+        address: propertyDraft.address.trim(),
+        propertyType: propertyDraft.propertyType,
+        price: Number(propertyDraft.price || (hasUnits ? propertyDraft.units[0]?.monthlyRate : 0) || 0),
+        units,
+      });
+      setPropertyDraft({ title: '', address: '', propertyType: 'Apartment', price: '', units: [{ unitNumber: '101', monthlyRate: '' }] });
+      setShowPropertyModal(false);
+      setSuccess('Property added to your portfolio. An Admin can assign a Property Manager.');
+      await loadOwnerData();
+    } catch (err) {
+      const details = err.response?.data;
+      setError(details?.detail || details?.title?.[0] || details?.address?.[0] || 'Unable to register this property. Please review the details and try again.');
+    } finally {
+      setSavingProperty(false);
     }
   };
 
@@ -60,7 +144,7 @@ export default function OwnerDashboard() {
       setActiveSection(event.detail);
       const tab = event.detail === 'billing' ? 'payments' : event.detail;
       if (event.detail === 'portfolio') setActivePortfolioTab('properties');
-      if (['properties', 'contracts', 'maintenance', 'payments'].includes(tab)) setActivePortfolioTab(tab);
+      if (['properties', 'approvals', 'contracts', 'maintenance', 'payments'].includes(tab)) setActivePortfolioTab(tab);
     };
     window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
     return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
@@ -115,18 +199,25 @@ export default function OwnerDashboard() {
           <div>
             <h1 className="pm-title">Owner Portfolio Overview</h1>
             <p className="pm-subtitle">
-              Read-only asset tracking, unit occupancy rates, and active rental income logs
+              Register properties you own and monitor occupancy, leases, maintenance, and rental income
             </p>
           </div>
-          <Badge bg="dark" className="px-3 py-2 fs-6">
-            Owner Mode
-          </Badge>
+          <div className="d-flex align-items-center gap-2">
+            <Button variant="dark" onClick={() => setShowPropertyModal(true)}>Add property</Button>
+            <Badge bg="dark" className="px-3 py-2 fs-6">Owner</Badge>
+          </div>
         </div>
 
         {error && (
           <div className="pm-alert pm-alert-error" role="alert">
             <span>{error}</span>
             <button className="pm-alert-close" onClick={() => setError('')} aria-label="Dismiss">×</button>
+          </div>
+        )}
+        {success && (
+          <div className="pm-alert pm-alert-success" role="status">
+            <span>{success}</span>
+            <button className="pm-alert-close" onClick={() => setSuccess('')} aria-label="Dismiss">×</button>
           </div>
         )}
 
@@ -166,7 +257,7 @@ export default function OwnerDashboard() {
             </div>
 
             {/* Tabbed Portfolio Views */}
-            <div className="pm-panel mb-4" id="portfolio" data-workspace-section="portfolio contracts maintenance billing">
+            <div className="pm-panel mb-4" id="portfolio" data-workspace-section="portfolio approvals contracts maintenance billing">
               <div className="pm-panel-header">Portfolio Details</div>
               <div style={{ padding: '20px' }}>
                 <Tabs activeKey={activePortfolioTab} onSelect={(key) => setActivePortfolioTab(key || 'properties')} id="owner-tabs" className="mb-3">
@@ -225,6 +316,52 @@ export default function OwnerDashboard() {
                               No property assets linked to your owner account.
                             </td>
                           </tr>
+                        )}
+                      </tbody>
+                    </Table>
+                  </Tab>
+
+                  <Tab eventKey="approvals" title={`Application approvals (${ownerApprovals.length})`}>
+                    <Table responsive className="pm-table mb-0">
+                      <thead>
+                        <tr>
+                          <th>Applicant</th>
+                          <th>Property / unit</th>
+                          <th>Employment</th>
+                          <th>Monthly income</th>
+                          <th>Requested move-in</th>
+                          <th>Manager review</th>
+                          <th>Decision</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ownerApprovals.map((application) => (
+                          <tr key={application.id}>
+                            <td>{application.applicantName || 'Applicant'}<div className="small text-muted">{application.applicantEmail}</div></td>
+                            <td>{application.propertyDetails?.title || 'Property'}{application.unitDetails?.unitNumber ? ` · Unit ${application.unitDetails.unitNumber}` : ''}</td>
+                            <td>{application.employment || '—'}</td>
+                            <td>{application.monthlyIncome != null ? `₱${Number(application.monthlyIncome).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
+                            <td>{application.moveInDate || '—'}</td>
+                            <td>{application.reviewNotes || 'No manager notes'}</td>
+                            <td style={{ minWidth: 240 }}>
+                              <Form.Control
+                                as="textarea"
+                                rows={2}
+                                className="mb-2"
+                                aria-label={`Decision notes for ${application.applicantName || 'applicant'}`}
+                                placeholder="Optional decision notes"
+                                value={ownerReviewNotes[application.id] || ''}
+                                onChange={(event) => setOwnerReviewNotes((current) => ({ ...current, [application.id]: event.target.value }))}
+                              />
+                              <div className="d-flex flex-wrap gap-2">
+                                <Button size="sm" variant="success" disabled={savingOwnerDecisionId === application.id} onClick={() => handleOwnerDecision(application, 'Approved')}>Approve</Button>
+                                <Button size="sm" variant="outline-danger" disabled={savingOwnerDecisionId === application.id} onClick={() => handleOwnerDecision(application, 'Rejected')}>{savingOwnerDecisionId === application.id ? 'Saving…' : 'Decline'}</Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {ownerApprovals.length === 0 && (
+                          <tr><td colSpan="7" className="pm-empty-row">No applications are waiting for your decision.</td></tr>
                         )}
                       </tbody>
                     </Table>
@@ -341,6 +478,58 @@ export default function OwnerDashboard() {
           </>
         )}
       </Container>
+
+      <Modal show={showPropertyModal} onHide={() => setShowPropertyModal(false)} centered dialogClassName="pm-modal">
+        <Modal.Header closeButton>
+          <Modal.Title>Register a property</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handlePropertyCreate}>
+          <Modal.Body>
+            <p className="text-muted small">Register a property you own. Your Owner account will be linked automatically. An Admin can assign the Property Manager.</p>
+            <Form.Group className="mb-3">
+              <Form.Label>Property name</Form.Label>
+              <Form.Control value={propertyDraft.title} onChange={(event) => setPropertyDraft({ ...propertyDraft, title: event.target.value })} required />
+            </Form.Group>
+            <Form.Group className="mb-3">
+              <Form.Label>Address</Form.Label>
+              <Form.Control value={propertyDraft.address} onChange={(event) => setPropertyDraft({ ...propertyDraft, address: event.target.value })} required />
+            </Form.Group>
+            <Row className="g-3 mb-3">
+              <Col md={['Apartment', 'Condo'].includes(propertyDraft.propertyType) ? 12 : 6}>
+                <Form.Label>Property type</Form.Label>
+                <Form.Select value={propertyDraft.propertyType} onChange={(event) => setPropertyDraft({ ...propertyDraft, propertyType: event.target.value })}>
+                  {['Apartment', 'Condo', 'House', 'Commercial'].map((type) => <option key={type}>{type}</option>)}
+                </Form.Select>
+              </Col>
+              {!['Apartment', 'Condo'].includes(propertyDraft.propertyType) && (
+                <Col md={6}>
+                  <Form.Label>Monthly rent (₱)</Form.Label>
+                  <Form.Control type="number" min="0.01" step="0.01" value={propertyDraft.price} onChange={(event) => setPropertyDraft({ ...propertyDraft, price: event.target.value })} required />
+                </Col>
+              )}
+            </Row>
+            {['Apartment', 'Condo'].includes(propertyDraft.propertyType) && (
+              <Form.Group>
+                <div className="d-flex justify-content-between align-items-center mb-2">
+                  <Form.Label className="mb-0">Initial units and rent</Form.Label>
+                  <Button type="button" size="sm" variant="outline-primary" onClick={() => setPropertyDraft((current) => ({ ...current, units: [...current.units, { unitNumber: '', monthlyRate: '' }] }))}>Add unit</Button>
+                </div>
+                {propertyDraft.units.map((unit, index) => (
+                  <Row className="g-2 mb-2" key={`owner-property-unit-${index}`}>
+                    <Col><Form.Control placeholder="Unit number" value={unit.unitNumber} onChange={(event) => setPropertyDraft((current) => ({ ...current, units: current.units.map((item, itemIndex) => itemIndex === index ? { ...item, unitNumber: event.target.value } : item) }))} required /></Col>
+                    <Col><Form.Control type="number" min="0.01" step="0.01" placeholder="Monthly rent (₱)" value={unit.monthlyRate} onChange={(event) => setPropertyDraft((current) => ({ ...current, units: current.units.map((item, itemIndex) => itemIndex === index ? { ...item, monthlyRate: event.target.value } : item) }))} required /></Col>
+                    <Col xs="auto"><Button type="button" variant="outline-danger" disabled={propertyDraft.units.length === 1} onClick={() => setPropertyDraft((current) => ({ ...current, units: current.units.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</Button></Col>
+                  </Row>
+                ))}
+              </Form.Group>
+            )}
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="outline-secondary" onClick={() => setShowPropertyModal(false)}>Cancel</Button>
+            <Button variant="dark" type="submit" disabled={savingProperty}>{savingProperty ? 'Saving…' : 'Add property'}</Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
     </div>
   );
 }

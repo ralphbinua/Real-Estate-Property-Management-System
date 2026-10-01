@@ -16,6 +16,17 @@ class IsAdminOrPropertyManager(permissions.BasePermission):
         )
 
 
+class IsAuthorizedContractReader(permissions.BasePermission):
+    message = 'You may only view lease records for your role and assigned scope.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            user and user.is_authenticated and user.is_active and not user.is_deleted
+            and user.role in ('Admin', 'Property Manager', 'Owner', 'Tenant')
+        )
+
+
 class ContractViewSet(viewsets.ModelViewSet):
     queryset = Contract.objects.all()
     serializer_class = ContractSerializer
@@ -37,13 +48,13 @@ class ContractViewSet(viewsets.ModelViewSet):
             return contracts.filter(property__owner=user).order_by('-id')
         if user.role == 'Tenant':
             return contracts.filter(tenant=user).order_by('-id')
-        if user.role == 'Agent':
-            return contracts.filter(property__assigned_agents=user).order_by('-id')
         return contracts.none()
 
     def get_permissions(self):
         if self.action in ('create', 'update', 'partial_update', 'destroy', 'terminate'):
             return [IsAdminOrPropertyManager()]
+        if self.action in ('list', 'retrieve'):
+            return [IsAuthorizedContractReader()]
         return [permissions.IsAuthenticated()]
 
     def perform_destroy(self, instance):

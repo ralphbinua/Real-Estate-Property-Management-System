@@ -3,6 +3,18 @@ from .models import MaintenanceRequest
 from .serializers import MaintenanceRequestSerializer
 from users.audit import record_activity
 
+
+class IsAuthorizedMaintenanceReader(permissions.BasePermission):
+    message = 'You may only view maintenance records for your role and assigned scope.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            user and user.is_authenticated and user.is_active and not user.is_deleted
+            and user.role in ('Admin', 'Property Manager', 'Owner', 'Tenant')
+        )
+
+
 class MaintenanceRequestViewSet(viewsets.ModelViewSet):
     queryset = MaintenanceRequest.objects.filter(is_deleted=False).order_by('-id')
     serializer_class = MaintenanceRequestSerializer
@@ -19,8 +31,6 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
             return qs.filter(property__manager=user)
         if user.role == 'Owner':
             return qs.filter(property__owner=user)
-        if user.role == 'Agent':
-            return qs.filter(property__assigned_agents=user)
         return qs.none()
 
     def get_permissions(self):
@@ -28,6 +38,8 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
             return [IsAdminOrManager()]
         if self.action == 'create':
             return [IsAdminOrTenant()]
+        if self.action in ('list', 'retrieve'):
+            return [IsAuthorizedMaintenanceReader()]
         return [permissions.IsAuthenticated()]
 
     def perform_create(self, serializer):

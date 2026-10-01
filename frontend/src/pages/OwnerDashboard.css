@@ -62,6 +62,7 @@
   font-size: 0.925rem;
 }
 .pm-owner .pm-alert-error { background: var(--rose-soft); border-color: var(--rose); color: #6B2530; }
+.pm-owner .pm-alert-success { background: var(--accent-soft); border-color: var(--accent); color: #225446; }
 .pm-owner .pm-alert-close {
   background: none;
   border: none;

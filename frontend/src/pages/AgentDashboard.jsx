@@ -8,6 +8,24 @@ import './AgentDashboard.css';
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
 const PROPERTY_STATUSES = ['Available', 'Occupied', 'Pending', 'Under Maintenance'];
 
+const toLocalDateTimeInput = (dateValue) => {
+  if (!dateValue) return '';
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return '';
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+};
+
+const getLocalDateTimeNow = () => toLocalDateTimeInput(new Date());
+const getInquiryStatus = (inquiry) => inquiry.status === 'New' && inquiry.viewing_at
+  ? 'Viewing Scheduled'
+  : inquiry.status;
+const formatViewingDate = (value) => value
+  ? new Intl.DateTimeFormat(undefined, {
+      month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+    }).format(new Date(value))
+  : null;
+
 const PILL_CLASS = {
   available: 'pm-pill-available',
   rented: 'pm-pill-occupied',
@@ -47,6 +65,7 @@ export default function AgentDashboard() {
   // Viewing Scheduler Modal State
   const [showViewingModal, setShowViewingModal] = useState(false);
   const [viewingData, setViewingData] = useState({
+    inquiryId: '',
     propertyId: '',
     unitId: '',
     prospectName: '',
@@ -125,36 +144,52 @@ export default function AgentDashboard() {
     [properties, selectedPropertyId]
   );
 
-  const handleOpenViewingModal = (propertyId, unitId = '') => {
+  const handleOpenViewingModal = (propertyId, unitId = '', inquiry = null) => {
     setViewingData({
-      propertyId,
-      unitId,
-      prospectName: '',
-      prospectEmail: '',
-      viewingAt: '',
-      notes: '',
+      inquiryId: inquiry?.id || '',
+      propertyId: inquiry?.property || propertyId,
+      unitId: inquiry?.unit || unitId,
+      prospectName: inquiry?.prospect_name || '',
+      prospectEmail: inquiry?.prospect_email || '',
+      viewingAt: toLocalDateTimeInput(inquiry?.viewing_at),
+      notes: inquiry?.notes || '',
     });
+    setError('');
+    setSuccess('');
     setShowViewingModal(true);
   };
 
   const handleScheduleSubmit = async (e) => {
     e.preventDefault();
+    if (!viewingData.viewingAt || new Date(viewingData.viewingAt).getTime() <= Date.now()) {
+      setError('Choose a future date and time for the viewing.');
+      return;
+    }
     setSavingInquiry(true);
     setError('');
     try {
-      await createInquiry({
+      const payload = {
         property: Number(viewingData.propertyId),
         unit: viewingData.unitId ? Number(viewingData.unitId) : null,
         prospect_name: viewingData.prospectName,
         prospect_email: viewingData.prospectEmail,
         viewing_at: viewingData.viewingAt ? new Date(viewingData.viewingAt).toISOString() : null,
         notes: viewingData.notes,
-      });
-      setSuccess('Prospect inquiry saved.');
+        status: 'Viewing Scheduled',
+      };
+      const savedInquiry = viewingData.inquiryId
+        ? await updateInquiry(viewingData.inquiryId, payload)
+        : await createInquiry(payload);
+      setInquiries((items) => viewingData.inquiryId
+        ? items.map((item) => item.id === savedInquiry.id ? savedInquiry : item)
+        : [savedInquiry, ...items.filter((item) => item.id !== savedInquiry.id)]);
+      setSuccess(viewingData.inquiryId ? 'Viewing updated successfully.' : 'Viewing scheduled successfully.');
       setShowViewingModal(false);
-      setInquiries(await fetchInquiries());
+      setActiveSection('inquiries');
+      window.dispatchEvent(new CustomEvent('workspace:navigate', { detail: 'inquiries' }));
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to save prospect inquiry.');
+      const apiError = err.response?.data;
+      setError(apiError?.viewing_at?.[0] || apiError?.unit?.[0] || apiError?.property?.[0] || apiError?.detail || 'Failed to schedule the viewing.');
     } finally {
       setSavingInquiry(false);
     }
@@ -163,12 +198,18 @@ export default function AgentDashboard() {
   const openApplicationForm = (inquiry) => {
     setSelectedInquiry(inquiry);
     setApplicationForm({ applicantEmail: inquiry.prospect_email || '', employment: '', monthlyIncome: '', moveInDate: '', notes: '' });
+    setError('');
+    setSuccess('');
     setShowApplicationModal(true);
   };
 
   const handleApplicationSubmit = async (e) => {
     e.preventDefault();
     if (!selectedInquiry) return;
+    if (!applicationForm.employment.trim() || applicationForm.monthlyIncome === '' || !applicationForm.moveInDate) {
+      setError('Complete employment, monthly income, and requested move-in date before submitting.');
+      return;
+    }
     setSavingApplication(true);
     setError('');
     setSuccess('');
@@ -176,9 +217,9 @@ export default function AgentDashboard() {
       await createApplication({
         inquiry: selectedInquiry.id,
         applicantEmail: applicationForm.applicantEmail,
-        employment: applicationForm.employment,
-        monthlyIncome: applicationForm.monthlyIncome || null,
-        moveInDate: applicationForm.moveInDate || null,
+        employment: applicationForm.employment.trim(),
+        monthlyIncome: applicationForm.monthlyIncome,
+        moveInDate: applicationForm.moveInDate,
         notes: applicationForm.notes,
       });
       setSuccess(`Rental application submitted for ${selectedInquiry.prospect_name}.`);
@@ -188,18 +229,32 @@ export default function AgentDashboard() {
       setApplications(updatedApplications);
     } catch (err) {
       const apiError = err.response?.data;
-      setError(typeof apiError === 'string' ? apiError : apiError?.detail || apiError?.inquiry?.[0] || 'Failed to submit rental application.');
+      const fieldError = apiError && typeof apiError === 'object'
+        ? Object.values(apiError).flat().find((message) => typeof message === 'string')
+        : '';
+      setError(typeof apiError === 'string' ? apiError : apiError?.detail || fieldError || 'Failed to submit rental application.');
     } finally {
       setSavingApplication(false);
     }
   };
 
   const handleInquiryStatusChange = async (inquiry, status) => {
+    const cancelsViewing = ['New', 'Closed'].includes(status) && Boolean(inquiry.viewing_at);
     try {
-      const updated = await updateInquiry(inquiry.id, { status });
+      const updated = await updateInquiry(inquiry.id, {
+        status,
+        ...(cancelsViewing ? { viewing_at: null } : {}),
+      });
       setInquiries((items) => items.map((item) => item.id === updated.id ? updated : item));
+      setSuccess(cancelsViewing
+        ? (status === 'Closed' ? 'Viewing cancelled and inquiry closed.' : 'Viewing cancelled. Inquiry returned to New.')
+        : 'Inquiry status updated.');
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to update inquiry status.');
+      const apiError = err.response?.data;
+      const fieldError = apiError && typeof apiError === 'object'
+        ? Object.values(apiError).flat().find((message) => typeof message === 'string')
+        : '';
+      setError(fieldError || apiError?.detail || 'Failed to update inquiry status.');
     }
   };
 
@@ -400,29 +455,71 @@ export default function AgentDashboard() {
               )}
             </Row>
             <div className="pm-panel mt-2" id="inquiries" data-workspace-section="inquiries">
-              <div className="pm-panel-header">Prospects and viewing inquiries ({inquiries.length})</div>
+              <div className="pm-prospects-header">
+                <div>
+                  <h2>Prospect pipeline</h2>
+                  <p>Manage inquiries, scheduled viewings, and rental applications.</p>
+                </div>
+                <Badge className="pm-prospects-count">{inquiries.length} {inquiries.length === 1 ? 'prospect' : 'prospects'}</Badge>
+              </div>
               <Table responsive className="pm-table mb-0">
-                <thead><tr><th>Prospect</th><th>Property</th><th>Viewing</th><th>Notes</th><th>Status</th><th>Application</th></tr></thead>
+                <thead><tr><th>Prospect</th><th>Property / unit</th><th>Viewing appointment</th><th>Notes</th><th>Status</th><th>Application</th><th>Actions</th></tr></thead>
                 <tbody>
                   {inquiries.map((inquiry) => (
-                    <tr key={inquiry.id}>
-                      <td>{inquiry.prospect_name}<div className="text-muted small">{inquiry.prospect_email}</div></td>
-                      <td>{properties.find((property) => Number(property._id) === Number(inquiry.property))?.title || inquiry.property}</td>
-                      <td>{inquiry.viewing_at ? new Date(inquiry.viewing_at).toLocaleString() : 'Not scheduled'}</td>
-                      <td>{inquiry.notes}</td>
+                    <tr key={inquiry.id} className={`pm-prospect-row pm-prospect-${getInquiryStatus(inquiry).toLowerCase().replaceAll(' ', '-')}`}>
                       <td>
-                        <Form.Select size="sm" value={inquiry.status} onChange={(e) => handleInquiryStatusChange(inquiry, e.target.value)}>
-                          {['New', 'Viewing Scheduled', 'Application In Progress', 'Converted', 'Closed'].map((status) => <option key={status}>{status}</option>)}
+                        <span className="pm-prospect-name">{inquiry.prospect_name}</span>
+                        <span className="pm-prospect-email">{inquiry.prospect_email || 'No email provided'}</span>
+                      </td>
+                      <td>
+                        <span className="pm-prospect-name">{properties.find((property) => Number(property._id) === Number(inquiry.property))?.title || `Property ${inquiry.property}`}</span>
+                        {inquiry.unit && <span className="pm-prospect-email">Unit {properties.flatMap((property) => property.units || []).find((unit) => Number(unit._id) === Number(inquiry.unit))?.unitNumber || inquiry.unit}</span>}
+                      </td>
+                      <td className="pm-viewing-cell">
+                        {inquiry.viewing_at
+                          ? <><span className="pm-prospect-name">{formatViewingDate(inquiry.viewing_at)}</span><span className="pm-prospect-email">{getInquiryStatus(inquiry) === 'Viewing Scheduled' ? 'Appointment scheduled' : 'Previous appointment'}</span></>
+                          : <span className="pm-prospect-email">No appointment scheduled</span>}
+                      </td>
+                      <td className="pm-prospect-notes" title={inquiry.notes || ''}>{inquiry.notes || '—'}</td>
+                      <td>
+                        <Form.Select size="sm" className={`pm-prospect-status status-${getInquiryStatus(inquiry).toLowerCase().replaceAll(' ', '-')}`} value={getInquiryStatus(inquiry)} aria-label={`Status for ${inquiry.prospect_name}`} onChange={(e) => handleInquiryStatusChange(inquiry, e.target.value)}>
+                          {['New', 'Viewing Scheduled', 'Application In Progress', 'Converted', 'Closed'].map((status) => {
+                            const relatedApplication = applications.find((application) => Number(application.inquiry) === Number(inquiry.id));
+                            const currentStatus = getInquiryStatus(inquiry);
+                            const requiresViewing = status === 'Viewing Scheduled' && currentStatus !== 'Viewing Scheduled';
+                            const requiresApplication = status === 'Application In Progress' && !relatedApplication;
+                            const requiresConversion = status === 'Converted' && relatedApplication?.status !== 'Converted';
+                            return <option key={status} disabled={requiresViewing || requiresApplication || requiresConversion}>{status}</option>;
+                          })}
                         </Form.Select>
                       </td>
                       <td>
-                        {applications.some((application) => application.inquiry === inquiry.id)
-                          ? <Badge bg="info">Application started</Badge>
-                          : <Button size="sm" variant="outline-primary" onClick={() => openApplicationForm(inquiry)}>Start application</Button>}
+                        {(() => {
+                          const currentStatus = getInquiryStatus(inquiry);
+                          const relatedApplication = applications.find((application) => Number(application.inquiry) === Number(inquiry.id));
+                          if (currentStatus === 'Closed') return <Badge bg="secondary">Closed</Badge>;
+                          if (currentStatus === 'Converted') return <Badge className="pm-application-badge" bg="info">Converted</Badge>;
+                          if (relatedApplication) return <Badge className="pm-application-badge" bg="info">Application {relatedApplication.status}</Badge>;
+                          if (currentStatus === 'Application In Progress') return <Badge className="pm-application-badge" bg="warning" text="dark">In progress</Badge>;
+                          return <Button size="sm" variant="outline-primary" className="pm-prospect-action" onClick={() => openApplicationForm(inquiry)}>Start application</Button>;
+                        })()}
+                      </td>
+                      <td>
+                        {['Closed', 'Converted'].includes(getInquiryStatus(inquiry))
+                          ? <span className="pm-no-action">—</span>
+                          : <Button
+                              size="sm"
+                              variant="outline-primary"
+                              className="pm-prospect-action"
+                              disabled={getInquiryStatus(inquiry) === 'Application In Progress'}
+                              onClick={() => handleOpenViewingModal(inquiry.property, inquiry.unit || '', inquiry)}
+                            >
+                              {inquiry.viewing_at ? 'Reschedule' : 'Schedule'}
+                            </Button>}
                       </td>
                     </tr>
                   ))}
-                  {inquiries.length === 0 && <tr><td colSpan="6" className="pm-empty-row">No inquiries recorded yet.</td></tr>}
+                  {inquiries.length === 0 && <tr><td colSpan="7" className="pm-empty-row"><strong>No prospects yet</strong><span>New inquiries and scheduled appointments will appear here.</span></td></tr>}
                 </tbody>
               </Table>
             </div>
@@ -449,32 +546,38 @@ export default function AgentDashboard() {
           </>
         )}
 
-        <Modal show={showApplicationModal} onHide={() => !savingApplication && setShowApplicationModal(false)} centered dialogClassName="pm-modal">
+        <Modal show={showApplicationModal} onHide={() => !savingApplication && setShowApplicationModal(false)} centered dialogClassName="pm-modal pm-application-modal">
           <Modal.Header closeButton>
-            <Modal.Title>Rental application · {selectedInquiry?.prospect_name}</Modal.Title>
+            <div>
+              <Modal.Title>Rental application</Modal.Title>
+              <p className="pm-application-subtitle mb-0">
+                {selectedInquiry?.prospect_name} · {properties.find((property) => Number(property._id) === Number(selectedInquiry?.property))?.title || 'Selected property'}
+                {selectedInquiry?.unit && ` · Unit ${properties.flatMap((property) => property.units || []).find((unit) => Number(unit._id) === Number(selectedInquiry.unit))?.unitNumber || selectedInquiry.unit}`}
+              </p>
+            </div>
           </Modal.Header>
           <Form onSubmit={handleApplicationSubmit}>
             <Modal.Body>
-              <p className="text-muted small">{selectedInquiry?.prospect_email || 'No email provided'} · {properties.find((property) => Number(property._id) === Number(selectedInquiry?.property))?.title || 'Selected property'}</p>
-              <Form.Group className="mb-3">
-                <Form.Label className="pm-form-label">Applicant email</Form.Label>
-                <Form.Control className="pm-input" type="email" required value={applicationForm.applicantEmail} onChange={(e) => setApplicationForm({ ...applicationForm, applicantEmail: e.target.value })} />
+              {error && <div className="pm-alert pm-alert-error mb-3" role="alert">{error}</div>}
+              <Form.Group className="mb-3" controlId="application-email">
+                <Form.Label className="pm-form-label">Applicant email <span className="pm-required-marker" aria-hidden="true">*</span></Form.Label>
+                <Form.Control className="pm-input" type="email" autoComplete="email" required value={applicationForm.applicantEmail} onChange={(e) => setApplicationForm({ ...applicationForm, applicantEmail: e.target.value })} />
               </Form.Group>
-              <Form.Group className="mb-3">
-                <Form.Label className="pm-form-label">Employment / occupation</Form.Label>
-                <Form.Control className="pm-input" value={applicationForm.employment} onChange={(e) => setApplicationForm({ ...applicationForm, employment: e.target.value })} placeholder="Employer or occupation" />
+              <Form.Group className="mb-3" controlId="application-employment">
+                <Form.Label className="pm-form-label">Employment / occupation <span className="pm-required-marker" aria-hidden="true">*</span></Form.Label>
+                <Form.Control className="pm-input" required value={applicationForm.employment} onChange={(e) => setApplicationForm({ ...applicationForm, employment: e.target.value })} placeholder="Employer or occupation" />
               </Form.Group>
-              <Form.Group className="mb-3">
-                <Form.Label className="pm-form-label">Monthly income (₱)</Form.Label>
-                <Form.Control className="pm-input" type="number" min="0" step="0.01" value={applicationForm.monthlyIncome} onChange={(e) => setApplicationForm({ ...applicationForm, monthlyIncome: e.target.value })} />
+              <Form.Group className="mb-3" controlId="application-income">
+                <Form.Label className="pm-form-label">Monthly income (₱) <span className="pm-required-marker" aria-hidden="true">*</span></Form.Label>
+                <Form.Control className="pm-input" type="number" min="0" step="0.01" required value={applicationForm.monthlyIncome} onChange={(e) => setApplicationForm({ ...applicationForm, monthlyIncome: e.target.value })} />
               </Form.Group>
-              <Form.Group className="mb-3">
-                <Form.Label className="pm-form-label">Requested move-in date</Form.Label>
-                <Form.Control className="pm-input" type="date" value={applicationForm.moveInDate} onChange={(e) => setApplicationForm({ ...applicationForm, moveInDate: e.target.value })} />
+              <Form.Group className="mb-3" controlId="application-move-in-date">
+                <Form.Label className="pm-form-label">Requested move-in date <span className="pm-required-marker" aria-hidden="true">*</span></Form.Label>
+                <Form.Control className="pm-input" type="date" required value={applicationForm.moveInDate} onChange={(e) => setApplicationForm({ ...applicationForm, moveInDate: e.target.value })} />
               </Form.Group>
-              <Form.Group>
-                <Form.Label className="pm-form-label">Application notes</Form.Label>
-                <Form.Control className="pm-input" as="textarea" rows={3} value={applicationForm.notes} onChange={(e) => setApplicationForm({ ...applicationForm, notes: e.target.value })} />
+              <Form.Group controlId="application-notes">
+                <Form.Label className="pm-form-label">Application notes <span className="pm-optional-marker">Optional</span></Form.Label>
+                <Form.Control className="pm-input" as="textarea" rows={2} value={applicationForm.notes} onChange={(e) => setApplicationForm({ ...applicationForm, notes: e.target.value })} />
               </Form.Group>
             </Modal.Body>
             <Modal.Footer>
@@ -485,38 +588,48 @@ export default function AgentDashboard() {
         </Modal>
 
         {/* Modal: Schedule Viewing / Match Tenant */}
-        <Modal show={showViewingModal} onHide={() => setShowViewingModal(false)} centered dialogClassName="pm-modal">
+        <Modal show={showViewingModal} onHide={() => !savingInquiry && setShowViewingModal(false)} centered dialogClassName="pm-modal pm-viewing-modal">
           <Modal.Header closeButton>
-            <Modal.Title>Schedule viewing / tenant inquiry</Modal.Title>
+            <div>
+              <Modal.Title>{viewingData.inquiryId ? 'Update viewing' : 'Schedule a viewing'}</Modal.Title>
+              <p className="pm-viewing-subtitle mb-0">
+                {properties.find((property) => Number(property._id) === Number(viewingData.propertyId))?.title || 'Selected property'}
+                {viewingData.unitId && ` · Unit ${properties.flatMap((property) => property.units || []).find((unit) => Number(unit._id) === Number(viewingData.unitId))?.unitNumber || viewingData.unitId}`}
+              </p>
+            </div>
           </Modal.Header>
           <Modal.Body>
+            {error && <div className="pm-alert pm-alert-error pm-modal-error mb-3" role="alert">{error}</div>}
             <Form onSubmit={handleScheduleSubmit}>
-              <Form.Group className="mb-3">
-                <Form.Label className="pm-form-label">Prospect name</Form.Label>
+              <Form.Group className="mb-3" controlId="viewing-prospect-name">
+                <Form.Label className="pm-form-label">Prospect name <span className="pm-required-marker" aria-hidden="true">*</span></Form.Label>
                 <Form.Control
                   className="pm-input"
+                  placeholder="Full name"
                   value={viewingData.prospectName}
                   onChange={(e) => setViewingData({ ...viewingData, prospectName: e.target.value })}
                   required
                 />
               </Form.Group>
-              <Form.Group className="mb-3">
-                <Form.Label className="pm-form-label">Prospect email</Form.Label>
-                <Form.Control className="pm-input" type="email" value={viewingData.prospectEmail} onChange={(e) => setViewingData({ ...viewingData, prospectEmail: e.target.value })} />
+              <Form.Group className="mb-3" controlId="viewing-prospect-email">
+                <Form.Label className="pm-form-label">Prospect email <span className="pm-optional-marker">Optional</span></Form.Label>
+                <Form.Control className="pm-input" type="email" placeholder="name@example.com" value={viewingData.prospectEmail} onChange={(e) => setViewingData({ ...viewingData, prospectEmail: e.target.value })} />
               </Form.Group>
 
-              <Form.Group className="mb-3">
-                <Form.Label className="pm-form-label">Proposed Viewing Date</Form.Label>
+              <Form.Group className="mb-3" controlId="viewing-date">
+                <Form.Label className="pm-form-label">Viewing date and time <span className="pm-required-marker" aria-hidden="true">*</span></Form.Label>
                 <Form.Control
                   className="pm-input"
                   type="datetime-local"
+                  min={getLocalDateTimeNow()}
                   value={viewingData.viewingAt}
                   onChange={(e) => setViewingData({ ...viewingData, viewingAt: e.target.value })}
+                  required
                 />
               </Form.Group>
 
-              <Form.Group className="mb-4">
-                <Form.Label className="pm-form-label">Client Application Notes</Form.Label>
+              <Form.Group className="mb-4" controlId="viewing-notes">
+                <Form.Label className="pm-form-label">Notes <span className="pm-optional-marker">Optional</span></Form.Label>
                 <Form.Control
                   as="textarea"
                   rows={3}
@@ -527,8 +640,8 @@ export default function AgentDashboard() {
                 />
               </Form.Group>
 
-              <Button variant="light" className="pm-btn-primary w-100 py-2" type="submit">
-                {savingInquiry ? 'Saving…' : 'Save inquiry'}
+              <Button variant="primary" className="pm-btn-primary w-100 py-2" type="submit" disabled={savingInquiry}>
+                {savingInquiry ? 'Saving…' : viewingData.inquiryId ? 'Update viewing' : 'Schedule viewing'}
               </Button>
             </Form>
           </Modal.Body>

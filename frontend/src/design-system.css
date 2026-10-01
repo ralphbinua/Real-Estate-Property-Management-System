@@ -223,6 +223,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .pm-manager[data-active-section="properties"] [data-workspace-section~="properties"],
 .pm-agent[data-active-section="listings"] [data-workspace-section~="listings"],
 .pm-owner[data-active-section="portfolio"] [data-workspace-section~="portfolio"],
+.pm-owner[data-active-section="approvals"] [data-workspace-section~="approvals"],
 .pm-admin[data-active-section="users"] [data-workspace-section~="users"],
 .pm-admin[data-active-section="contracts"] [data-workspace-section~="contracts"],
 .pm-manager[data-active-section="contracts"] [data-workspace-section~="contracts"],

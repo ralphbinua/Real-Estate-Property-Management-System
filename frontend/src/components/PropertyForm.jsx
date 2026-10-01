@@ -11,6 +11,7 @@ export default function PropertyForm({ onPropertyCreated }) {
     price: '',
     propertyType: 'Apartment',
     status: 'Available',
+    applicationApprovalMode: 'Manager',
     owner: '',
     manager: '',
     assignedAgents: [],
@@ -51,6 +52,7 @@ export default function PropertyForm({ onPropertyCreated }) {
       price: Number(formData.price || (['Apartment', 'Condo'].includes(formData.propertyType) ? formData.units[0]?.monthlyRate : 0) || 0),
       propertyType: formData.propertyType,
       status: formData.status,
+      applicationApprovalMode: formData.applicationApprovalMode,
       assignedAgents: formData.assignedAgents,
     };
     if (['Apartment', 'Condo'].includes(formData.propertyType)) {
@@ -227,6 +229,18 @@ export default function PropertyForm({ onPropertyCreated }) {
           </Form.Group>
         </Col>
       </Row>
+
+      <Form.Group className="mb-3">
+        <Form.Label className="fw-bold text-secondary">Rental application approval</Form.Label>
+        <Form.Select
+          value={formData.applicationApprovalMode}
+          onChange={(e) => setFormData({ ...formData, applicationApprovalMode: e.target.value })}
+        >
+          <option value="Manager">Property Manager reviews and decides</option>
+          <option value="Owner">Property Manager reviews; Owner makes final decision</option>
+        </Form.Select>
+        <Form.Text className="text-muted">Choose who makes the final decision on rental applications for this property.</Form.Text>
+      </Form.Group>
 
       <Button variant="primary" type="submit" className="w-100 fw-bold py-2 mt-2" disabled={loading}>
         {loading ? 'Saving Property...' : 'Submit Property'}

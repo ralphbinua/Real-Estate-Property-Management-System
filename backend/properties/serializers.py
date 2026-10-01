@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils import timezone
 from .models import Property, Unit, PropertyInquiry, RentalApplication
 from users.serializers import UserSerializer
 from django.contrib.auth import get_user_model
@@ -16,6 +17,18 @@ class UnitSerializer(serializers.ModelSerializer):
     class Meta:
         model = Unit
         fields = ['_id', 'propertyId', 'unitNumber', 'monthlyRate', 'status', 'tenantId', 'tenantDetails']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user and user.role == User.Role.AGENT:
+            data.pop('tenantId', None)
+            data.pop('tenantDetails', None)
+        elif user and user.role == User.Role.TENANT and instance.tenant_id != user.pk:
+            data.pop('tenantId', None)
+            data.pop('tenantDetails', None)
+        return data
 
 
 class UnitManagementSerializer(serializers.ModelSerializer):
@@ -39,9 +52,18 @@ class UnitManagementSerializer(serializers.ModelSerializer):
         if property_obj and unit_number and Unit.objects.filter(property=property_obj, unit_number=unit_number).exclude(pk=getattr(self.instance, 'pk', None)).exists():
             raise serializers.ValidationError({'unitNumber': 'This unit number is already used on the selected property.'})
         requested_status = attrs.get('status', getattr(self.instance, 'status', 'Available'))
+        has_approved_application = bool(self.instance and RentalApplication.objects.filter(
+            inquiry__unit=self.instance, status='Approved'
+        ).exists())
+        if has_approved_application and requested_status != 'Reserved':
+            raise serializers.ValidationError({'status': 'This unit is reserved for an approved rental application. Convert or reject that application before releasing the unit.'})
         if requested_status in ('Occupied', 'Reserved'):
             related_contracts = self.instance.contracts.filter(is_deleted=False) if self.instance else Unit.objects.none()
-            expected = 'Occupied' if related_contracts.filter(status='Active').exists() else 'Reserved' if related_contracts.filter(status='Pending').exists() else None
+            expected = (
+                'Occupied' if related_contracts.filter(status='Active').exists()
+                else 'Reserved' if related_contracts.filter(status='Pending').exists() or has_approved_application
+                else None
+            )
             if requested_status != expected:
                 raise serializers.ValidationError({'status': 'Units become occupied or reserved through a lease contract.'})
         if self.instance and self.instance.contracts.filter(status__in=['Active', 'Pending'], is_deleted=False).exists():
@@ -56,6 +78,9 @@ class UnitManagementSerializer(serializers.ModelSerializer):
 class PropertySerializer(serializers.ModelSerializer):
     _id = serializers.IntegerField(source='id', read_only=True)
     propertyType = serializers.CharField(source='property_type')
+    applicationApprovalMode = serializers.ChoiceField(
+        source='application_approval_mode', choices=Property.APPLICATION_APPROVAL_MODES, required=False
+    )
     monthlyRate = serializers.DecimalField(source='price', max_digits=10, decimal_places=2, required=False)
     units = UnitSerializer(many=True, required=False)
 
@@ -79,7 +104,7 @@ class PropertySerializer(serializers.ModelSerializer):
         model = Property
         fields = [
             '_id', 'title', 'description', 'address', 'propertyType', 'price', 
-            'monthlyRate', 'status', 'units', 'owner', 'manager', 'assignedAgents',
+            'monthlyRate', 'status', 'applicationApprovalMode', 'units', 'owner', 'manager', 'assignedAgents',
             'ownerDetails', 'managerDetails'
         ]
 
@@ -87,10 +112,19 @@ class PropertySerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         request = self.context.get('request')
         if request and getattr(request.user, 'role', None) != User.Role.ADMIN:
-            for field_name in ('owner', 'manager', 'assignedAgents'):
+            for field_name in ('owner', 'manager', 'assignedAgents', 'applicationApprovalMode'):
                 self.fields[field_name].read_only = True
         if self.instance is not None:
             self.fields['units'].read_only = True
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user and user.role in (User.Role.AGENT, User.Role.TENANT):
+            data.pop('owner', None)
+            data.pop('ownerDetails', None)
+        return data
 
     def validate_units(self, units):
         unit_numbers = [str(unit.get('unit_number', '')).strip().casefold() for unit in units]
@@ -99,6 +133,29 @@ class PropertySerializer(serializers.ModelSerializer):
         if len(unit_numbers) != len(set(unit_numbers)):
             raise serializers.ValidationError('Unit numbers must be unique within the property.')
         return units
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None)
+        requested_mode = attrs.get(
+            'application_approval_mode',
+            getattr(self.instance, 'application_approval_mode', 'Manager'),
+        )
+        requested_owner = attrs.get('owner', getattr(self.instance, 'owner', None))
+        if actor and actor.role == User.Role.ADMIN and requested_mode == 'Owner' and not requested_owner:
+            raise serializers.ValidationError({
+                'owner': 'Assign a property owner before requiring Owner approval for applications.'
+            })
+        if self.instance and self.instance.status == 'Pending':
+            requested_status = attrs.get('status', self.instance.status)
+            has_approved_application = RentalApplication.objects.filter(
+                inquiry__property=self.instance,
+                inquiry__unit__isnull=True,
+                status='Approved',
+            ).exists()
+            if has_approved_application and requested_status != 'Pending':
+                raise serializers.ValidationError({'status': 'This property is reserved for an approved rental application. Convert or reject that application before releasing it.'})
+        return super().validate(attrs)
 
     def create(self, validated_data):
         units_data = validated_data.pop('units', [])
@@ -152,32 +209,52 @@ class PropertyInquirySerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'status': 'Convert this inquiry by creating a lease from its approved application.'})
         if 'status' in attrs and attrs['status'] == 'Viewing Scheduled' and not attrs.get('viewing_at', getattr(self.instance, 'viewing_at', None)):
             raise serializers.ValidationError({'viewing_at': 'Set a viewing date and time before marking this inquiry as scheduled.'})
+        viewing_at = attrs.get('viewing_at', getattr(self.instance, 'viewing_at', None))
+        if viewing_at and ('viewing_at' in attrs or requested_status == 'Viewing Scheduled') and viewing_at <= timezone.now():
+            raise serializers.ValidationError({'viewing_at': 'Choose a future date and time for the viewing.'})
         return attrs
 
 
 class RentalApplicationSerializer(serializers.ModelSerializer):
     inquiryDetails = PropertyInquirySerializer(source='inquiry', read_only=True)
     applicantName = serializers.CharField(source='inquiry.prospect_name', read_only=True)
-    applicantEmail = serializers.EmailField(source='applicant_email')
+    applicantEmail = serializers.EmailField(source='applicant_email', required=True, allow_blank=False)
+    applicationApprovalMode = serializers.CharField(source='inquiry.property.application_approval_mode', read_only=True)
+    employment = serializers.CharField(required=True, allow_blank=False, trim_whitespace=True)
     propertyDetails = PropertySerializer(source='inquiry.property', read_only=True)
     unitDetails = UnitSerializer(source='inquiry.unit', read_only=True, allow_null=True)
-    monthlyIncome = serializers.DecimalField(source='monthly_income', max_digits=12, decimal_places=2, required=False, allow_null=True)
-    moveInDate = serializers.DateField(source='move_in_date', required=False, allow_null=True)
+    monthlyIncome = serializers.DecimalField(source='monthly_income', max_digits=12, decimal_places=2, min_value=0, required=True)
+    moveInDate = serializers.DateField(source='move_in_date', required=True)
     reviewNotes = serializers.CharField(source='review_notes', required=False, allow_blank=True)
+    ownerReviewNotes = serializers.CharField(source='owner_review_notes', required=False, allow_blank=True)
     createdBy = UserSerializer(source='created_by', read_only=True)
     reviewedBy = UserSerializer(source='reviewed_by', read_only=True)
+    ownerReviewedBy = UserSerializer(source='owner_reviewed_by', read_only=True)
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     reviewedAt = serializers.DateTimeField(source='reviewed_at', read_only=True, allow_null=True)
+    ownerReviewedAt = serializers.DateTimeField(source='owner_reviewed_at', read_only=True, allow_null=True)
 
     class Meta:
         model = RentalApplication
         fields = [
-            'id', 'inquiry', 'inquiryDetails', 'applicantName', 'applicantEmail',
+            'id', 'inquiry', 'inquiryDetails', 'applicantName', 'applicantEmail', 'applicationApprovalMode',
             'propertyDetails', 'unitDetails', 'employment', 'monthlyIncome',
-            'moveInDate', 'notes', 'status', 'reviewNotes', 'createdBy',
-            'reviewedBy', 'createdAt', 'reviewedAt',
+            'moveInDate', 'notes', 'status', 'reviewNotes', 'ownerReviewNotes', 'createdBy',
+            'reviewedBy', 'ownerReviewedBy', 'createdAt', 'reviewedAt', 'ownerReviewedAt',
         ]
-        read_only_fields = ['id', 'createdBy', 'reviewedBy', 'createdAt', 'reviewedAt']
+        read_only_fields = [
+            'id', 'createdBy', 'reviewedBy', 'ownerReviewedBy', 'createdAt', 'reviewedAt',
+            'ownerReviewedAt', 'applicationApprovalMode',
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user and user.role not in (User.Role.ADMIN, User.Role.PROPERTY_MANAGER):
+            self.fields['reviewNotes'].read_only = True
+        if user and user.role not in (User.Role.ADMIN, User.Role.OWNER):
+            self.fields['ownerReviewNotes'].read_only = True
 
     def validate_inquiry(self, inquiry):
         request = self.context.get('request')
@@ -189,15 +266,44 @@ class RentalApplicationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('You may only apply for inquiries on properties you manage.')
         if RentalApplication.objects.filter(inquiry=inquiry).exclude(pk=getattr(self.instance, 'pk', None)).exists():
             raise serializers.ValidationError('An application already exists for this inquiry.')
+        if inquiry.unit_id and inquiry.unit.status != 'Available':
+            raise serializers.ValidationError({'inquiry': 'This unit is no longer available for applications.'})
+        if not inquiry.unit_id and inquiry.property.status != 'Available':
+            raise serializers.ValidationError({'inquiry': 'This property is no longer available for applications.'})
         return inquiry
 
     def validate_status(self, status):
         if self.instance is None:
             raise serializers.ValidationError('New applications must be submitted through the application workflow.')
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        role = getattr(user, 'role', None)
+        current = self.instance.status
+        approval_mode = self.instance.inquiry.property.application_approval_mode
+
+        if status == 'Pending Owner Approval' and approval_mode != 'Owner':
+            raise serializers.ValidationError('Owner approval is not enabled for this property.')
+
+        if role == User.Role.OWNER:
+            if current != 'Pending Owner Approval' or status not in ('Approved', 'Rejected'):
+                raise serializers.ValidationError('Owners may decide only applications awaiting their approval.')
+            return status
+
+        if role == User.Role.PROPERTY_MANAGER and approval_mode == 'Owner':
+            manager_transitions = {
+                'Submitted': {'Under Review'},
+                'Under Review': {'Pending Owner Approval'},
+                'Approved': {'Rejected'},
+            }
+            if status not in manager_transitions.get(current, set()):
+                raise serializers.ValidationError('This property requires Owner approval before an application can be approved or rejected.')
+            return status
+
         transitions = {
             'Submitted': {'Under Review', 'Approved', 'Rejected'},
-            'Under Review': {'Approved', 'Rejected'},
-            'Approved': set(),
+            'Under Review': {'Pending Owner Approval', 'Approved', 'Rejected'},
+            'Pending Owner Approval': set(),
+            'Approved': {'Rejected'},
             'Rejected': set(),
             'Converted': set(),
         }

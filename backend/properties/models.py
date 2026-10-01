@@ -15,6 +15,10 @@ class Property(models.Model):
         ('Pending', 'Pending'),
         ('Under Maintenance', 'Under Maintenance'),
     ]
+    APPLICATION_APPROVAL_MODES = [
+        ('Manager', 'Property Manager decides'),
+        ('Owner', 'Owner approval required'),
+    ]
 
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default='')
@@ -22,6 +26,9 @@ class Property(models.Model):
     property_type = models.CharField(max_length=20, choices=PROPERTY_TYPES)
     price = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # single-unit rate (e.g. House)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Available')
+    application_approval_mode = models.CharField(
+        max_length=20, choices=APPLICATION_APPROVAL_MODES, default='Manager'
+    )
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='owned_properties')
     manager = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='managed_properties')
@@ -105,6 +112,7 @@ class RentalApplication(models.Model):
     STATUS_CHOICES = [
         ('Submitted', 'Submitted'),
         ('Under Review', 'Under Review'),
+        ('Pending Owner Approval', 'Pending Owner Approval'),
         ('Approved', 'Approved'),
         ('Rejected', 'Rejected'),
         ('Converted', 'Converted'),
@@ -116,12 +124,15 @@ class RentalApplication(models.Model):
     monthly_income = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     move_in_date = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True, default='')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Submitted')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='Submitted')
     review_notes = models.TextField(blank=True, default='')
+    owner_review_notes = models.TextField(blank=True, default='')
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='created_rental_applications')
     reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_rental_applications')
+    owner_reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='owner_reviewed_rental_applications')
     created_at = models.DateTimeField(auto_now_add=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
+    owner_reviewed_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"Application — {self.inquiry.prospect_name} ({self.status})"

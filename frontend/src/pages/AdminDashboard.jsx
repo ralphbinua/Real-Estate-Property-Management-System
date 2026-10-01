@@ -149,6 +149,7 @@ export default function AdminDashboard() {
       owner: prop.owner || prop.ownerDetails?._id || prop.ownerDetails?.id || '',
       manager: prop.manager || prop.managerDetails?._id || prop.managerDetails?.id || '',
       assignedAgents: prop.assignedAgents || [],
+      applicationApprovalMode: prop.applicationApprovalMode || 'Manager',
     });
     setShowEditModal(true);
   };
@@ -167,6 +168,7 @@ export default function AdminDashboard() {
         owner: editingProperty.owner ? Number(editingProperty.owner) : null,
         manager: editingProperty.manager ? Number(editingProperty.manager) : null,
         assignedAgents: editingProperty.assignedAgents.map(Number),
+        applicationApprovalMode: editingProperty.applicationApprovalMode || 'Manager',
       };
 
       await updateProperty(editingProperty._id || editingProperty.id, payload);
@@ -725,6 +727,18 @@ export default function AdminDashboard() {
                     </Form.Select>
                   </Col>
                 </Row>
+                <Form.Group className="mb-3">
+                  <Form.Label className="pm-form-label">Rental application approval</Form.Label>
+                  <Form.Select
+                    className="pm-input"
+                    value={editingProperty.applicationApprovalMode || 'Manager'}
+                    onChange={(e) => setEditingProperty({ ...editingProperty, applicationApprovalMode: e.target.value })}
+                  >
+                    <option value="Manager">Property Manager reviews and decides</option>
+                    <option value="Owner">Property Manager reviews; Owner makes final decision</option>
+                  </Form.Select>
+                  <Form.Text className="text-muted">Owner approval applies to this property’s rental applications.</Form.Text>
+                </Form.Group>
                 <Row className="mb-3">
                   <Col md={6}>
                     <Form.Label className="pm-form-label">Assign Owner</Form.Label>

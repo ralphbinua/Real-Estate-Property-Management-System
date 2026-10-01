@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Container, Table, Form, Spinner, Button, Row, Col, Badge, Modal } from 'react-bootstrap';
-import { fetchProperties, createProperty, updateProperty, deleteProperty } from '../services/propertyService';
+import { fetchProperties, updateProperty, deleteProperty } from '../services/propertyService';
 import { fetchContracts, createContract, terminateContract } from '../services/contractService';
 import { fetchAssignableTenants } from '../services/userService';
 import { fetchInvoices } from '../services/invoiceService';
@@ -27,6 +27,7 @@ const PILL_CLASS = {
   terminated: 'pm-pill-terminated',
   submitted: 'pm-pill-pending',
   'under review': 'pm-pill-active',
+  'pending owner approval': 'pm-pill-pending',
   approved: 'pm-pill-available',
   rejected: 'pm-pill-terminated',
   converted: 'pm-pill-occupied',
@@ -51,6 +52,7 @@ export default function ManagerDashboard() {
   const [invoices, setInvoices] = useState([]);
   const [inquiries, setInquiries] = useState([]);
   const [applications, setApplications] = useState([]);
+  const [managerReviewNotes, setManagerReviewNotes] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -76,21 +78,11 @@ export default function ManagerDashboard() {
     rentAmount: ''
   });
 
-  // New Property Modal State
-  const [showPropertyModal, setShowPropertyModal] = useState(false);
   const [showPropertyEditModal, setShowPropertyEditModal] = useState(false);
   const [editingProperty, setEditingProperty] = useState(null);
   const [showUnitModal, setShowUnitModal] = useState(false);
   const [unitData, setUnitData] = useState({ id: null, property: '', unitNumber: '', monthlyRate: '', status: 'Available' });
   const [leaseTermMonths, setLeaseTermMonths] = useState(12);
-  const [propertyFormData, setPropertyFormData] = useState({
-    title: '',
-    address: '',
-    propertyType: 'Apartment',
-    price: '',
-    units: [{ unitNumber: '101', monthlyRate: '' }],
-  });
-
   // Filter State
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
@@ -235,11 +227,25 @@ export default function ManagerDashboard() {
     setError('');
     setSuccess('');
     try {
-      await reviewApplication(application.id, { status });
-      setSuccess(`Application ${status.toLowerCase()}.`);
-      setApplications(await fetchApplications());
+      await reviewApplication(application.id, {
+        status,
+        ...(status === 'Pending Owner Approval' ? { reviewNotes: managerReviewNotes[application.id]?.trim() || '' } : {}),
+      });
+      setManagerReviewNotes((current) => {
+        const next = { ...current };
+        delete next[application.id];
+        return next;
+      });
+      setSuccess(status === 'Pending Owner Approval'
+        ? 'Application sent to the property owner for a decision.'
+        : `Application ${status.toLowerCase()}.`);
+      const [updatedApplications, updatedProperties, updatedInquiries] = await Promise.all([fetchApplications(), fetchProperties(), fetchInquiries()]);
+      setApplications(updatedApplications);
+      setProperties(updatedProperties);
+      setInquiries(updatedInquiries);
     } catch (err) {
-      setError(err.response?.data?.status?.[0] || err.response?.data?.detail || `Unable to ${status.toLowerCase()} this application.`);
+      const responseData = err.response?.data;
+      setError(responseData?.status?.[0] || responseData?.unit?.[0] || responseData?.detail || `Unable to ${status.toLowerCase()} this application.`);
     }
   };
 
@@ -309,39 +315,6 @@ export default function ManagerDashboard() {
       setInquiries((items) => items.map((item) => item.id === updated.id ? updated : item));
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to update prospect inquiry.');
-    }
-  };
-
-  const handlePropertySubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setSuccess('');
-
-    try {
-      const hasUnits = ['Apartment', 'Condo'].includes(propertyFormData.propertyType);
-      const units = hasUnits
-        ? propertyFormData.units.map((unit) => ({
-            unitNumber: unit.unitNumber.trim(),
-            monthlyRate: Number(unit.monthlyRate),
-            status: 'Available',
-          }))
-        : [];
-
-      const payload = {
-        title: propertyFormData.title,
-        address: propertyFormData.address,
-        propertyType: propertyFormData.propertyType,
-        price: Number(propertyFormData.price || (hasUnits ? propertyFormData.units[0]?.monthlyRate : 0) || 0),
-        units,
-      };
-
-      await createProperty(payload);
-      setSuccess('New property listing created successfully!');
-      setPropertyFormData({ title: '', address: '', propertyType: 'Apartment', price: '', units: [{ unitNumber: '101', monthlyRate: '' }] });
-      setShowPropertyModal(false);
-      loadManagerData();
-    } catch (err) {
-      setError(err.response?.data?.message || 'Failed to add property listing.');
     }
   };
 
@@ -451,13 +424,6 @@ export default function ManagerDashboard() {
             </p>
           </div>
           <div className="d-flex gap-2">
-            <Button
-              variant="light"
-              className="pm-btn-primary"
-              onClick={() => setShowPropertyModal(true)}
-            >
-              Add property
-            </Button>
           <Button
               variant="light"
               className="pm-btn-ghost"
@@ -793,10 +759,34 @@ export default function ManagerDashboard() {
                       <td>{application.employment || '—'}</td>
                       <td>{application.monthlyIncome ? `₱${Number(application.monthlyIncome).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
                       <td>{application.moveInDate || '—'}</td>
-                      <td><StatusPill status={application.status} />{application.reviewNotes && <div className="small text-muted mt-1">{application.reviewNotes}</div>}</td>
+                      <td>
+                        <StatusPill status={application.status} />
+                        {application.reviewNotes && <div className="small text-muted mt-1">Manager: {application.reviewNotes}</div>}
+                        {application.ownerReviewNotes && <div className="small text-muted mt-1">Owner: {application.ownerReviewNotes}</div>}
+                      </td>
                       <td>
                         {application.status === 'Approved' ? (
-                          <Button size="sm" variant="primary" onClick={() => openLeaseForApplication(application)}>Create lease</Button>
+                          <div className="d-flex flex-wrap gap-1">
+                            <Button size="sm" variant="primary" onClick={() => openLeaseForApplication(application)}>Create lease</Button>
+                            <Button size="sm" variant="outline-danger" onClick={() => handleApplicationReview(application, 'Rejected')}>Reject and release</Button>
+                          </div>
+                        ) : application.applicationApprovalMode === 'Owner' && application.status === 'Pending Owner Approval' ? (
+                          <span className="small text-muted">Awaiting owner decision</span>
+                        ) : application.applicationApprovalMode === 'Owner' && application.status === 'Submitted' ? (
+                          <Button size="sm" variant="outline-secondary" onClick={() => handleApplicationReview(application, 'Under Review')}>Begin review</Button>
+                        ) : application.applicationApprovalMode === 'Owner' && application.status === 'Under Review' ? (
+                          <div style={{ minWidth: 210 }}>
+                            <Form.Control
+                              as="textarea"
+                              rows={2}
+                              className="mb-2"
+                              aria-label={`Manager review notes for ${application.applicantName || 'applicant'}`}
+                              placeholder="Add review notes for the owner (optional)"
+                              value={managerReviewNotes[application.id] || ''}
+                              onChange={(event) => setManagerReviewNotes((current) => ({ ...current, [application.id]: event.target.value }))}
+                            />
+                            <Button size="sm" variant="primary" onClick={() => handleApplicationReview(application, 'Pending Owner Approval')}>Send to owner</Button>
+                          </div>
                         ) : ['Submitted', 'Under Review'].includes(application.status) ? (
                           <div className="d-flex flex-wrap gap-1">
                             {application.status === 'Submitted' && <Button size="sm" variant="outline-secondary" onClick={() => handleApplicationReview(application, 'Under Review')}>Review</Button>}
@@ -807,7 +797,7 @@ export default function ManagerDashboard() {
                       </td>
                     </tr>
                   ))}
-                  {applications.length === 0 && <tr><td colSpan="7" className="pm-empty-row">No rental applications are awaiting review.</td></tr>}
+                  {applications.length === 0 && <tr><td colSpan="7" className="pm-empty-row">No applications are linked to your managed properties yet. Agent-submitted applications appear here when the property is assigned to your account.</td></tr>}
                 </tbody>
               </Table>
             </div>
@@ -826,88 +816,6 @@ export default function ManagerDashboard() {
             </Modal.Body>
             <Modal.Footer><Button variant="light" onClick={() => setShowPropertyEditModal(false)}>Cancel</Button><Button type="submit">Save changes</Button></Modal.Footer>
           </Form>}
-        </Modal>
-
-        {/* Modal: New Property Listing */}
-        <Modal show={showPropertyModal} onHide={() => setShowPropertyModal(false)} centered dialogClassName="pm-modal">
-          <Modal.Header closeButton>
-            <Modal.Title>Add property listing</Modal.Title>
-          </Modal.Header>
-          <Modal.Body>
-            <Form onSubmit={handlePropertySubmit}>
-              <Form.Group className="mb-3">
-                <Form.Label className="pm-form-label">Property Title</Form.Label>
-                <Form.Control
-                  className="pm-input"
-                  placeholder="e.g., Horizon Residences"
-                  value={propertyFormData.title}
-                  onChange={(e) => setPropertyFormData({ ...propertyFormData, title: e.target.value })}
-                  required
-                />
-              </Form.Group>
-
-              <Form.Group className="mb-3">
-                <Form.Label className="pm-form-label">Address</Form.Label>
-                <Form.Control
-                  className="pm-input"
-                  placeholder="e.g., 123 Ayala Ave, Makati City"
-                  value={propertyFormData.address}
-                  onChange={(e) => setPropertyFormData({ ...propertyFormData, address: e.target.value })}
-                  required
-                />
-              </Form.Group>
-
-              <Row className="mb-3">
-                <Col md={6}>
-                  <Form.Label className="pm-form-label">Property Type</Form.Label>
-                  <Form.Select
-                    className="pm-input"
-                    value={propertyFormData.propertyType}
-                    onChange={(e) => setPropertyFormData({ ...propertyFormData, propertyType: e.target.value })}
-                  >
-                    <option value="Apartment">Apartment</option>
-                    <option value="Condo">Condo</option>
-                    <option value="House">House</option>
-                    <option value="Commercial">Commercial</option>
-                  </Form.Select>
-                </Col>
-
-                {!['Apartment', 'Condo'].includes(propertyFormData.propertyType) && (
-                  <Col md={6}>
-                    <Form.Label className="pm-form-label">Monthly Rate (₱)</Form.Label>
-                    <Form.Control
-                      className="pm-input"
-                      type="number"
-                      value={propertyFormData.price}
-                      onChange={(e) => setPropertyFormData({ ...propertyFormData, price: e.target.value })}
-                      required
-                    />
-                  </Col>
-                )}
-              </Row>
-
-              {['Apartment', 'Condo'].includes(propertyFormData.propertyType) && (
-                <Form.Group className="mb-4">
-                  <div className="d-flex justify-content-between align-items-center mb-2">
-                    <Form.Label className="pm-form-label mb-0">Units and monthly rent</Form.Label>
-                    <Button type="button" size="sm" variant="outline-primary" onClick={() => setPropertyFormData((current) => ({ ...current, units: [...current.units, { unitNumber: '', monthlyRate: '' }] }))}>Add unit</Button>
-                  </div>
-                  {propertyFormData.units.map((unit, index) => (
-                    <Row className="g-2 mb-2" key={`property-unit-${index}`}>
-                      <Col><Form.Control className="pm-input" placeholder="Unit number (e.g. 101)" value={unit.unitNumber} onChange={(e) => setPropertyFormData((current) => ({ ...current, units: current.units.map((item, i) => i === index ? { ...item, unitNumber: e.target.value } : item) }))} required /></Col>
-                      <Col><Form.Control className="pm-input" type="number" min="0" step="0.01" placeholder="Monthly rent (₱)" value={unit.monthlyRate} onChange={(e) => setPropertyFormData((current) => ({ ...current, units: current.units.map((item, i) => i === index ? { ...item, monthlyRate: e.target.value } : item) }))} required /></Col>
-                      <Col xs="auto"><Button type="button" variant="outline-danger" disabled={propertyFormData.units.length === 1} onClick={() => setPropertyFormData((current) => ({ ...current, units: current.units.filter((_, i) => i !== index) }))}>Remove</Button></Col>
-                    </Row>
-                  ))}
-                  <Form.Text className="text-muted">Set a separate rent amount for each unit.</Form.Text>
-                </Form.Group>
-              )}
-
-              <Button variant="light" className="pm-btn-primary w-100 py-2" type="submit">
-                Save Property Listing
-              </Button>
-            </Form>
-          </Modal.Body>
         </Modal>
 
         <Modal show={showUnitModal} onHide={() => setShowUnitModal(false)} centered>
