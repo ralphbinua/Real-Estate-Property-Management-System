@@ -19,3 +19,18 @@ export const deleteProperty = async (id) => {
   const response = await api.delete(`/properties/${id}/`);
   return response.data;
 };
+
+export const setLeaseSigningAuthority = async (id, authorityData) => {
+  const response = await api.patch(`/properties/${id}/lease-signing-authority/`, authorityData);
+  return response.data;
+};
+
+export const setLeaseTerminationAuthority = async (id, authorityData) => {
+  const response = await api.patch(`/properties/${id}/termination-authority/`, authorityData);
+  return response.data;
+};
+
+export const setApplicationApprovalPolicy = async (id, policyData) => {
+  const response = await api.patch(`/properties/${id}/approval-policy/`, policyData);
+  return response.data;
+};

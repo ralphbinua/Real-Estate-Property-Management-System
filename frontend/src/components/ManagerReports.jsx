@@ -1,40 +1,63 @@
-import React, { useMemo } from 'react';
-import { Row, Col, Card, ProgressBar, Table, Badge } from 'react-bootstrap';
+import React, { useMemo, useState } from 'react';
+import { Row, Col, Card, ProgressBar, Table, Badge, Form } from 'react-bootstrap';
 
 const formatCurrency = (value) => `₱${Number(value || 0).toLocaleString('en-PH', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 })}`;
 
+const currentMonth = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const monthLabel = (month) => new Date(`${month}-01T00:00:00`).toLocaleDateString('en-PH', {
+  month: 'long',
+  year: 'numeric',
+});
+
 export default function ManagerReports({ properties = [], invoices = [] }) {
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth());
+
+  const monthOptions = useMemo(() => {
+    const months = new Set(invoices.map((invoice) => invoice.dueDate?.slice(0, 7)).filter(Boolean));
+    months.add(currentMonth());
+    return [...months].sort((first, second) => second.localeCompare(first));
+  }, [invoices]);
+
+  const periodInvoices = useMemo(() => selectedMonth === 'all'
+    ? invoices
+    : invoices.filter((invoice) => invoice.dueDate?.slice(0, 7) === selectedMonth),
+  [invoices, selectedMonth]);
+
   const reportData = useMemo(() => {
     let totalRooms = 0;
     let occupiedRooms = 0;
     let expectedRevenue = 0;
 
-    properties.forEach((p) => {
-      if (Array.isArray(p.units) && p.units.length > 0) {
-        totalRooms += p.units.length;
-        const occupied = p.units.filter((u) => u.status === 'Occupied');
+    properties.forEach((property) => {
+      if (Array.isArray(property.units) && property.units.length > 0) {
+        totalRooms += property.units.length;
+        const occupied = property.units.filter((unit) => unit.status === 'Occupied');
         occupiedRooms += occupied.length;
-        expectedRevenue += occupied.reduce((sum, u) => sum + (u.monthlyRate || 0), 0);
+        expectedRevenue += occupied.reduce((sum, unit) => sum + Number(unit.monthlyRate || 0), 0);
       } else {
         totalRooms += 1;
-        if (['occupied', 'rented'].includes(p.status?.toLowerCase())) {
+        if (['occupied', 'rented'].includes(property.status?.toLowerCase())) {
           occupiedRooms += 1;
-          expectedRevenue += p.price || 0;
+          expectedRevenue += Number(property.price || 0);
         }
       }
     });
 
-    const collectedRevenue = invoices
-      .filter((inv) => inv.status === 'Paid')
-      .reduce((sum, inv) => sum + (inv.amount || 0), 0);
-
-    const pendingRevenue = invoices
-      .filter((inv) => ['Pending', 'Overdue'].includes(inv.status))
-      .reduce((sum, inv) => sum + (inv.totalDue || inv.amount || 0), 0);
-
+    const invoicedRevenue = periodInvoices
+      .filter((invoice) => invoice.status !== 'Cancelled')
+      .reduce((sum, invoice) => sum + Number(invoice.totalDue || 0), 0);
+    const collectedRevenue = periodInvoices
+      .reduce((sum, invoice) => sum + Number(invoice.amountPaid || 0), 0);
+    const outstandingRevenue = periodInvoices
+      .filter((invoice) => invoice.status !== 'Cancelled')
+      .reduce((sum, invoice) => sum + Number(invoice.balanceDue || 0), 0);
     const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
 
     return {
@@ -42,106 +65,111 @@ export default function ManagerReports({ properties = [], invoices = [] }) {
       occupiedRooms,
       occupancyRate,
       expectedRevenue,
+      invoicedRevenue,
       collectedRevenue,
-      pendingRevenue,
+      outstandingRevenue,
     };
-  }, [properties, invoices]);
+  }, [properties, periodInvoices]);
 
   return (
     <div>
-      {/* High-Level Financial Metrics */}
+      <div className="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
+        <div>
+          <h6 className="fw-bold text-dark mb-1">Property and rent performance</h6>
+          <div className="small text-muted">Collections include verified payments only.</div>
+        </div>
+        <Form.Group>
+          <Form.Label className="small text-muted mb-1">Invoice month</Form.Label>
+          <Form.Select size="sm" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} aria-label="Select invoice month">
+            <option value="all">All months</option>
+            {monthOptions.map((month) => <option value={month} key={month}>{monthLabel(month)}</option>)}
+          </Form.Select>
+        </Form.Group>
+      </div>
+
       <Row className="g-3 mb-4">
-        <Col md={4}>
-          <Card className="p-3 border-0 bg-light shadow-sm">
-            <span className="text-muted small fw-semibold">Portfolio Occupancy</span>
+        <Col md={6} xl={3}>
+          <Card className="p-3 border-0 bg-light shadow-sm h-100">
+            <span className="text-muted small fw-semibold">Portfolio occupancy</span>
             <h3 className="fw-bold text-dark mt-1">{reportData.occupancyRate}%</h3>
-            <ProgressBar
-              now={reportData.occupancyRate}
-              variant={reportData.occupancyRate > 75 ? 'success' : 'warning'}
-              className="mt-2"
-              style={{ height: '6px' }}
-            />
-            <span className="text-muted text-xs mt-2 d-block" style={{ fontSize: '12px' }}>
-              {reportData.occupiedRooms} of {reportData.totalRooms} Units Occupied
-            </span>
+            <ProgressBar now={reportData.occupancyRate} variant={reportData.occupancyRate > 75 ? 'success' : 'warning'} className="mt-2" style={{ height: '6px' }} />
+            <span className="text-muted small mt-2">{reportData.occupiedRooms} of {reportData.totalRooms} units occupied</span>
+            <span className="text-muted small">Expected monthly rent: {formatCurrency(reportData.expectedRevenue)}</span>
           </Card>
         </Col>
-
-        <Col md={4}>
-          <Card className="p-3 border-0 bg-light shadow-sm">
-            <span className="text-muted small fw-semibold">Collected Rent (Paid)</span>
-            <h3 className="fw-bold text-success mt-1">
-              {formatCurrency(reportData.collectedRevenue)}
-            </h3>
-            <span className="text-muted text-xs mt-2 d-block" style={{ fontSize: '12px' }}>
-              Target Expected: {formatCurrency(reportData.expectedRevenue)}
-            </span>
+        <Col md={6} xl={3}>
+          <Card className="p-3 border-0 bg-light shadow-sm h-100">
+            <span className="text-muted small fw-semibold">Rent invoiced</span>
+            <h3 className="fw-bold text-dark mt-1">{formatCurrency(reportData.invoicedRevenue)}</h3>
+            <span className="text-muted small mt-2">{selectedMonth === 'all' ? 'Across all invoice months' : `Invoices due in ${monthLabel(selectedMonth)}`}</span>
           </Card>
         </Col>
-
-        <Col md={4}>
-          <Card className="p-3 border-0 bg-light shadow-sm">
-            <span className="text-muted small fw-semibold">Pending / Overdue Balance</span>
-            <h3 className="fw-bold text-danger mt-1">
-              {formatCurrency(reportData.pendingRevenue)}
-            </h3>
-            <span className="text-muted text-xs mt-2 d-block" style={{ fontSize: '12px' }}>
-              Uncollected monthly ledgers
-            </span>
+        <Col md={6} xl={3}>
+          <Card className="p-3 border-0 bg-light shadow-sm h-100">
+            <span className="text-muted small fw-semibold">Verified rent collected</span>
+            <h3 className="fw-bold text-success mt-1">{formatCurrency(reportData.collectedRevenue)}</h3>
+            <span className="text-muted small mt-2">Pending submissions are not counted</span>
+          </Card>
+        </Col>
+        <Col md={6} xl={3}>
+          <Card className="p-3 border-0 bg-light shadow-sm h-100">
+            <span className="text-muted small fw-semibold">Balance outstanding</span>
+            <h3 className="fw-bold text-danger mt-1">{formatCurrency(reportData.outstandingRevenue)}</h3>
+            <span className="text-muted small mt-2">Unpaid balance for the selected invoice period</span>
           </Card>
         </Col>
       </Row>
 
-      {/* Breakdown per Managed Property */}
-      <h6 className="fw-bold text-dark mb-3">Property Financial & Occupancy Breakdown</h6>
+      <h6 className="fw-bold text-dark mb-3">Property financial and occupancy breakdown</h6>
       <Table responsive className="pm-table mb-0">
         <thead>
           <tr>
-            <th>Property Title</th>
+            <th>Property</th>
             <th>Type</th>
-            <th>Occupancy Rate</th>
-            <th>Monthly Yield</th>
+            <th>Occupancy</th>
+            <th>Rent invoiced</th>
+            <th>Verified collected</th>
+            <th>Balance outstanding</th>
           </tr>
         </thead>
         <tbody>
           {properties.length > 0 ? (
-            properties.map((p) => {
-              const total = p.units?.length || 1;
-              const occ = p.units
-                ? p.units.filter((u) => u.status === 'Occupied').length
-                : p.status === 'Occupied' ? 1 : 0;
-              const rate = total > 0 ? Math.round((occ / total) * 100) : 0;
-
-              const yieldAmt = p.units
-                ? p.units
-                    .filter((u) => u.status === 'Occupied')
-                    .reduce((sum, u) => sum + (u.monthlyRate || 0), 0)
-                : p.status === 'Occupied' ? p.price : 0;
+            properties.map((property) => {
+              const total = property.units?.length || 1;
+              const occupied = property.units
+                ? property.units.filter((unit) => unit.status === 'Occupied').length
+                : property.status === 'Occupied' ? 1 : 0;
+              const rate = total > 0 ? Math.round((occupied / total) * 100) : 0;
+              const propertyId = String(property._id || property.id || '');
+              const propertyInvoices = periodInvoices.filter((invoice) => String(
+                invoice.propertyDetails?._id || invoice.propertyDetails?.id || invoice.property || '',
+              ) === propertyId);
+              const invoiced = propertyInvoices
+                .filter((invoice) => invoice.status !== 'Cancelled')
+                .reduce((sum, invoice) => sum + Number(invoice.totalDue || 0), 0);
+              const collected = propertyInvoices.reduce((sum, invoice) => sum + Number(invoice.amountPaid || 0), 0);
+              const outstanding = propertyInvoices
+                .filter((invoice) => invoice.status !== 'Cancelled')
+                .reduce((sum, invoice) => sum + Number(invoice.balanceDue || 0), 0);
 
               return (
-                <tr key={p._id}>
-                  <td className="pm-cell-title">{p.title}</td>
-                  <td>{p.propertyType}</td>
+                <tr key={property._id || property.id}>
+                  <td className="pm-cell-title">{property.title}</td>
+                  <td>{property.propertyType}</td>
                   <td>
                     <div className="d-flex align-items-center gap-2">
-                      <span className="fw-semibold">{occ}/{total}</span>
-                      <Badge bg={rate === 100 ? 'success' : rate > 0 ? 'info' : 'secondary'}>
-                        {rate}%
-                      </Badge>
+                      <span className="fw-semibold">{occupied}/{total}</span>
+                      <Badge bg={rate === 100 ? 'success' : rate > 0 ? 'info' : 'secondary'}>{rate}%</Badge>
                     </div>
                   </td>
-                  <td className="pm-cell-strong text-success">
-                    {formatCurrency(yieldAmt)}/mo
-                  </td>
+                  <td>{formatCurrency(invoiced)}</td>
+                  <td className="pm-cell-strong text-success">{formatCurrency(collected)}</td>
+                  <td className="pm-cell-strong">{formatCurrency(outstanding)}</td>
                 </tr>
               );
             })
           ) : (
-            <tr>
-              <td colSpan="4" className="text-center text-muted py-3">
-                No managed property performance records available.
-              </td>
-            </tr>
+            <tr><td colSpan="6" className="text-center text-muted py-3">No managed property performance records available.</td></tr>
           )}
         </tbody>
       </Table>

@@ -1,80 +1,103 @@
 real-estate-management/
 ├── .gitignore
-├── backend/                             # Django Backend Project
-│   ├── .env                             # Supabase PostgreSQL database configuration
-│   ├── manage.py                        # Django management script
-│   ├── core/                            # Main Django configuration app
+├── README.md
+├── file_structure.txt
+├── backend/                                      # Django REST API
+│   ├── manage.py
+│   ├── core/                                     # Django project configuration
 │   │   ├── __init__.py
 │   │   ├── asgi.py
 │   │   ├── settings.py
 │   │   ├── urls.py
 │   │   └── wsgi.py
-│   ├── billing/                         # Invoices, payments, financial tracking
+│   ├── users/                                    # Accounts, roles, settings, and audit events
+│   │   ├── admin.py
+│   │   ├── audit.py
 │   │   ├── models.py
 │   │   ├── serializers.py
 │   │   ├── urls.py
 │   │   ├── views.py
 │   │   └── migrations/
-│   ├── contracts/                       # Lease agreements & tenant contracts
-│   │   ├── models.py
-│   │   ├── serializers.py
-│   │   ├── urls.py
-│   │   ├── views.py
-│   │   └── migrations/
-│   ├── maintenance/                     # Maintenance requests & status updates
-│   │   ├── models.py
-│   │   ├── serializers.py
-│   │   ├── urls.py
-│   │   ├── views.py
-│   │   └── migrations/
-│   ├── properties/                      # Property & unit listings
+│   │       ├── __init__.py
+│   │       ├── 0001_initial.py
+│   │       ├── 0002_auditevent.py
+│   │       └── 0003_systemsettings.py
+│   ├── properties/                               # Properties, units, inquiries, and applications
+│   │   ├── __init__.py
 │   │   ├── admin.py
 │   │   ├── apps.py
 │   │   ├── models.py
 │   │   ├── serializers.py
-│   │   ├── tests.py
 │   │   ├── urls.py
 │   │   ├── views.py
 │   │   └── migrations/
-│   └── users/                           # User management & authentication models
-│       ├── admin.py
+│   │       ├── __init__.py
+│   │       ├── 0001_initial.py
+│   │       ├── 0002_remove_property_manager_id_remove_property_owner_id_and_more.py
+│   │       ├── 0003_property_assigned_agents.py
+│   │       ├── 0004_propertyinquiry.py
+│   │       ├── 0005_rentalapplication.py
+│   │       ├── 0006_owner_application_approval.py
+│   │       └── 0007_lease_signing_authorization.py
+│   ├── contracts/                                # Lease contracts and signing authority
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   ├── views.py
+│   │   └── migrations/
+│   │       ├── __init__.py
+│   │       ├── 0001_initial.py
+│   │       ├── 0002_lease_signing_authority.py
+│   │       └── 0003_contract_rent_due_day.py
+│   ├── billing/                                  # Rent invoices and payment records
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── services.py
+│   │   ├── urls.py
+│   │   ├── views.py
+│   │   ├── migrations/
+│   │   │   ├── __init__.py
+│   │   │   └── 0001_initial.py
+│   │   └── management/
+│   │       ├── __init__.py
+│   │       └── commands/
+│   │           ├── __init__.py
+│   │           └── generate_monthly_invoices.py
+│   └── maintenance/                              # Tenant maintenance requests
 │       ├── models.py
 │       ├── serializers.py
 │       ├── urls.py
 │       ├── views.py
 │       └── migrations/
-│
-└── frontend/                            # React + Vite Frontend Project
-    ├── .env
+│           ├── __init__.py
+│           └── 0001_initial.py
+└── frontend/                                     # React application built with Vite
     ├── .gitignore
     ├── eslint.config.js
     ├── index.html
     ├── package.json
     ├── package-lock.json
-    ├── README.md
     ├── vite.config.js
-    ├── public/                          # Public static assets
-    │   ├── favicon.svg
-    │   └── icons.svg
+    ├── public/
+    │   └── favicon.svg
     └── src/
-        ├── App.css
-        ├── App.jsx                      # Main React Router setup
-        ├── index.css
-        ├── main.jsx                     # Vite entry point
-        ├── components/                  # Shared UI components
+        ├── App.jsx                               # App routes and role-based dashboards
+        ├── main.jsx                              # Frontend entry point
+        ├── design-system.css                     # Shared application styles
+        ├── context/
+        │   └── AuthContext.jsx
+        ├── components/                           # Shared dashboard and form components
+        │   ├── AdminActivityLog.jsx
         │   ├── AdminMaintenanceManager.jsx
+        │   ├── AdminSystemSettings.jsx
         │   ├── ManagerInvoiceTracker.jsx
         │   ├── ManagerReports.jsx
-        │   ├── MetricCard.jsx
         │   ├── Navbar.jsx
-        │   ├── PropertyFilter.jsx
         │   ├── PropertyForm.jsx
-        │   ├── RoleProtectedRoute.jsx
         │   ├── TenantInvoiceViewer.jsx
-        │   └── UserManagement.jsx
-        ├── context/                     # Context providers
-        │   └── AuthContext.jsx          # Auth state & session handler
-        ├── pages/                       # Page components & styles
+        │   ├── UserManagement.jsx
+        │   └── WorkspaceSidebar.jsx
+        ├── pages/                                # Login and role-specific dashboards
         │   ├── AdminDashboard.jsx
         │   ├── AdminDashboard.css
         │   ├── AgentDashboard.jsx
@@ -83,19 +106,24 @@ real-estate-management/
         │   ├── Login.css
         │   ├── ManagerDashboard.jsx
         │   ├── ManagerDashboard.css
-        │   ├── NotFound.jsx
-        │   ├── NotFound.css
         │   ├── OwnerDashboard.jsx
         │   ├── OwnerDashboard.css
         │   ├── TenantDashboard.jsx
         │   └── TenantDashboard.css
-        ├── services/                    # API communication modules
-        │   ├── api.js                   # Axios base instance & interceptors
+        ├── services/                             # Frontend API request modules
+        │   ├── api.js
+        │   ├── applicationService.js
         │   ├── contractService.js
+        │   ├── inquiryService.js
         │   ├── invoiceService.js
         │   ├── maintenanceService.js
         │   ├── ownerService.js
+        │   ├── profileService.js
         │   ├── propertyService.js
+        │   ├── systemSettingsService.js
+        │   ├── unitService.js
         │   └── userService.js
-        └── utils/                       # Utility helper functions
-            └── badgeUtils.jsx
+        └── utils/
+            └── dateUtils.js
+
+Local environment files, installed dependencies, generated files, and build output are excluded from this source tree.

@@ -11,7 +11,9 @@ export default function PropertyForm({ onPropertyCreated }) {
     price: '',
     propertyType: 'Apartment',
     status: 'Available',
-    applicationApprovalMode: 'Manager',
+    applicationApprovalMode: 'Owner',
+    instructionNote: '',
+    instructionReference: '',
     owner: '',
     manager: '',
     assignedAgents: [],
@@ -55,6 +57,15 @@ export default function PropertyForm({ onPropertyCreated }) {
       applicationApprovalMode: formData.applicationApprovalMode,
       assignedAgents: formData.assignedAgents,
     };
+    if (formData.applicationApprovalMode === 'Manager') {
+      payload.instructionNote = formData.instructionNote.trim();
+      payload.instructionReference = formData.instructionReference.trim();
+      if (!payload.instructionNote || !payload.instructionReference) {
+        setError('Add the Owner’s written instruction and a reference before selecting Manager approval.');
+        setLoading(false);
+        return;
+      }
+    }
     if (['Apartment', 'Condo'].includes(formData.propertyType)) {
       payload.units = formData.units.map((unit) => ({ ...unit, monthlyRate: Number(unit.monthlyRate), status: 'Available' }));
     }
@@ -73,7 +84,8 @@ export default function PropertyForm({ onPropertyCreated }) {
       if (onPropertyCreated) onPropertyCreated();
     } catch (err) {
       setLoading(false);
-      setError(err.response?.data?.message || 'Failed to save property.');
+      const details = err.response?.data || {};
+      setError(details.detail || details.owner?.[0] || details.manager?.[0] || details.instructionNote?.[0] || details.instructionReference?.[0] || details.message || 'Failed to save property.');
     }
   };
 
@@ -182,8 +194,9 @@ export default function PropertyForm({ onPropertyCreated }) {
             <Form.Select 
               value={formData.owner} 
               onChange={(e) => setFormData({ ...formData, owner: e.target.value })}
+              required
             >
-              <option value="">Optional Owner</option>
+              <option value="">Choose an owner</option>
               {owners.map((o) => (
                 <option key={o._id} value={o._id}>
                   {o.name} ({o.email})
@@ -198,8 +211,9 @@ export default function PropertyForm({ onPropertyCreated }) {
             <Form.Select 
               value={formData.manager} 
               onChange={(e) => setFormData({ ...formData, manager: e.target.value })}
+              required={formData.applicationApprovalMode === 'Manager'}
             >
-              <option value="">Optional Manager</option>
+              <option value="">{formData.applicationApprovalMode === 'Manager' ? 'Choose a manager' : 'Optional Manager'}</option>
               {managers.map((m) => (
                 <option key={m._id} value={m._id}>
                   {m.name} ({m.email})
@@ -239,8 +253,25 @@ export default function PropertyForm({ onPropertyCreated }) {
           <option value="Manager">Property Manager reviews and decides</option>
           <option value="Owner">Property Manager reviews; Owner makes final decision</option>
         </Form.Select>
-        <Form.Text className="text-muted">Choose who makes the final decision on rental applications for this property.</Form.Text>
+        <Form.Text className="text-muted">New properties start with Owner approval. Select Manager approval only when the Owner has delegated that decision.</Form.Text>
       </Form.Group>
+
+      {formData.applicationApprovalMode === 'Manager' && (
+        <Row className="mb-3">
+          <Col md={7}>
+            <Form.Group>
+              <Form.Label className="fw-bold text-secondary">Owner’s written instruction</Form.Label>
+              <Form.Control as="textarea" rows={2} value={formData.instructionNote} onChange={(e) => setFormData({ ...formData, instructionNote: e.target.value })} required />
+            </Form.Group>
+          </Col>
+          <Col md={5}>
+            <Form.Group>
+              <Form.Label className="fw-bold text-secondary">Instruction reference</Form.Label>
+              <Form.Control value={formData.instructionReference} onChange={(e) => setFormData({ ...formData, instructionReference: e.target.value })} placeholder="Email, letter, or agreement record" required />
+            </Form.Group>
+          </Col>
+        </Row>
+      )}
 
       <Button variant="primary" type="submit" className="w-100 fw-bold py-2 mt-2" disabled={loading}>
         {loading ? 'Saving Property...' : 'Submit Property'}

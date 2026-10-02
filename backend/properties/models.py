@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 
 
 class Property(models.Model):
@@ -27,7 +28,7 @@ class Property(models.Model):
     price = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # single-unit rate (e.g. House)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Available')
     application_approval_mode = models.CharField(
-        max_length=20, choices=APPLICATION_APPROVAL_MODES, default='Manager'
+        max_length=20, choices=APPLICATION_APPROVAL_MODES, default='Owner'
     )
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='owned_properties')
@@ -119,6 +120,13 @@ class RentalApplication(models.Model):
     ]
 
     inquiry = models.OneToOneField(PropertyInquiry, on_delete=models.CASCADE, related_name='rental_application')
+    approval_mode = models.CharField(
+        max_length=20,
+        choices=Property.APPLICATION_APPROVAL_MODES,
+        blank=True,
+        default='',
+        help_text='Approval rule in effect when this application was submitted.',
+    )
     applicant_email = models.EmailField(max_length=254)
     employment = models.CharField(max_length=255, blank=True, default='')
     monthly_income = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
@@ -136,3 +144,163 @@ class RentalApplication(models.Model):
 
     def __str__(self):
         return f"Application — {self.inquiry.prospect_name} ({self.status})"
+
+
+class RentalApplicationDecision(models.Model):
+    application = models.ForeignKey(
+        RentalApplication,
+        on_delete=models.CASCADE,
+        related_name='decisions',
+    )
+    from_status = models.CharField(max_length=30, blank=True, default='')
+    to_status = models.CharField(max_length=30)
+    authority = models.CharField(max_length=30, blank=True, default='')
+    note = models.TextField(blank=True, default='')
+    instruction_reference = models.CharField(max_length=500, blank=True, default='')
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='rental_application_decisions',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']
+
+    def __str__(self):
+        return f"Application {self.application_id}: {self.from_status} → {self.to_status}"
+
+
+class PropertyApprovalPolicyChange(models.Model):
+    property = models.ForeignKey(
+        Property,
+        on_delete=models.CASCADE,
+        related_name='approval_policy_changes',
+    )
+    previous_mode = models.CharField(max_length=20, choices=Property.APPLICATION_APPROVAL_MODES)
+    new_mode = models.CharField(max_length=20, choices=Property.APPLICATION_APPROVAL_MODES)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='property_approval_policy_changes',
+    )
+    instruction_note = models.TextField(blank=True, default='')
+    instruction_reference = models.CharField(max_length=500, blank=True, default='')
+    changed_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-changed_at', '-id']
+
+    def __str__(self):
+        return f"{self.property.title}: {self.previous_mode} → {self.new_mode}"
+
+
+class LeaseSigningAuthorization(models.Model):
+    property = models.OneToOneField(
+        Property,
+        on_delete=models.CASCADE,
+        related_name='lease_signing_authorization',
+    )
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='lease_signing_authorizations',
+    )
+    agreement_reference = models.CharField(max_length=500)
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='granted_lease_signing_authorizations',
+    )
+    granted_at = models.DateTimeField(default=timezone.now)
+    is_active = models.BooleanField(default=True)
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='revoked_lease_signing_authorizations',
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        state = 'active' if self.is_active else 'revoked'
+        return f"Lease signing authority for {self.property.title} ({state})"
+
+
+class LeaseTerminationAuthorization(models.Model):
+    property = models.OneToOneField(
+        Property,
+        on_delete=models.CASCADE,
+        related_name='lease_termination_authorization',
+    )
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='lease_termination_authorizations',
+    )
+    agreement_reference = models.CharField(max_length=500)
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='granted_lease_termination_authorizations',
+    )
+    granted_at = models.DateTimeField(default=timezone.now)
+    is_active = models.BooleanField(default=True)
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='revoked_lease_termination_authorizations',
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        state = 'active' if self.is_active else 'revoked'
+        return f"Lease termination authority for {self.property.title} ({state})"
+
+
+class PropertyAuthorityEvent(models.Model):
+    AUTHORITY_CHOICES = [
+        ('Lease signing', 'Lease signing'),
+        ('Lease termination', 'Lease termination'),
+    ]
+    ACTION_CHOICES = [
+        ('Granted', 'Granted'),
+        ('Revoked', 'Revoked'),
+    ]
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='authority_events')
+    authority = models.CharField(max_length=30, choices=AUTHORITY_CHOICES)
+    action = models.CharField(max_length=10, choices=ACTION_CHOICES)
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='received_property_authority_events',
+    )
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='recorded_property_authority_events',
+    )
+    agreement_reference = models.CharField(max_length=500, blank=True, default='')
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f"{self.action} {self.authority} for {self.property.title}"

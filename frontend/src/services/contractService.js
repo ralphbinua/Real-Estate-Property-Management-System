@@ -10,7 +10,12 @@ export const createContract = async (contractData) => {
   return response.data;
 };
 
-export const terminateContract = async (id) => {
-  const response = await api.patch(`/contracts/${id}/terminate/`);
+export const terminateContract = async (id, terminationData) => {
+  const response = await api.post(`/contracts/${id}/terminate/`, terminationData);
+  return response.data;
+};
+
+export const activateContract = async (id, activationData) => {
+  const response = await api.post(`/contracts/${id}/activate/`, activationData);
   return response.data;
 };

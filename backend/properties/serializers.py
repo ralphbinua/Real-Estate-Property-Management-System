@@ -83,6 +83,15 @@ class PropertySerializer(serializers.ModelSerializer):
     )
     monthlyRate = serializers.DecimalField(source='price', max_digits=10, decimal_places=2, required=False)
     units = UnitSerializer(many=True, required=False)
+    managerLeaseSigningAuthorized = serializers.SerializerMethodField()
+    leaseSigningAgreementReference = serializers.SerializerMethodField()
+    leaseSigningAuthorizedAt = serializers.SerializerMethodField()
+    managerLeaseTerminationAuthorized = serializers.SerializerMethodField()
+    leaseTerminationAgreementReference = serializers.SerializerMethodField()
+    leaseTerminationAuthorizedAt = serializers.SerializerMethodField()
+    approvalPolicyHistory = serializers.SerializerMethodField()
+    instructionNote = serializers.CharField(write_only=True, required=False, allow_blank=True, trim_whitespace=True)
+    instructionReference = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=500, trim_whitespace=True)
 
     owner = serializers.PrimaryKeyRelatedField(
         queryset=User.objects.filter(role=User.Role.OWNER, is_active=True, is_deleted=False), required=False, allow_null=True
@@ -105,15 +114,84 @@ class PropertySerializer(serializers.ModelSerializer):
         fields = [
             '_id', 'title', 'description', 'address', 'propertyType', 'price', 
             'monthlyRate', 'status', 'applicationApprovalMode', 'units', 'owner', 'manager', 'assignedAgents',
-            'ownerDetails', 'managerDetails'
+            'ownerDetails', 'managerDetails', 'managerLeaseSigningAuthorized',
+            'leaseSigningAgreementReference', 'leaseSigningAuthorizedAt',
+            'managerLeaseTerminationAuthorized', 'leaseTerminationAgreementReference',
+            'leaseTerminationAuthorizedAt', 'approvalPolicyHistory',
+            'instructionNote', 'instructionReference',
         ]
+
+    def get_managerLeaseSigningAuthorized(self, instance):
+        authorization = getattr(instance, 'lease_signing_authorization', None)
+        return bool(
+            authorization
+            and authorization.is_active
+            and authorization.manager_id
+            and authorization.manager_id == instance.manager_id
+            and authorization.granted_by_id == instance.owner_id
+        )
+
+    def get_leaseSigningAgreementReference(self, instance):
+        authorization = getattr(instance, 'lease_signing_authorization', None)
+        if not authorization or not authorization.is_active or authorization.manager_id != instance.manager_id or authorization.granted_by_id != instance.owner_id:
+            return ''
+        return authorization.agreement_reference
+
+    def get_leaseSigningAuthorizedAt(self, instance):
+        authorization = getattr(instance, 'lease_signing_authorization', None)
+        if not authorization or not authorization.is_active or authorization.manager_id != instance.manager_id or authorization.granted_by_id != instance.owner_id:
+            return None
+        return authorization.granted_at
+
+    def _active_termination_authorization(self, instance):
+        authorization = getattr(instance, 'lease_termination_authorization', None)
+        if (
+            not authorization
+            or not authorization.is_active
+            or authorization.manager_id != instance.manager_id
+            or authorization.granted_by_id != instance.owner_id
+        ):
+            return None
+        return authorization
+
+    def get_managerLeaseTerminationAuthorized(self, instance):
+        return self._active_termination_authorization(instance) is not None
+
+    def get_leaseTerminationAgreementReference(self, instance):
+        authorization = self._active_termination_authorization(instance)
+        return authorization.agreement_reference if authorization else ''
+
+    def get_leaseTerminationAuthorizedAt(self, instance):
+        authorization = self._active_termination_authorization(instance)
+        return authorization.granted_at if authorization else None
+
+    def get_approvalPolicyHistory(self, instance):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not user or user.role not in (User.Role.ADMIN, User.Role.OWNER):
+            return []
+        changes = instance.approval_policy_changes.select_related('changed_by')[:20]
+        return [{
+            'previousMode': change.previous_mode,
+            'newMode': change.new_mode,
+            'changedBy': (
+                change.changed_by.get_full_name() or change.changed_by.email
+                if change.changed_by else 'System'
+            ),
+            'changedAt': change.changed_at,
+            'instructionNote': change.instruction_note,
+            'instructionReference': change.instruction_reference,
+        } for change in changes]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         request = self.context.get('request')
-        if request and getattr(request.user, 'role', None) != User.Role.ADMIN:
-            for field_name in ('owner', 'manager', 'assignedAgents', 'applicationApprovalMode'):
+        role = getattr(getattr(request, 'user', None), 'role', None)
+        if request and role != User.Role.ADMIN:
+            for field_name in ('owner', 'manager', 'assignedAgents'):
                 self.fields[field_name].read_only = True
+        if self.instance is not None or role not in (User.Role.ADMIN, User.Role.OWNER):
+            self.fields['applicationApprovalMode'].read_only = True
         if self.instance is not None:
             self.fields['units'].read_only = True
 
@@ -124,6 +202,21 @@ class PropertySerializer(serializers.ModelSerializer):
         if user and user.role in (User.Role.AGENT, User.Role.TENANT):
             data.pop('owner', None)
             data.pop('ownerDetails', None)
+            data.pop('managerLeaseSigningAuthorized', None)
+            data.pop('leaseSigningAgreementReference', None)
+            data.pop('leaseSigningAuthorizedAt', None)
+            data.pop('managerLeaseTerminationAuthorized', None)
+            data.pop('leaseTerminationAgreementReference', None)
+            data.pop('leaseTerminationAuthorizedAt', None)
+            data.pop('approvalPolicyHistory', None)
+        elif user and user.role == User.Role.PROPERTY_MANAGER:
+            data.pop('leaseSigningAgreementReference', None)
+            data.pop('leaseSigningAuthorizedAt', None)
+            data.pop('leaseTerminationAgreementReference', None)
+            data.pop('leaseTerminationAuthorizedAt', None)
+        elif user and user.role == User.Role.OWNER and instance.owner_id != user.pk:
+            data.pop('leaseSigningAgreementReference', None)
+            data.pop('leaseSigningAuthorizedAt', None)
         return data
 
     def validate_units(self, units):
@@ -139,13 +232,23 @@ class PropertySerializer(serializers.ModelSerializer):
         actor = getattr(request, 'user', None)
         requested_mode = attrs.get(
             'application_approval_mode',
-            getattr(self.instance, 'application_approval_mode', 'Manager'),
+            getattr(self.instance, 'application_approval_mode', 'Owner'),
         )
         requested_owner = attrs.get('owner', getattr(self.instance, 'owner', None))
-        if actor and actor.role == User.Role.ADMIN and requested_mode == 'Owner' and not requested_owner:
+        requested_manager = attrs.get('manager', getattr(self.instance, 'manager', None))
+        if actor and actor.role == User.Role.OWNER and not self.instance:
+            requested_owner = actor
+        if actor and actor.role in (User.Role.ADMIN, User.Role.OWNER) and not self.instance and not requested_owner:
             raise serializers.ValidationError({
-                'owner': 'Assign a property owner before requiring Owner approval for applications.'
+                'owner': 'Assign a property owner before saving its application-approval rule.'
             })
+        if actor and actor.role in (User.Role.ADMIN, User.Role.OWNER) and not self.instance and requested_mode == 'Manager' and not requested_manager:
+            raise serializers.ValidationError({'manager': 'Assign a Property Manager before delegating application decisions.'})
+        if actor and actor.role == User.Role.ADMIN and not self.instance and requested_mode == 'Manager':
+            if not attrs.get('instruction_note', '').strip():
+                raise serializers.ValidationError({'instructionNote': 'Enter the Owner instruction authorizing delegated Manager approval.'})
+            if not attrs.get('instruction_reference', '').strip():
+                raise serializers.ValidationError({'instructionReference': 'Enter a reference to the Owner instruction.'})
         if self.instance and self.instance.status == 'Pending':
             requested_status = attrs.get('status', self.instance.status)
             has_approved_application = RentalApplication.objects.filter(
@@ -160,7 +263,10 @@ class PropertySerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         units_data = validated_data.pop('units', [])
         assigned_agents = validated_data.pop('assigned_agents', [])
+        instruction_note = validated_data.pop('instruction_note', '')
+        instruction_reference = validated_data.pop('instruction_reference', '')
         property_obj = Property.objects.create(**validated_data)
+        property_obj._creation_instruction = (instruction_note, instruction_reference)
         property_obj.assigned_agents.set(assigned_agents)
         # Property.save creates a default house unit; replace it when the form supplied units.
         if units_data:
@@ -219,7 +325,7 @@ class RentalApplicationSerializer(serializers.ModelSerializer):
     inquiryDetails = PropertyInquirySerializer(source='inquiry', read_only=True)
     applicantName = serializers.CharField(source='inquiry.prospect_name', read_only=True)
     applicantEmail = serializers.EmailField(source='applicant_email', required=True, allow_blank=False)
-    applicationApprovalMode = serializers.CharField(source='inquiry.property.application_approval_mode', read_only=True)
+    applicationApprovalMode = serializers.SerializerMethodField()
     employment = serializers.CharField(required=True, allow_blank=False, trim_whitespace=True)
     propertyDetails = PropertySerializer(source='inquiry.property', read_only=True)
     unitDetails = UnitSerializer(source='inquiry.unit', read_only=True, allow_null=True)
@@ -233,6 +339,9 @@ class RentalApplicationSerializer(serializers.ModelSerializer):
     createdAt = serializers.DateTimeField(source='created_at', read_only=True)
     reviewedAt = serializers.DateTimeField(source='reviewed_at', read_only=True, allow_null=True)
     ownerReviewedAt = serializers.DateTimeField(source='owner_reviewed_at', read_only=True, allow_null=True)
+    decisionHistory = serializers.SerializerMethodField()
+    instructionNote = serializers.CharField(source='decision_instruction_note', required=False, allow_blank=True, write_only=True, trim_whitespace=True)
+    instructionReference = serializers.CharField(source='decision_instruction_reference', required=False, allow_blank=True, write_only=True, max_length=500, trim_whitespace=True)
 
     class Meta:
         model = RentalApplication
@@ -241,6 +350,7 @@ class RentalApplicationSerializer(serializers.ModelSerializer):
             'propertyDetails', 'unitDetails', 'employment', 'monthlyIncome',
             'moveInDate', 'notes', 'status', 'reviewNotes', 'ownerReviewNotes', 'createdBy',
             'reviewedBy', 'ownerReviewedBy', 'createdAt', 'reviewedAt', 'ownerReviewedAt',
+            'decisionHistory', 'instructionNote', 'instructionReference',
         ]
         read_only_fields = [
             'id', 'createdBy', 'reviewedBy', 'ownerReviewedBy', 'createdAt', 'reviewedAt',
@@ -255,6 +365,34 @@ class RentalApplicationSerializer(serializers.ModelSerializer):
             self.fields['reviewNotes'].read_only = True
         if user and user.role not in (User.Role.ADMIN, User.Role.OWNER):
             self.fields['ownerReviewNotes'].read_only = True
+        if self.instance is not None:
+            for field_name in ('inquiry', 'applicantEmail', 'employment', 'monthlyIncome', 'moveInDate', 'notes'):
+                self.fields[field_name].read_only = True
+
+    def get_decisionHistory(self, instance):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        can_view_admin_reference = bool(user and user.role in (User.Role.ADMIN, User.Role.OWNER))
+        history = []
+        for decision in instance.decisions.select_related('actor').all():
+            item = {
+                'fromStatus': decision.from_status,
+                'toStatus': decision.to_status,
+                'authority': decision.authority,
+                'note': decision.note,
+                'actor': (
+                    decision.actor.get_full_name() or decision.actor.email
+                    if decision.actor else 'System'
+                ),
+                'createdAt': decision.created_at,
+            }
+            if can_view_admin_reference:
+                item['instructionReference'] = decision.instruction_reference
+            history.append(item)
+        return history
+
+    def get_applicationApprovalMode(self, instance):
+        return instance.approval_mode or instance.inquiry.property.application_approval_mode
 
     def validate_inquiry(self, inquiry):
         request = self.context.get('request')
@@ -279,12 +417,14 @@ class RentalApplicationSerializer(serializers.ModelSerializer):
         user = getattr(request, 'user', None)
         role = getattr(user, 'role', None)
         current = self.instance.status
-        approval_mode = self.instance.inquiry.property.application_approval_mode
+        approval_mode = self.instance.approval_mode or self.instance.inquiry.property.application_approval_mode
 
         if status == 'Pending Owner Approval' and approval_mode != 'Owner':
             raise serializers.ValidationError('Owner approval is not enabled for this property.')
 
         if role == User.Role.OWNER:
+            if approval_mode != 'Owner':
+                raise serializers.ValidationError('The Owner delegated application decisions to the Property Manager for this property.')
             if current != 'Pending Owner Approval' or status not in ('Approved', 'Rejected'):
                 raise serializers.ValidationError('Owners may decide only applications awaiting their approval.')
             return status
@@ -293,7 +433,6 @@ class RentalApplicationSerializer(serializers.ModelSerializer):
             manager_transitions = {
                 'Submitted': {'Under Review'},
                 'Under Review': {'Pending Owner Approval'},
-                'Approved': {'Rejected'},
             }
             if status not in manager_transitions.get(current, set()):
                 raise serializers.ValidationError('This property requires Owner approval before an application can be approved or rejected.')

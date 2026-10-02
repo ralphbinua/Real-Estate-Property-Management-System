@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Container, Table, Form, Row, Col, Modal, Spinner, Button, Badge } from 'react-bootstrap';
-import { fetchProperties, updateProperty, deleteProperty } from '../services/propertyService';
-import { fetchContracts, createContract, terminateContract } from '../services/contractService';
+import { fetchProperties, updateProperty, deleteProperty, setApplicationApprovalPolicy } from '../services/propertyService';
+import { fetchContracts, createContract, terminateContract, activateContract } from '../services/contractService';
 import { fetchUsers } from '../services/userService';
 import { fetchInvoices } from '../services/invoiceService';
 import PropertyForm from '../components/PropertyForm';
@@ -65,6 +65,25 @@ export default function AdminDashboard() {
   // Visibility & Modal Toggles
   const [showPropertyModal, setShowPropertyModal] = useState(false);
   const [showContractModal, setShowContractModal] = useState(false);
+  const [showActivationModal, setShowActivationModal] = useState(false);
+  const [contractForActivation, setContractForActivation] = useState(null);
+  const [ownerInstruction, setOwnerInstruction] = useState('');
+  const [ownerInstructionReference, setOwnerInstructionReference] = useState('');
+  const [signedCopyReference, setSignedCopyReference] = useState('');
+  const [manualLeaseReason, setManualLeaseReason] = useState('');
+  const [manualLeaseReference, setManualLeaseReference] = useState('');
+  const [activatingContract, setActivatingContract] = useState(false);
+  const [showTerminationModal, setShowTerminationModal] = useState(false);
+  const [contractForTermination, setContractForTermination] = useState(null);
+  const [terminationReason, setTerminationReason] = useState('');
+  const [terminationEffectiveDate, setTerminationEffectiveDate] = useState('');
+  const [terminationInstruction, setTerminationInstruction] = useState('');
+  const [terminationInstructionReference, setTerminationInstructionReference] = useState('');
+  const [showApprovalPolicyModal, setShowApprovalPolicyModal] = useState(false);
+  const [approvalPolicyProperty, setApprovalPolicyProperty] = useState(null);
+  const [approvalPolicyMode, setApprovalPolicyMode] = useState('Owner');
+  const [approvalPolicyInstruction, setApprovalPolicyInstruction] = useState('');
+  const [approvalPolicyInstructionReference, setApprovalPolicyInstructionReference] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
   const [showUserManagement, setShowUserManagement] = useState(false);
 
@@ -76,7 +95,10 @@ export default function AdminDashboard() {
     tenant: '',
     startDate: '',
     endDate: '',
-    rentAmount: ''
+    rentAmount: '',
+    rentDueDay: 1,
+    manualLeaseReason: '',
+    manualLeaseReference: '',
   });
 
   const loadData = async () => {
@@ -97,6 +119,15 @@ export default function AdminDashboard() {
       setError('Failed to fetch dashboard data.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const refreshInvoiceSummaries = async () => {
+    try {
+      const data = await fetchInvoices();
+      setInvoices(Array.isArray(data) ? data : []);
+    } catch {
+      // The ledger keeps its own refreshed data; the dashboard can refresh on next navigation.
     }
   };
 
@@ -149,7 +180,6 @@ export default function AdminDashboard() {
       owner: prop.owner || prop.ownerDetails?._id || prop.ownerDetails?.id || '',
       manager: prop.manager || prop.managerDetails?._id || prop.managerDetails?.id || '',
       assignedAgents: prop.assignedAgents || [],
-      applicationApprovalMode: prop.applicationApprovalMode || 'Manager',
     });
     setShowEditModal(true);
   };
@@ -168,7 +198,6 @@ export default function AdminDashboard() {
         owner: editingProperty.owner ? Number(editingProperty.owner) : null,
         manager: editingProperty.manager ? Number(editingProperty.manager) : null,
         assignedAgents: editingProperty.assignedAgents.map(Number),
-        applicationApprovalMode: editingProperty.applicationApprovalMode || 'Manager',
       };
 
       await updateProperty(editingProperty._id || editingProperty.id, payload);
@@ -231,33 +260,125 @@ export default function AdminDashboard() {
       setError('End Date must be strictly after Start Date.');
       return;
     }
+    if (!contractData.manualLeaseReason.trim() && !contractData.manualLeaseReference.trim()) {
+      setError('For an existing or offline tenancy, enter a reason or a reference to its current lease record.');
+      return;
+    }
 
     try {
       await createContract({
         ...contractData,
         unit: contractData.unit ? Number(contractData.unit) : null,
-        rentAmount: Number(contractData.rentAmount)
+        rentAmount: Number(contractData.rentAmount),
+        rentDueDay: Number(contractData.rentDueDay),
+        manualLeaseReason: contractData.manualLeaseReason.trim(),
+        manualLeaseReference: contractData.manualLeaseReference.trim(),
       });
-      setSuccess('Lease contract created successfully!');
-      setContractData({ property: '', tenant: '', startDate: '', endDate: '', rentAmount: '' });
+      setSuccess('Lease prepared as pending. It becomes active only after signatures are confirmed and activation is recorded.');
+      setContractData({ property: '', unit: '', tenant: '', startDate: '', endDate: '', rentAmount: '', rentDueDay: 1, manualLeaseReason: '', manualLeaseReference: '' });
       setShowContractModal(false);
       loadData();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to create contract.');
+                  const details = err.response?.data || {};
+                  setError(details.detail || details.manualLeaseReason?.[0] || details.tenant?.[0] || details.unit?.[0] || details.message || 'Failed to create contract.');
     }
   };
 
-  const handleTerminateContract = async (id) => {
-    if (window.confirm('Are you sure you want to end this lease? The property will return to Available status.')) {
-      setError('');
-      setSuccess('');
-      try {
-        await terminateContract(id);
-        setSuccess('Lease terminated successfully.');
-        loadData();
-      } catch (err) {
-        setError(err.response?.data?.message || 'Failed to terminate lease contract.');
-      }
+  const openTerminationForm = (contract) => {
+    setContractForTermination(contract);
+    setTerminationReason('');
+    setTerminationEffectiveDate(new Date().toISOString().slice(0, 10));
+    setTerminationInstruction('');
+    setTerminationInstructionReference('');
+    setShowTerminationModal(true);
+  };
+
+  const handleTerminateContract = async (event) => {
+    event.preventDefault();
+    if (!contractForTermination) return;
+    setError('');
+    setSuccess('');
+    try {
+      await terminateContract(contractForTermination._id || contractForTermination.id, {
+        reason: terminationReason.trim(),
+        effectiveDate: terminationEffectiveDate,
+        instructionNote: terminationInstruction.trim(),
+        instructionReference: terminationInstructionReference.trim(),
+      });
+      setShowTerminationModal(false);
+      setContractForTermination(null);
+      setSuccess('Lease ended. Its contract history has been preserved.');
+      await loadData();
+    } catch (err) {
+      const details = err.response?.data || {};
+      setError(details.reason?.[0] || details.effectiveDate?.[0] || details.instructionNote?.[0] || details.instructionReference?.[0] || details.detail || 'Unable to end this lease.');
+    }
+  };
+
+  const openActivationForm = (contract) => {
+    setContractForActivation(contract);
+    setOwnerInstruction('');
+    setOwnerInstructionReference('');
+    setSignedCopyReference('');
+    setManualLeaseReason('');
+    setManualLeaseReference('');
+    setShowActivationModal(true);
+  };
+
+  const handleAdminActivateLease = async (event) => {
+    event.preventDefault();
+    if (!contractForActivation) return;
+    setError('');
+    setSuccess('');
+    setActivatingContract(true);
+    try {
+      await activateContract(contractForActivation._id || contractForActivation.id, {
+        signaturesComplete: true,
+        signedCopyReference: signedCopyReference.trim(),
+        manualLeaseReason: manualLeaseReason.trim(),
+        manualLeaseReference: manualLeaseReference.trim(),
+        instructionNote: ownerInstruction.trim(),
+        instructionReference: ownerInstructionReference.trim(),
+      });
+      setShowActivationModal(false);
+      setContractForActivation(null);
+      setSuccess('Lease activation recorded under the Owner instruction.');
+      await loadData();
+    } catch (err) {
+      const details = err.response?.data || {};
+      setError(details.instructionNote?.[0] || details.instructionReference?.[0] || details.signedCopyReference?.[0] || details.manualLeaseReason?.[0] || details.detail || 'Unable to record this lease activation.');
+    } finally {
+      setActivatingContract(false);
+    }
+  };
+
+  const openApprovalPolicyForm = (property) => {
+    setApprovalPolicyProperty(property);
+    setApprovalPolicyMode(property.applicationApprovalMode || 'Owner');
+    setApprovalPolicyInstruction('');
+    setApprovalPolicyInstructionReference('');
+    setShowApprovalPolicyModal(true);
+  };
+
+  const handleApprovalPolicySubmit = async (event) => {
+    event.preventDefault();
+    if (!approvalPolicyProperty) return;
+    setError('');
+    setSuccess('');
+    try {
+      const propertyId = approvalPolicyProperty._id || approvalPolicyProperty.id;
+      await setApplicationApprovalPolicy(propertyId, {
+        applicationApprovalMode: approvalPolicyMode,
+        instructionNote: approvalPolicyInstruction.trim(),
+        instructionReference: approvalPolicyInstructionReference.trim(),
+      });
+      setShowApprovalPolicyModal(false);
+      setApprovalPolicyProperty(null);
+      setSuccess(`Application-approval rule updated for ${approvalPolicyProperty.title}.`);
+      await loadData();
+    } catch (err) {
+      const details = err.response?.data || {};
+      setError(details.instructionNote?.[0] || details.instructionReference?.[0] || details.applicationApprovalMode?.[0] || details.detail || 'Unable to update the application-approval rule.');
     }
   };
 
@@ -295,7 +416,8 @@ export default function AdminDashboard() {
       occupancyRate: totalUnits ? Math.round((totalOccupiedUnits / totalUnits) * 100) : 0,
       activeContracts: activeContractsList.length,
       totalRevenue: activeContractsList.reduce((acc, curr) => acc + Number(curr.rentAmount || 0), 0),
-      pendingInvoices: invoices.filter((invoice) => ['pending', 'overdue'].includes(invoice.status?.toLowerCase())).length,
+      pendingInvoices: invoices.filter((invoice) => invoice.status !== 'Cancelled' && Number(invoice.balanceDue || 0) > 0).length,
+      pendingPaymentReviews: invoices.reduce((total, invoice) => total + Number(invoice.pendingPaymentCount || 0), 0),
     };
   }, [properties, contracts, invoices]);
 
@@ -336,7 +458,10 @@ export default function AdminDashboard() {
           </div>
           <div className="pm-header-actions">
             {(activeSection === 'overview' || activeSection === 'contracts') && (
-              <Button variant="light" className="pm-btn-outline" onClick={() => setShowContractModal(true)}>
+              <Button variant="light" className="pm-btn-outline" onClick={() => {
+                setContractData((current) => ({ ...current, rentDueDay: 1, manualLeaseReason: '', manualLeaseReference: '' }));
+                setShowContractModal(true);
+              }}>
                 New lease
               </Button>
             )}
@@ -409,9 +534,9 @@ export default function AdminDashboard() {
                   <small>{tenantUsers.length} tenants · {ownerUsers.length} owners · {managerUsers.length} managers · {agentUsers.length} agents</small>
                 </div>
                 <div className="pm-admin-summary-item">
-                  <span>Invoices needing attention</span>
+                  <span>Invoices with balance</span>
                   <strong>{metrics.pendingInvoices}</strong>
-                  <small>Pending or overdue</small>
+                  <small>{metrics.pendingPaymentReviews} payment submissions awaiting review</small>
                 </div>
               </div>
             </section>
@@ -512,6 +637,9 @@ export default function AdminDashboard() {
                             >
                               Edit
                             </Button>
+                            <Button variant="outline-secondary" size="sm" className="me-2" onClick={() => openApprovalPolicyForm(prop)}>
+                              Approval rule
+                            </Button>
                             <Button
                               variant="light"
                               size="sm"
@@ -592,7 +720,7 @@ export default function AdminDashboard() {
 
             <div className="pm-panel mb-4" id="billing" data-workspace-section="billing">
               <div className="pm-panel-header">System-wide rent payments</div>
-              <div style={{ padding: '22px' }}><ManagerInvoiceTracker /></div>
+              <div style={{ padding: '22px' }}><ManagerInvoiceTracker onPaymentsUpdated={refreshInvoiceSummaries} /></div>
             </div>
 
             <div className="pm-panel mb-4" id="activity" data-workspace-section="activity">
@@ -607,11 +735,11 @@ export default function AdminDashboard() {
 
             {/* Active Contracts */}
             <div className="pm-panel mb-4" id="contracts" data-workspace-section="contracts">
-              <div className="pm-panel-header">Active lease contracts</div>
+              <div className="pm-panel-header">Lease contracts</div>
               <Table responsive className="pm-table mb-0">
                 <thead>
                   <tr>
-                    <th>Property</th>
+                    <th>Property / unit</th>
                     <th>Tenant</th>
                     <th>Rent amount</th>
                     <th>Status</th>
@@ -627,21 +755,23 @@ export default function AdminDashboard() {
 
                       return (
                         <tr key={contractId}>
-                          <td className="pm-cell-title">{propertyTitle}</td>
+                          <td className="pm-cell-title">
+                            {propertyTitle}
+                            {con.unitDetails?.unitNumber && con.unitDetails.unitNumber !== 'Main Unit' && ` · ${con.unitDetails.unitNumber}`}
+                          </td>
                           <td>{tenantName}</td>
                           <td className="pm-cell-strong">₱{Number(con.rentAmount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                          <td><StatusPill status={con.status} /></td>
-                          <td className="text-center">
-                            {con.status === 'Active' && (
-                              <Button
-                                variant="light"
-                                size="sm"
-                                className="pm-btn-end-lease"
-                                onClick={() => handleTerminateContract(contractId)}
-                              >
-                                End lease
-                              </Button>
+                          <td>
+                            <StatusPill status={con.status} />
+                            {con.activatedAt && (
+                              <div className="small text-muted mt-1" title={con.activationNote || undefined}>
+                                {con.activationBasis} · {con.activatedBy?.name || con.activatedBy?.email || 'recorded user'}
+                              </div>
                             )}
+                          </td>
+                          <td className="text-center">
+                            {con.status === 'Pending' && <Button variant="outline-primary" size="sm" className="me-2" onClick={() => openActivationForm(con)}>Record signed lease</Button>}
+                            {['Pending', 'Active'].includes(con.status) && <Button variant="light" size="sm" className="pm-btn-end-lease" onClick={() => openTerminationForm(con)}>End lease</Button>}
                           </td>
                         </tr>
                       );
@@ -727,18 +857,6 @@ export default function AdminDashboard() {
                     </Form.Select>
                   </Col>
                 </Row>
-                <Form.Group className="mb-3">
-                  <Form.Label className="pm-form-label">Rental application approval</Form.Label>
-                  <Form.Select
-                    className="pm-input"
-                    value={editingProperty.applicationApprovalMode || 'Manager'}
-                    onChange={(e) => setEditingProperty({ ...editingProperty, applicationApprovalMode: e.target.value })}
-                  >
-                    <option value="Manager">Property Manager reviews and decides</option>
-                    <option value="Owner">Property Manager reviews; Owner makes final decision</option>
-                  </Form.Select>
-                  <Form.Text className="text-muted">Owner approval applies to this property’s rental applications.</Form.Text>
-                </Form.Group>
                 <Row className="mb-3">
                   <Col md={6}>
                     <Form.Label className="pm-form-label">Assign Owner</Form.Label>
@@ -822,10 +940,11 @@ export default function AdminDashboard() {
         {/* Modal: New Lease Contract */}
         <Modal show={showContractModal} onHide={() => setShowContractModal(false)} centered dialogClassName="pm-modal">
           <Modal.Header closeButton>
-            <Modal.Title>Create lease contract</Modal.Title>
+            <Modal.Title>Prepare lease contract</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             <Form onSubmit={handleContractSubmit}>
+              <p className="text-muted small">This creates a pending lease record and reserves the selected unit. It does not sign or activate the lease.</p>
               <Form.Group className="mb-3">
                 <Form.Label className="pm-form-label">Select property</Form.Label>
                 <Form.Select
@@ -915,11 +1034,168 @@ export default function AdminDashboard() {
                   required
                 />
               </Form.Group>
+              <Form.Group className="mb-4">
+                <Form.Label className="pm-form-label">Rent due day</Form.Label>
+                <Form.Control
+                  className="pm-input"
+                  type="number"
+                  min="1"
+                  max="28"
+                  step="1"
+                  value={contractData.rentDueDay}
+                  onChange={(e) => setContractData({ ...contractData, rentDueDay: e.target.value })}
+                  required
+                />
+                <Form.Text className="text-muted">Rent will be due on this day each month (1–28).</Form.Text>
+              </Form.Group>
+              <div className="border rounded p-3 mb-3 bg-light">
+                <div className="fw-semibold mb-1">Existing or offline lease record</div>
+                <div className="text-muted small mb-3">Provide a short reason or a reference to the existing signed lease. The Owner or an Admin with the Owner’s written instruction must activate it.</div>
+                <Form.Group className="mb-3">
+                  <Form.Label className="pm-form-label">Reason (optional if a reference is provided)</Form.Label>
+                  <Form.Control as="textarea" rows={2} value={contractData.manualLeaseReason} onChange={(e) => setContractData({ ...contractData, manualLeaseReason: e.target.value })} />
+                </Form.Group>
+                <Form.Group>
+                  <Form.Label className="pm-form-label">Existing lease reference (optional if a reason is provided)</Form.Label>
+                  <Form.Control value={contractData.manualLeaseReference} onChange={(e) => setContractData({ ...contractData, manualLeaseReference: e.target.value })} placeholder="File name, folder, or record ID" />
+                </Form.Group>
+              </div>
               <Button variant="light" className="pm-btn-primary w-100 py-2" type="submit">
-                Save lease contract
+                Prepare lease
               </Button>
             </Form>
           </Modal.Body>
+        </Modal>
+
+        <Modal
+          show={showActivationModal}
+          onHide={() => !activatingContract && setShowActivationModal(false)}
+          centered
+          dialogClassName="pm-modal"
+        >
+          <Modal.Header closeButton>
+            <Modal.Title>Record signed lease</Modal.Title>
+          </Modal.Header>
+          <Form onSubmit={handleAdminActivateLease}>
+            <Modal.Body>
+              <p>
+                This is an administrative override for <strong>{contractForActivation?.propertyDetails?.title || 'this property'}</strong>.
+                The Admin records the activation but does not sign the lease or replace the Owner's authority.
+              </p>
+              <Form.Group className="mb-3">
+                <Form.Label>Signed lease copy reference</Form.Label>
+                <Form.Control value={signedCopyReference} onChange={(event) => setSignedCopyReference(event.target.value)} placeholder="File name, folder, or record ID" required />
+              </Form.Group>
+              {!contractForActivation?.sourceApplication && (
+                <div className="border rounded p-3 mb-3 bg-light">
+                  <div className="fw-semibold mb-2">Existing or offline lease record</div>
+                  <Form.Group className="mb-3">
+                    <Form.Label>Reason (optional if a reference is provided)</Form.Label>
+                    <Form.Control as="textarea" rows={2} value={manualLeaseReason} onChange={(event) => setManualLeaseReason(event.target.value)} />
+                  </Form.Group>
+                  <Form.Group>
+                    <Form.Label>Existing lease reference (optional if a reason is provided)</Form.Label>
+                    <Form.Control value={manualLeaseReference} onChange={(event) => setManualLeaseReference(event.target.value)} />
+                  </Form.Group>
+                </div>
+              )}
+              <Form.Group className="mb-3">
+                <Form.Label>Owner instruction</Form.Label>
+                <Form.Control
+                  as="textarea"
+                  rows={3}
+                  value={ownerInstruction}
+                  onChange={(event) => setOwnerInstruction(event.target.value)}
+                  placeholder="Describe the Owner's instruction to record this lease"
+                  required
+                />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Label>Instruction reference</Form.Label>
+                <Form.Control
+                  value={ownerInstructionReference}
+                  onChange={(event) => setOwnerInstructionReference(event.target.value)}
+                  placeholder="Email, letter, or other record reference"
+                  required
+                />
+              </Form.Group>
+              <Form.Check
+                type="checkbox"
+                id="admin-confirm-signatures-complete"
+                label="I confirm all required parties have signed the lease."
+                required
+              />
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="outline-secondary" onClick={() => setShowActivationModal(false)} disabled={activatingContract}>Cancel</Button>
+              <Button variant="primary" type="submit" disabled={activatingContract}>
+                {activatingContract ? 'Recording…' : 'Record activation'}
+              </Button>
+            </Modal.Footer>
+          </Form>
+        </Modal>
+
+        <Modal show={showApprovalPolicyModal} onHide={() => setShowApprovalPolicyModal(false)} centered dialogClassName="pm-modal">
+          <Modal.Header closeButton>
+            <Modal.Title>Application approval rule</Modal.Title>
+          </Modal.Header>
+          <Form onSubmit={handleApprovalPolicySubmit}>
+            <Modal.Body>
+              <p className="text-muted">{approvalPolicyProperty?.title}: choose who reviews and decides rental applications.</p>
+              <Form.Group className="mb-3">
+                <Form.Label>Decision authority</Form.Label>
+                <Form.Select value={approvalPolicyMode} onChange={(event) => setApprovalPolicyMode(event.target.value)}>
+                  <option value="Owner">Manager reviews; Owner makes the final decision</option>
+                  <option value="Manager">Assigned Manager reviews and decides under Owner delegation</option>
+                </Form.Select>
+              </Form.Group>
+              {approvalPolicyMode !== (approvalPolicyProperty?.applicationApprovalMode || 'Owner') && (
+                <>
+                  <Form.Group className="mb-3">
+                    <Form.Label>Owner instruction</Form.Label>
+                    <Form.Control as="textarea" rows={3} value={approvalPolicyInstruction} onChange={(event) => setApprovalPolicyInstruction(event.target.value)} placeholder="Describe the Owner’s instruction for this rule change" required />
+                  </Form.Group>
+                  <Form.Group>
+                    <Form.Label>Instruction reference</Form.Label>
+                    <Form.Control value={approvalPolicyInstructionReference} onChange={(event) => setApprovalPolicyInstructionReference(event.target.value)} placeholder="Email, letter, or agreement reference" required />
+                  </Form.Group>
+                </>
+              )}
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="outline-secondary" onClick={() => setShowApprovalPolicyModal(false)}>Cancel</Button>
+              <Button variant="primary" type="submit">Save rule</Button>
+            </Modal.Footer>
+          </Form>
+        </Modal>
+
+        <Modal show={showTerminationModal} onHide={() => setShowTerminationModal(false)} centered dialogClassName="pm-modal">
+          <Modal.Header closeButton><Modal.Title>End lease</Modal.Title></Modal.Header>
+          <Form onSubmit={handleTerminateContract}>
+            <Modal.Body>
+              <p className="text-muted">This keeps the lease record and records why and when it ended. Confirm the Owner’s instruction before continuing.</p>
+              <Form.Group className="mb-3">
+                <Form.Label>Reason</Form.Label>
+                <Form.Control as="textarea" rows={2} value={terminationReason} onChange={(event) => setTerminationReason(event.target.value)} required />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Label>Effective date</Form.Label>
+                <Form.Control type="date" value={terminationEffectiveDate} onChange={(event) => setTerminationEffectiveDate(event.target.value)} required />
+              </Form.Group>
+              <Form.Group className="mb-3">
+                <Form.Label>Owner instruction</Form.Label>
+                <Form.Control as="textarea" rows={2} value={terminationInstruction} onChange={(event) => setTerminationInstruction(event.target.value)} required />
+              </Form.Group>
+              <Form.Group>
+                <Form.Label>Instruction reference</Form.Label>
+                <Form.Control value={terminationInstructionReference} onChange={(event) => setTerminationInstructionReference(event.target.value)} placeholder="Email, letter, or other record reference" required />
+              </Form.Group>
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="outline-secondary" onClick={() => setShowTerminationModal(false)}>Cancel</Button>
+              <Button variant="danger" type="submit">Record lease ending</Button>
+            </Modal.Footer>
+          </Form>
         </Modal>
       </Container>
     </div>

@@ -2,8 +2,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { Container, Table, Spinner, Badge, Tab, Tabs, Button, Form, Modal, Row, Col } from 'react-bootstrap';
 import { useAuth } from '../context/AuthContext';
 import { fetchOwnerPortfolio } from '../services/ownerService';
+import { fetchPayments } from '../services/invoiceService';
 import { fetchApplications, reviewApplication } from '../services/applicationService';
-import { createProperty } from '../services/propertyService';
+import { createProperty, setLeaseSigningAuthority, setLeaseTerminationAuthority, setApplicationApprovalPolicy } from '../services/propertyService';
+import { activateContract } from '../services/contractService';
 import './OwnerDashboard.css';
 
 const PILL_CLASS = {
@@ -13,7 +15,7 @@ const PILL_CLASS = {
   'under maintenance': 'pm-pill-maintenance',
   active: 'pm-pill-active',
   terminated: 'pm-pill-terminated',
-  pending: 'pm-pill-occupied',
+  pending: 'pm-pill-pending',
 };
 
 function StatusPill({ status }) {
@@ -30,7 +32,7 @@ function StatusPill({ status }) {
 export default function OwnerDashboard() {
   const { user } = useAuth();
   const [activeSection, setActiveSection] = useState('overview');
-  const [portfolio, setPortfolio] = useState({ properties: [], contracts: [], maintenanceRequests: [], invoices: [] });
+  const [portfolio, setPortfolio] = useState({ properties: [], contracts: [], maintenanceRequests: [], invoices: [], payments: [], leaseSigningHistory: [] });
   const [ownerApprovals, setOwnerApprovals] = useState([]);
   const [ownerReviewNotes, setOwnerReviewNotes] = useState({});
   const [savingOwnerDecisionId, setSavingOwnerDecisionId] = useState(null);
@@ -40,18 +42,40 @@ export default function OwnerDashboard() {
   const [activePortfolioTab, setActivePortfolioTab] = useState('properties');
   const [showPropertyModal, setShowPropertyModal] = useState(false);
   const [savingProperty, setSavingProperty] = useState(false);
+  const [showLeaseAuthorityModal, setShowLeaseAuthorityModal] = useState(false);
+  const [leaseAuthorityProperty, setLeaseAuthorityProperty] = useState(null);
+  const [leaseAuthorityReference, setLeaseAuthorityReference] = useState('');
+  const [confirmWrittenAuthority, setConfirmWrittenAuthority] = useState(false);
+  const [savingLeaseAuthority, setSavingLeaseAuthority] = useState(false);
+  const [activatingContractId, setActivatingContractId] = useState(null);
+  const [approvalModeDrafts, setApprovalModeDrafts] = useState({});
+  const [savingApprovalPropertyId, setSavingApprovalPropertyId] = useState(null);
+  const [leaseAuthorityKind, setLeaseAuthorityKind] = useState('signing');
+  const [contractForActivation, setContractForActivation] = useState(null);
+  const [signedCopyReference, setSignedCopyReference] = useState('');
+  const [manualActivationReason, setManualActivationReason] = useState('');
+  const [manualActivationReference, setManualActivationReference] = useState('');
+  const [contractForTermination, setContractForTermination] = useState(null);
+  const [terminationReason, setTerminationReason] = useState('');
+  const [terminationEffectiveDate, setTerminationEffectiveDate] = useState('');
+  const [savingTermination, setSavingTermination] = useState(false);
   const [propertyDraft, setPropertyDraft] = useState({
     title: '',
     address: '',
     propertyType: 'Apartment',
     price: '',
+    applicationApprovalMode: 'Owner',
     units: [{ unitNumber: '101', monthlyRate: '' }],
   });
 
   const loadOwnerData = async () => {
     setLoading(true);
     try {
-      const [portfolioResult, approvalsResult] = await Promise.allSettled([fetchOwnerPortfolio(), fetchApplications()]);
+      const [portfolioResult, approvalsResult, paymentResult] = await Promise.allSettled([
+        fetchOwnerPortfolio(),
+        fetchApplications(),
+        fetchPayments(),
+      ]);
       if (portfolioResult.status === 'rejected') throw portfolioResult.reason;
       const data = portfolioResult.value;
       setPortfolio({
@@ -59,14 +83,20 @@ export default function OwnerDashboard() {
         contracts: Array.isArray(data.contracts) ? data.contracts : [],
         maintenanceRequests: Array.isArray(data.maintenanceRequests) ? data.maintenanceRequests : [],
         invoices: Array.isArray(data.invoices) ? data.invoices : [],
+        payments: paymentResult.status === 'fulfilled'
+          ? (Array.isArray(paymentResult.value) ? paymentResult.value : paymentResult.value.results || [])
+          : [],
+        leaseSigningHistory: Array.isArray(data.leaseSigningHistory) ? data.leaseSigningHistory : [],
       });
+      const warnings = [];
       if (approvalsResult.status === 'fulfilled') {
         setOwnerApprovals(Array.isArray(approvalsResult.value) ? approvalsResult.value : []);
-        setError('');
       } else {
         setOwnerApprovals([]);
-        setError('Your portfolio loaded, but application approvals could not be fetched. Please refresh or contact an administrator.');
+        warnings.push('Application approvals could not be loaded.');
       }
+      if (paymentResult.status === 'rejected') warnings.push('Payment history could not be loaded.');
+      setError(warnings.length ? warnings.join(' ') : '');
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to fetch portfolio data.');
     } finally {
@@ -120,10 +150,11 @@ export default function OwnerDashboard() {
         title: propertyDraft.title.trim(),
         address: propertyDraft.address.trim(),
         propertyType: propertyDraft.propertyType,
+        applicationApprovalMode: propertyDraft.applicationApprovalMode,
         price: Number(propertyDraft.price || (hasUnits ? propertyDraft.units[0]?.monthlyRate : 0) || 0),
         units,
       });
-      setPropertyDraft({ title: '', address: '', propertyType: 'Apartment', price: '', units: [{ unitNumber: '101', monthlyRate: '' }] });
+      setPropertyDraft({ title: '', address: '', propertyType: 'Apartment', price: '', applicationApprovalMode: 'Owner', units: [{ unitNumber: '101', monthlyRate: '' }] });
       setShowPropertyModal(false);
       setSuccess('Property added to your portfolio. An Admin can assign a Property Manager.');
       await loadOwnerData();
@@ -132,6 +163,145 @@ export default function OwnerDashboard() {
       setError(details?.detail || details?.title?.[0] || details?.address?.[0] || 'Unable to register this property. Please review the details and try again.');
     } finally {
       setSavingProperty(false);
+    }
+  };
+
+  const handleLeaseAuthorityClick = async (property, authorityKind = 'signing') => {
+    const propertyId = property._id || property.id;
+    const isAuthorized = authorityKind === 'signing'
+      ? property.managerLeaseSigningAuthorized
+      : property.managerLeaseTerminationAuthorized;
+    const saveAuthority = authorityKind === 'signing' ? setLeaseSigningAuthority : setLeaseTerminationAuthority;
+    if (isAuthorized) {
+      if (!window.confirm(`Revoke ${authorityKind === 'signing' ? 'lease signing' : 'lease termination'} authority for ${property.managerDetails?.name || 'the assigned manager'} at ${property.title}?`)) return;
+      setError('');
+      setSuccess('');
+      try {
+        await saveAuthority(propertyId, { authorized: false });
+        setSuccess(`Lease ${authorityKind === 'signing' ? 'signing' : 'termination'} authority revoked for ${property.title}.`);
+        await loadOwnerData();
+      } catch (err) {
+        setError(err.response?.data?.detail || 'Unable to revoke manager authority.');
+      }
+      return;
+    }
+    setLeaseAuthorityProperty(property);
+    setLeaseAuthorityKind(authorityKind);
+    setLeaseAuthorityReference('');
+    setConfirmWrittenAuthority(false);
+    setShowLeaseAuthorityModal(true);
+  };
+
+  const handleGrantLeaseAuthority = async (event) => {
+    event.preventDefault();
+    if (!leaseAuthorityProperty) return;
+    setError('');
+    setSuccess('');
+    setSavingLeaseAuthority(true);
+    try {
+      const saveAuthority = leaseAuthorityKind === 'signing' ? setLeaseSigningAuthority : setLeaseTerminationAuthority;
+      await saveAuthority(leaseAuthorityProperty._id || leaseAuthorityProperty.id, {
+        authorized: true,
+        agreementReference: leaseAuthorityReference.trim(),
+        confirmWrittenAuthority,
+      });
+      setShowLeaseAuthorityModal(false);
+      setSuccess(`Lease ${leaseAuthorityKind === 'signing' ? 'signing' : 'termination'} authority recorded for ${leaseAuthorityProperty.title}.`);
+      await loadOwnerData();
+    } catch (err) {
+      const details = err.response?.data;
+      setError(details?.agreementReference?.[0] || details?.confirmWrittenAuthority?.[0] || details?.detail || 'Unable to grant manager authority.');
+    } finally {
+      setSavingLeaseAuthority(false);
+    }
+  };
+
+  const handleActivateLease = async (contract) => {
+    const contractId = contract._id || contract.id;
+    setContractForActivation(contract);
+    setSignedCopyReference('');
+    setManualActivationReason('');
+    setManualActivationReference('');
+  };
+
+  const handleActivationSubmit = async (event) => {
+    event.preventDefault();
+    if (!contractForActivation) return;
+    if (!signedCopyReference.trim()) {
+      setError('Enter the name or location of the signed lease copy before activating.');
+      return;
+    }
+    if (!contractForActivation.sourceApplication && !manualActivationReason.trim() && !manualActivationReference.trim()) {
+      setError('Enter a reason or an existing lease-record reference for this manual lease.');
+      return;
+    }
+    const contractId = contractForActivation._id || contractForActivation.id;
+    setError('');
+    setSuccess('');
+    setActivatingContractId(contractId);
+    try {
+      await activateContract(contractId, {
+        signaturesComplete: true,
+        signedCopyReference: signedCopyReference.trim(),
+        manualLeaseReason: manualActivationReason.trim(),
+        manualLeaseReference: manualActivationReference.trim(),
+      });
+      setContractForActivation(null);
+      setSuccess('Lease activated and recorded in the signing history.');
+      await loadOwnerData();
+    } catch (err) {
+      setError(err.response?.data?.detail || err.response?.data?.signedCopyReference?.[0] || err.response?.data?.manualLeaseReason?.[0] || err.response?.data?.status?.[0] || 'Unable to activate this lease.');
+    } finally {
+      setActivatingContractId(null);
+    }
+  };
+
+  const handleApprovalPolicySave = async (property) => {
+    const propertyId = property._id || property.id;
+    const applicationApprovalMode = approvalModeDrafts[propertyId] || property.applicationApprovalMode || 'Owner';
+    setError('');
+    setSuccess('');
+    setSavingApprovalPropertyId(propertyId);
+    try {
+      await setApplicationApprovalPolicy(propertyId, { applicationApprovalMode });
+      setApprovalModeDrafts((current) => {
+        const next = { ...current };
+        delete next[propertyId];
+        return next;
+      });
+      setSuccess(`Application approval rule updated for ${property.title}.`);
+      await loadOwnerData();
+    } catch (err) {
+      setError(err.response?.data?.detail || err.response?.data?.applicationApprovalMode?.[0] || 'Unable to update the application approval rule.');
+    } finally {
+      setSavingApprovalPropertyId(null);
+    }
+  };
+
+  const openTerminationForm = (contract) => {
+    setContractForTermination(contract);
+    setTerminationReason('');
+    setTerminationEffectiveDate(new Date().toISOString().slice(0, 10));
+  };
+
+  const handleTerminationSubmit = async (event) => {
+    event.preventDefault();
+    if (!contractForTermination) return;
+    setError('');
+    setSuccess('');
+    setSavingTermination(true);
+    try {
+      await terminateContract(contractForTermination._id || contractForTermination.id, {
+        reason: terminationReason.trim(),
+        effectiveDate: terminationEffectiveDate,
+      });
+      setContractForTermination(null);
+      setSuccess('Lease ended. Its history remains in your portfolio.');
+      await loadOwnerData();
+    } catch (err) {
+      setError(err.response?.data?.reason?.[0] || err.response?.data?.effectiveDate?.[0] || err.response?.data?.detail || 'Unable to end this lease.');
+    } finally {
+      setSavingTermination(false);
     }
   };
 
@@ -180,6 +350,15 @@ export default function OwnerDashboard() {
     }
 
     const occupancyRate = totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0;
+    const activeInvoices = portfolio.invoices.filter((invoice) => invoice.status !== 'Cancelled');
+    const rentInvoiced = activeInvoices.reduce((sum, invoice) => sum + Number(invoice.totalDue || 0), 0);
+    // Cancellation does not reverse payments already verified for an invoice.
+    const rentCollected = portfolio.invoices.reduce((sum, invoice) => sum + Number(invoice.amountPaid || 0), 0);
+    const outstandingBalance = activeInvoices.reduce((sum, invoice) => sum + Number(invoice.balanceDue || 0), 0);
+    const paymentsAwaitingReview = portfolio.invoices.reduce(
+      (sum, invoice) => sum + Number(invoice.pendingPaymentCount || 0),
+      0,
+    );
 
     return {
       totalOwned: properties.length,
@@ -188,6 +367,10 @@ export default function OwnerDashboard() {
       occupancyRate,
       totalMonthlyIncome,
       activeLeasesCount: activeContracts.length,
+      rentInvoiced,
+      rentCollected,
+      outstandingBalance,
+      paymentsAwaitingReview,
     };
   }, [portfolio]);
 
@@ -272,6 +455,8 @@ export default function OwnerDashboard() {
                           <th>Type</th>
                           <th>Occupancy</th>
                           <th>Monthly Yield</th>
+                          <th>Application approval</th>
+                          <th>Manager lease authority</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -307,12 +492,76 @@ export default function OwnerDashboard() {
                                 <td className="pm-cell-strong text-success">
                                   ₱{Number(yieldAmt).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </td>
+                                <td style={{ minWidth: 250 }}>
+                                  <Form.Select
+                                    size="sm"
+                                    className="mb-2"
+                                    aria-label={`Application approval rule for ${prop.title}`}
+                                    value={approvalModeDrafts[propId] || prop.applicationApprovalMode || 'Owner'}
+                                    onChange={(event) => setApprovalModeDrafts((current) => ({ ...current, [propId]: event.target.value }))}
+                                  >
+                                    <option value="Owner">Owner approves applications</option>
+                                    <option value="Manager" disabled={!prop.managerDetails}>Manager decides (delegated)</option>
+                                  </Form.Select>
+                                  <Button
+                                    size="sm"
+                                    variant="outline-primary"
+                                    disabled={savingApprovalPropertyId === propId || (approvalModeDrafts[propId] || prop.applicationApprovalMode || 'Owner') === prop.applicationApprovalMode}
+                                    onClick={() => handleApprovalPolicySave(prop)}
+                                  >
+                                    {savingApprovalPropertyId === propId ? 'Saving…' : 'Save rule'}
+                                  </Button>
+                                  {prop.approvalPolicyHistory?.length > 0 && (
+                                    <details className="small mt-2">
+                                      <summary>Change history</summary>
+                                      {prop.approvalPolicyHistory.map((change, index) => (
+                                        <div key={`${propId}-approval-${index}`} className="border-top mt-1 pt-1">
+                                          {change.previousMode} → {change.newMode} · {change.changedBy} · {new Date(change.changedAt).toLocaleDateString()}
+                                          {change.instructionReference && <div>Instruction: {change.instructionReference}</div>}
+                                        </div>
+                                      ))}
+                                    </details>
+                                  )}
+                                </td>
+                                <td style={{ minWidth: 235 }}>
+                                  {prop.managerDetails ? (
+                                    <>
+                                      <div className="small mb-1">{prop.managerDetails.name || prop.managerDetails.email}</div>
+                                      <div className="mb-2">
+                                        <StatusPill status={prop.managerLeaseSigningAuthorized ? 'Signing authorized' : 'Signing not authorized'} />
+                                        <Button
+                                          size="sm"
+                                          className="ms-2"
+                                          variant={prop.managerLeaseSigningAuthorized ? 'outline-danger' : 'outline-primary'}
+                                          onClick={() => handleLeaseAuthorityClick(prop, 'signing')}
+                                        >
+                                          {prop.managerLeaseSigningAuthorized ? 'Revoke' : 'Grant'}
+                                        </Button>
+                                      </div>
+                                      <div>
+                                        <StatusPill status={prop.managerLeaseTerminationAuthorized ? 'Termination authorized' : 'Termination not authorized'} />
+                                        <Button
+                                          size="sm"
+                                          className="ms-2"
+                                          variant={prop.managerLeaseTerminationAuthorized ? 'outline-danger' : 'outline-primary'}
+                                          onClick={() => handleLeaseAuthorityClick(prop, 'termination')}
+                                        >
+                                          {prop.managerLeaseTerminationAuthorized ? 'Revoke' : 'Grant'}
+                                        </Button>
+                                      </div>
+                                      {prop.leaseSigningAgreementReference && <div className="small text-muted mt-1">Signing agreement: {prop.leaseSigningAgreementReference}</div>}
+                                      {prop.leaseTerminationAgreementReference && <div className="small text-muted mt-1">Termination agreement: {prop.leaseTerminationAgreementReference}</div>}
+                                    </>
+                                  ) : (
+                                    <span className="small text-muted">Assign a Property Manager first</span>
+                                  )}
+                                </td>
                               </tr>
                             );
                           })
                         ) : (
                           <tr>
-                            <td colSpan="5" className="pm-empty-row">
+                            <td colSpan="7" className="pm-empty-row">
                               No property assets linked to your owner account.
                             </td>
                           </tr>
@@ -321,7 +570,7 @@ export default function OwnerDashboard() {
                     </Table>
                   </Tab>
 
-                  <Tab eventKey="approvals" title={`Application approvals (${ownerApprovals.length})`}>
+                  <Tab eventKey="approvals" title={`Applications (${ownerApprovals.length})`}>
                     <Table responsive className="pm-table mb-0">
                       <thead>
                         <tr>
@@ -331,6 +580,7 @@ export default function OwnerDashboard() {
                           <th>Monthly income</th>
                           <th>Requested move-in</th>
                           <th>Manager review</th>
+                          <th>Status / history</th>
                           <th>Decision</th>
                         </tr>
                       </thead>
@@ -343,25 +593,44 @@ export default function OwnerDashboard() {
                             <td>{application.monthlyIncome != null ? `₱${Number(application.monthlyIncome).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
                             <td>{application.moveInDate || '—'}</td>
                             <td>{application.reviewNotes || 'No manager notes'}</td>
+                            <td>
+                              <StatusPill status={application.status} />
+                              {application.decisionHistory?.length > 0 && (
+                                <details className="small mt-2">
+                                  <summary>Decision history</summary>
+                                  {application.decisionHistory.map((decision, index) => (
+                                    <div key={`${application.id}-decision-${index}`} className="border-top mt-1 pt-1">
+                                      {decision.fromStatus || 'New'} → {decision.toStatus} · {decision.actor} · {new Date(decision.createdAt).toLocaleDateString()}
+                                      {decision.note && <div>{decision.note}</div>}
+                                      {decision.instructionReference && <div>Instruction: {decision.instructionReference}</div>}
+                                    </div>
+                                  ))}
+                                </details>
+                              )}
+                            </td>
                             <td style={{ minWidth: 240 }}>
-                              <Form.Control
-                                as="textarea"
-                                rows={2}
-                                className="mb-2"
-                                aria-label={`Decision notes for ${application.applicantName || 'applicant'}`}
-                                placeholder="Optional decision notes"
-                                value={ownerReviewNotes[application.id] || ''}
-                                onChange={(event) => setOwnerReviewNotes((current) => ({ ...current, [application.id]: event.target.value }))}
-                              />
-                              <div className="d-flex flex-wrap gap-2">
-                                <Button size="sm" variant="success" disabled={savingOwnerDecisionId === application.id} onClick={() => handleOwnerDecision(application, 'Approved')}>Approve</Button>
-                                <Button size="sm" variant="outline-danger" disabled={savingOwnerDecisionId === application.id} onClick={() => handleOwnerDecision(application, 'Rejected')}>{savingOwnerDecisionId === application.id ? 'Saving…' : 'Decline'}</Button>
-                              </div>
+                              {application.status === 'Pending Owner Approval' ? (
+                                <>
+                                  <Form.Control
+                                    as="textarea"
+                                    rows={2}
+                                    className="mb-2"
+                                    aria-label={`Decision notes for ${application.applicantName || 'applicant'}`}
+                                    placeholder="Optional decision notes"
+                                    value={ownerReviewNotes[application.id] || ''}
+                                    onChange={(event) => setOwnerReviewNotes((current) => ({ ...current, [application.id]: event.target.value }))}
+                                  />
+                                  <div className="d-flex flex-wrap gap-2">
+                                    <Button size="sm" variant="success" disabled={savingOwnerDecisionId === application.id} onClick={() => handleOwnerDecision(application, 'Approved')}>Approve</Button>
+                                    <Button size="sm" variant="outline-danger" disabled={savingOwnerDecisionId === application.id} onClick={() => handleOwnerDecision(application, 'Rejected')}>{savingOwnerDecisionId === application.id ? 'Saving…' : 'Decline'}</Button>
+                                  </div>
+                                </>
+                              ) : <span className="small text-muted">Decision is read-only</span>}
                             </td>
                           </tr>
                         ))}
                         {ownerApprovals.length === 0 && (
-                          <tr><td colSpan="7" className="pm-empty-row">No applications are waiting for your decision.</td></tr>
+                          <tr><td colSpan="8" className="pm-empty-row">No applications are recorded for your properties.</td></tr>
                         )}
                       </tbody>
                     </Table>
@@ -377,6 +646,7 @@ export default function OwnerDashboard() {
                           <th>Monthly rental</th>
                           <th>Lease Term</th>
                           <th>Status</th>
+                          <th>Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -390,7 +660,9 @@ export default function OwnerDashboard() {
                               <tr key={contractId}>
                                 <td className="pm-cell-title">
                                   {propTitle}
-                                  {con.unitNumber && con.unitNumber !== 'Main Unit' ? ` (${con.unitNumber})` : ''}
+                                  {(con.unitDetails?.unitNumber || con.unitNumber) && (con.unitDetails?.unitNumber || con.unitNumber) !== 'Main Unit'
+                                    ? ` (${con.unitDetails?.unitNumber || con.unitNumber})`
+                                    : ''}
                                 </td>
                                 <td>{tenantName} {con.tenantDetails?.email || con.tenant?.email ? `(${con.tenantDetails?.email || con.tenant?.email})` : ''}</td>
                                 <td className="pm-cell-strong">
@@ -401,16 +673,55 @@ export default function OwnerDashboard() {
                                 </td>
                                 <td>
                                   <StatusPill status={con.status} />
+                                  {con.activatedAt && <div className="small text-muted mt-1">{con.activationBasis} · {new Date(con.activatedAt).toLocaleDateString()}</div>}
+                                  {con.terminationEffectiveDate && <div className="small text-muted mt-1">Ended effective {new Date(con.terminationEffectiveDate).toLocaleDateString()}</div>}
+                                  {con.terminationReason && <div className="small text-muted mt-1">{con.terminationReason}</div>}
+                                </td>
+                                <td>
+                                  {con.status === 'Pending' ? (
+                                    <Button size="sm" variant="primary" disabled={activatingContractId === contractId} onClick={() => handleActivateLease(con)}>
+                                      Confirm signed & activate
+                                    </Button>
+                                  ) : con.activatedAt ? (
+                                    <span className="small text-muted d-block mb-2">Activated by {con.activatedBy?.name || con.activatedBy?.email || 'Owner'}</span>
+                                  ) : null}
+                                  {['Pending', 'Active'].includes(con.status) && (
+                                    <Button size="sm" variant="outline-danger" onClick={() => openTerminationForm(con)}>
+                                      {con.status === 'Pending' ? 'Cancel pending lease' : 'End lease'}
+                                    </Button>
+                                  )}
+                                  {!['Pending', 'Active'].includes(con.status) && '—'}
                                 </td>
                               </tr>
                             );
                           })
                         ) : (
                           <tr>
-                            <td colSpan="5" className="pm-empty-row">
-                              No active lease contracts found.
+                            <td colSpan="6" className="pm-empty-row">
+                              No lease contracts found.
                             </td>
                           </tr>
+                        )}
+                      </tbody>
+                    </Table>
+                  </Tab>
+
+                  <Tab eventKey="signingHistory" title={`Lease signing history (${portfolio.leaseSigningHistory.length})`}>
+                    <Table responsive className="pm-table mb-0">
+                      <thead>
+                        <tr><th>Date</th><th>Event</th><th>Record</th><th>Recorded by</th></tr>
+                      </thead>
+                      <tbody>
+                        {portfolio.leaseSigningHistory.map((event) => (
+                          <tr key={event.id}>
+                            <td>{event.createdAt ? new Date(event.createdAt).toLocaleString() : '—'}</td>
+                            <td className="pm-cell-strong">{event.action}</td>
+                            <td>{event.summary}</td>
+                            <td>{event.actor || 'System'}</td>
+                          </tr>
+                        ))}
+                        {portfolio.leaseSigningHistory.length === 0 && (
+                          <tr><td colSpan="4" className="pm-empty-row">No lease signing events recorded.</td></tr>
                         )}
                       </tbody>
                     </Table>
@@ -454,20 +765,73 @@ export default function OwnerDashboard() {
                   </Tab>
 
                   <Tab eventKey="payments" title={`Payment Status (${portfolio.invoices.length})`}>
-                    <Table responsive className="pm-table mb-0">
-                      <thead><tr><th>Property</th><th>Tenant</th><th>Amount due</th><th>Due date</th><th>Status</th><th>Paid</th></tr></thead>
+                    <h6 className="fw-bold mb-3">Portfolio rent summary</h6>
+                    <Row className="g-3 mb-4">
+                      <Col sm={6} xl={3}>
+                        <div className="pm-panel p-3 h-100">
+                          <div className="small text-muted">Rent invoiced</div>
+                          <div className="fs-5 fw-bold">₱{metrics.rentInvoiced.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        </div>
+                      </Col>
+                      <Col sm={6} xl={3}>
+                        <div className="pm-panel p-3 h-100">
+                          <div className="small text-muted">Verified rent collected</div>
+                          <div className="fs-5 fw-bold text-success">₱{metrics.rentCollected.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        </div>
+                      </Col>
+                      <Col sm={6} xl={3}>
+                        <div className="pm-panel p-3 h-100">
+                          <div className="small text-muted">Balance outstanding</div>
+                          <div className="fs-5 fw-bold text-danger">₱{metrics.outstandingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        </div>
+                      </Col>
+                      <Col sm={6} xl={3}>
+                        <div className="pm-panel p-3 h-100">
+                          <div className="small text-muted">Payments awaiting review</div>
+                          <div className="fs-5 fw-bold">{metrics.paymentsAwaitingReview}</div>
+                        </div>
+                      </Col>
+                    </Row>
+                    <h6 className="fw-bold mb-3">Invoice balances</h6>
+                    <Table responsive className="pm-table mb-4">
+                      <thead><tr><th>Property</th><th>Tenant</th><th>Total due</th><th>Paid</th><th>Balance</th><th>Due date</th><th>Status</th><th>Awaiting review</th></tr></thead>
                       <tbody>
                         {portfolio.invoices.map((invoice) => (
-                          <tr key={invoice._id}>
+                          <tr key={invoice._id || invoice.id}>
                             <td>{invoice.propertyDetails?.title || 'Property'}</td>
-                            <td>{invoice.tenantDetails?.name || 'Tenant'}</td>
-                            <td>₱{Number(invoice.totalDue || invoice.amount || 0).toLocaleString()}</td>
-                            <td>{invoice.dueDate}</td>
-                            <td><StatusPill status={invoice.status} /></td>
-                            <td>{invoice.paidAt ? new Date(invoice.paidAt).toLocaleDateString() : '—'}</td>
+                            <td>{invoice.tenantDetails?.name || invoice.tenantDetails?.email || 'Tenant'}</td>
+                            <td>₱{Number(invoice.totalDue || invoice.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            <td>₱{Number(invoice.amountPaid || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            <td className="fw-semibold">₱{Number(invoice.balanceDue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            <td>{invoice.dueDate || '—'}</td>
+                            <td>
+                              <StatusPill status={invoice.status} />
+                              {invoice.isArchived && <div className="small text-muted mt-1">Archived history</div>}
+                            </td>
+                            <td>{Number(invoice.pendingPaymentCount || 0)}</td>
                           </tr>
                         ))}
-                        {portfolio.invoices.length === 0 && <tr><td colSpan="6" className="text-center text-muted py-4">No payment records found for your properties.</td></tr>}
+                        {portfolio.invoices.length === 0 && <tr><td colSpan="8" className="text-center text-muted py-4">No invoices found for your properties.</td></tr>}
+                      </tbody>
+                    </Table>
+
+                    <h6 className="fw-bold mb-3">Payment history</h6>
+                    <Table responsive className="pm-table mb-0">
+                      <thead><tr><th>Property</th><th>Tenant</th><th>Payment date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th><th>Review note</th></tr></thead>
+                      <tbody>
+                        {portfolio.payments.map((payment) => (
+                          <tr key={payment.id}>
+                            <td>{payment.invoiceDetails?.property || 'Property'}</td>
+                            <td>{payment.invoiceDetails?.tenant || 'Tenant'}</td>
+                            <td>{payment.paymentDate ? new Date(`${payment.paymentDate}T00:00:00`).toLocaleDateString('en-PH') : '—'}</td>
+                            <td className="fw-semibold">₱{Number(payment.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                            <td>{payment.paymentMethod || '—'}</td>
+                            <td>{payment.referenceNumber || '—'}</td>
+                            <td><StatusPill status={payment.status} /></td>
+                            <td>{payment.rejectionReason || payment.reversalReason || '—'}</td>
+                          </tr>
+                        ))}
+                        {portfolio.payments.length === 0 && <tr><td colSpan="8" className="text-center text-muted py-4">No payment transactions recorded for your properties.</td></tr>}
                       </tbody>
                     </Table>
                   </Tab>
@@ -508,6 +872,13 @@ export default function OwnerDashboard() {
                 </Col>
               )}
             </Row>
+            <Form.Group className="mb-3">
+              <Form.Label>Rental application approval</Form.Label>
+              <Form.Select value={propertyDraft.applicationApprovalMode} disabled>
+                <option value="Owner">Owner reviews and makes the final decision</option>
+              </Form.Select>
+              <Form.Text className="text-muted">New properties start with Owner approval. After a Manager is assigned, you can delegate application decisions from the property settings.</Form.Text>
+            </Form.Group>
             {['Apartment', 'Condo'].includes(propertyDraft.propertyType) && (
               <Form.Group>
                 <div className="d-flex justify-content-between align-items-center mb-2">
@@ -527,6 +898,111 @@ export default function OwnerDashboard() {
           <Modal.Footer>
             <Button variant="outline-secondary" onClick={() => setShowPropertyModal(false)}>Cancel</Button>
             <Button variant="dark" type="submit" disabled={savingProperty}>{savingProperty ? 'Saving…' : 'Add property'}</Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      <Modal show={Boolean(contractForActivation)} onHide={() => !activatingContractId && setContractForActivation(null)} centered dialogClassName="pm-modal">
+        <Modal.Header closeButton>
+          <Modal.Title>Activate signed lease</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleActivationSubmit}>
+          <Modal.Body>
+            <p>Confirm the parties signed <strong>{contractForActivation?.propertyDetails?.title || 'this lease'}</strong>. This records activation and marks the unit occupied.</p>
+            <Form.Group className="mb-3">
+              <Form.Label>Signed-copy reference</Form.Label>
+              <Form.Control value={signedCopyReference} onChange={(event) => setSignedCopyReference(event.target.value)} maxLength={500} placeholder="File name, document location, or reference" required />
+            </Form.Group>
+            {contractForActivation && !contractForActivation.sourceApplication && (
+              <>
+                <p className="small text-muted">This is a manual/offline lease. Add a reason or reference to the existing tenancy record.</p>
+                <Form.Group className="mb-3">
+                  <Form.Label>Manual lease reason</Form.Label>
+                  <Form.Control as="textarea" rows={2} value={manualActivationReason} onChange={(event) => setManualActivationReason(event.target.value)} placeholder="Existing tenancy or offline arrangement" />
+                </Form.Group>
+                <Form.Group className="mb-3">
+                  <Form.Label>Existing lease-record reference</Form.Label>
+                  <Form.Control value={manualActivationReference} onChange={(event) => setManualActivationReference(event.target.value)} maxLength={500} placeholder="Optional if a reason is entered" />
+                </Form.Group>
+              </>
+            )}
+            <Form.Check type="checkbox" id="owner-confirm-signed-lease" label="I confirm all required parties signed this lease outside the system." required />
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="outline-secondary" onClick={() => setContractForActivation(null)} disabled={Boolean(activatingContractId)}>Cancel</Button>
+            <Button variant="primary" type="submit" disabled={Boolean(activatingContractId)}>{activatingContractId ? 'Activating…' : 'Activate lease'}</Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      <Modal show={Boolean(contractForTermination)} onHide={() => !savingTermination && setContractForTermination(null)} centered dialogClassName="pm-modal">
+        <Modal.Header closeButton>
+          <Modal.Title>End lease</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleTerminationSubmit}>
+          <Modal.Body>
+            <p>End the lease for <strong>{contractForTermination?.propertyDetails?.title || 'this property'}</strong>. The lease record will remain in your history.</p>
+            <Form.Group className="mb-3">
+              <Form.Label>Effective date</Form.Label>
+              <Form.Control type="date" value={terminationEffectiveDate} onChange={(event) => setTerminationEffectiveDate(event.target.value)} required />
+            </Form.Group>
+            <Form.Group>
+              <Form.Label>Reason</Form.Label>
+              <Form.Control as="textarea" rows={3} value={terminationReason} onChange={(event) => setTerminationReason(event.target.value)} required />
+            </Form.Group>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="outline-secondary" onClick={() => setContractForTermination(null)} disabled={savingTermination}>Cancel</Button>
+            <Button variant="danger" type="submit" disabled={savingTermination}>{savingTermination ? 'Saving…' : 'End lease'}</Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
+
+      <Modal
+        show={showLeaseAuthorityModal}
+        onHide={() => !savingLeaseAuthority && setShowLeaseAuthorityModal(false)}
+        centered
+        dialogClassName="pm-modal"
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>Grant lease {leaseAuthorityKind === 'signing' ? 'signing' : 'termination'} authority</Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleGrantLeaseAuthority}>
+          <Modal.Body>
+            <p>
+              This allows <strong>{leaseAuthorityProperty?.managerDetails?.name || 'the assigned Property Manager'}</strong> to
+              {leaseAuthorityKind === 'signing' ? ' activate signed leases for ' : ' end leases for '}
+              <strong>{leaseAuthorityProperty?.title}</strong>
+              It applies only to this property.
+            </p>
+            <p className="small text-muted">
+              Grant this only when your written management agreement gives the manager this authority. This system does not
+              {leaseAuthorityKind === 'signing' ? ' sign leases or determine their legal validity.' : ' decide whether ending a lease is legally justified.'}
+            </p>
+            <Form.Group className="mb-3">
+              <Form.Label>Written agreement reference</Form.Label>
+              <Form.Control
+                value={leaseAuthorityReference}
+                onChange={(event) => setLeaseAuthorityReference(event.target.value)}
+                maxLength={500}
+                placeholder="Agreement name, date, or clause"
+                required
+              />
+            </Form.Group>
+            <Form.Check
+              type="checkbox"
+              id="confirm-written-lease-authority"
+              checked={confirmWrittenAuthority}
+              onChange={(event) => setConfirmWrittenAuthority(event.target.checked)}
+              label={`I confirm the written agreement grants this manager authority to ${leaseAuthorityKind === 'signing' ? 'activate signed leases' : 'end leases'} for this property.`}
+              required
+            />
+          </Modal.Body>
+          <Modal.Footer>
+            <Button variant="outline-secondary" onClick={() => setShowLeaseAuthorityModal(false)} disabled={savingLeaseAuthority}>Cancel</Button>
+            <Button variant="primary" type="submit" disabled={savingLeaseAuthority}>
+              {savingLeaseAuthority ? 'Saving…' : `Grant ${leaseAuthorityKind === 'signing' ? 'signing' : 'termination'} authority`}
+            </Button>
           </Modal.Footer>
         </Form>
       </Modal>
