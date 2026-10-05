@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from .models import Contract
 from .serializers import ContractSerializer, LeaseTerminationSerializer
@@ -10,7 +11,11 @@ from properties.models import (
     LeaseSigningAuthorization, LeaseTerminationAuthorization, Property, Unit,
     RentalApplicationDecision,
 )
+from properties.querysets import property_serializer_queryset
 from users.audit import record_activity
+from core.pagination import OptInPageNumberPagination
+from notifications.models import Notification
+from notifications.services import create_for_recipients
 
 
 class IsAdminOrPropertyManager(permissions.BasePermission):
@@ -58,6 +63,7 @@ class IsAuthorizedContractTerminator(permissions.BasePermission):
 class ContractViewSet(viewsets.ModelViewSet):
     queryset = Contract.objects.all()
     serializer_class = ContractSerializer
+    pagination_class = OptInPageNumberPagination
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
@@ -69,14 +75,32 @@ class ContractViewSet(viewsets.ModelViewSet):
             contracts = Contract.objects.filter(is_deleted=False)
 
         if user.role == 'Admin':
-            return contracts.order_by('-id')
-        if user.role == 'Property Manager':
-            return contracts.filter(property__manager=user).order_by('-id')
-        if user.role == 'Owner':
-            return contracts.filter(property__owner=user).order_by('-id')
-        if user.role == 'Tenant':
-            return contracts.filter(tenant=user).order_by('-id')
-        return contracts.none()
+            scoped_contracts = contracts
+        elif user.role == 'Property Manager':
+            scoped_contracts = contracts.filter(property__manager=user)
+        elif user.role == 'Owner':
+            scoped_contracts = contracts.filter(property__owner=user)
+        elif user.role == 'Tenant':
+            scoped_contracts = contracts.filter(tenant=user)
+        else:
+            scoped_contracts = contracts.none()
+        contract_status = self.request.query_params.get('status')
+        search = self.request.query_params.get('search', '').strip()
+        if contract_status:
+            scoped_contracts = scoped_contracts.filter(status=contract_status)
+        if search:
+            scoped_contracts = scoped_contracts.filter(
+                Q(property__title__icontains=search)
+                | Q(tenant__email__icontains=search)
+                | Q(tenant__first_name__icontains=search)
+                | Q(tenant__last_name__icontains=search)
+                | Q(unit__unit_number__icontains=search)
+            )
+        return scoped_contracts.select_related(
+            'tenant', 'unit', 'unit__tenant', 'activated_by', 'terminated_by',
+        ).prefetch_related(
+            Prefetch('property', queryset=property_serializer_queryset(Property.objects.all())),
+        ).order_by('-id')
 
     def get_permissions(self):
         if self.action == 'activate':
@@ -91,7 +115,7 @@ class ContractViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def _end_contract(self, request, contract):
-        locked_contract = Contract.objects.select_for_update().select_related('property', 'source_application').get(pk=contract.pk)
+        locked_contract = Contract.objects.select_for_update().select_related('property').get(pk=contract.pk)
         if locked_contract.status not in ('Active', 'Pending') or locked_contract.is_deleted:
             raise ValidationError({'status': 'Only an active or pending lease can be ended.'})
 
@@ -160,6 +184,12 @@ class ContractViewSet(viewsets.ModelViewSet):
             f'Ended lease for {property_obj.title} effective {effective_date} under {authority} authority. Reason: {reason}.'
             + (f' Owner instruction: {note}' if note else ''),
         )
+        self._notify_lease_participants(
+            locked_contract,
+            actor=actor,
+            title='Lease ended',
+            message='A lease for this property was ended.',
+        )
         return locked_contract
 
     @transaction.atomic
@@ -187,9 +217,43 @@ class ContractViewSet(viewsets.ModelViewSet):
             prop.status = 'Available'
         prop.save(update_fields=['status'])
 
+    @transaction.atomic
     def perform_create(self, serializer):
         contract = serializer.save()
         record_activity(self.request.user, 'CREATE', 'Contract', contract.pk, f'Created lease contract {contract.pk}.')
+        self._notify_lease_participants(
+            contract,
+            actor=self.request.user,
+            title='Lease prepared',
+            message='A lease is ready for review and signing.',
+        )
+
+    def _notify_lease_participants(self, contract, *, actor, title, message):
+        property_obj = contract.property
+        create_for_recipients(
+            recipients=[property_obj.owner] if property_obj.owner_id else [],
+            actor=actor,
+            event_type=Notification.EventType.LEASE,
+            title=title,
+            message=message,
+            destination=Notification.Destination.OWNER_CONTRACTS,
+        )
+        create_for_recipients(
+            recipients=[property_obj.manager] if property_obj.manager_id else [],
+            actor=actor,
+            event_type=Notification.EventType.LEASE,
+            title=title,
+            message=message,
+            destination=Notification.Destination.MANAGER_CONTRACTS,
+        )
+        create_for_recipients(
+            recipients=[contract.tenant],
+            actor=actor,
+            event_type=Notification.EventType.LEASE,
+            title=title,
+            message=message,
+            destination=Notification.Destination.TENANT_LEASE,
+        )
 
     def perform_update(self, serializer):
         contract = serializer.save()
@@ -206,9 +270,7 @@ class ContractViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def activate(self, request, pk=None):
         existing = self.get_object()
-        contract = Contract.objects.select_for_update().select_related(
-            'property', 'source_application', 'source_application__inquiry'
-        ).get(pk=existing.pk)
+        contract = Contract.objects.select_for_update().select_related('property').get(pk=existing.pk)
         if contract.status != 'Pending':
             raise ValidationError({'status': 'Only a pending lease can be activated.'})
         if request.data.get('signaturesComplete') is not True:
@@ -342,4 +404,21 @@ class ContractViewSet(viewsets.ModelViewSet):
             contract.pk,
             f'Activated lease for {property_obj.title} under {activation_basis} authority.',
         )
+        self._notify_lease_participants(
+            contract,
+            actor=actor,
+            title='Lease activated',
+            message='A lease for this property is now active.',
+        )
+        if application and application.inquiry.agent_id:
+            assigned_agent = application.inquiry.agent
+            if property_obj.assigned_agents.filter(pk=assigned_agent.pk, role='Agent').exists():
+                create_for_recipients(
+                    recipients=[assigned_agent],
+                    actor=actor,
+                    event_type=Notification.EventType.APPLICATION,
+                    title='Application status updated',
+                    message='The prospect application you represented has converted to a lease.',
+                    destination=Notification.Destination.AGENT_APPLICATIONS,
+                )
         return Response(self.get_serializer(contract).data)

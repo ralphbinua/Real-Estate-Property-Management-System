@@ -1,11 +1,15 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Container, Table, Spinner, Badge, Tab, Tabs, Button, Form, Modal, Row, Col } from 'react-bootstrap';
-import { useAuth } from '../context/AuthContext';
-import { fetchOwnerPortfolio } from '../services/ownerService';
-import { fetchPayments } from '../services/invoiceService';
-import { fetchApplications, reviewApplication } from '../services/applicationService';
-import { createProperty, setLeaseSigningAuthority, setLeaseTerminationAuthority, setApplicationApprovalPolicy } from '../services/propertyService';
-import { activateContract } from '../services/contractService';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Container, Table, Spinner, Badge, Button, Form, Modal, Row, Col } from 'react-bootstrap';
+import { fetchOwnerPortfolio, fetchOwnerPortfolioPage } from '../services/ownerService';
+import { fetchPaymentsPage } from '../services/invoiceService';
+import { fetchApplicationsPage, reviewApplication } from '../services/applicationService';
+import CollectionPagination from '../components/CollectionPagination';
+import useNotificationDeepLink from '../hooks/useNotificationDeepLink';
+import {
+  createProperty, setLeaseSigningAuthority, setLeaseTerminationAuthority,
+  setUnitPricingAuthority, setApplicationApprovalPolicy, decideRentChange,
+} from '../services/propertyService';
+import { activateContract, terminateContract } from '../services/contractService';
 import './OwnerDashboard.css';
 
 const PILL_CLASS = {
@@ -16,6 +20,7 @@ const PILL_CLASS = {
   active: 'pm-pill-active',
   terminated: 'pm-pill-terminated',
   pending: 'pm-pill-pending',
+  cancelled: 'pm-pill-terminated',
 };
 
 function StatusPill({ status }) {
@@ -29,17 +34,97 @@ function StatusPill({ status }) {
   );
 }
 
+function getRentChangeEffectiveDate(changeRequest) {
+  if (changeRequest.status === 'Pending') return 'After Owner approval';
+  if (changeRequest.status !== 'Approved') return '—';
+  if (!changeRequest.decidedAt) return 'On approval';
+
+  const effectiveAt = new Date(changeRequest.decidedAt);
+  return Number.isNaN(effectiveAt.getTime())
+    ? 'On approval'
+    : effectiveAt.toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function getOwnerRentalProgress(application, contract) {
+  if (contract?.status === 'Active') {
+    return {
+      label: 'Lease active',
+      detail: 'The lease has been activated and the unit is occupied.',
+      tone: 'active',
+    };
+  }
+  if (contract?.status === 'Pending') {
+    return {
+      label: 'Lease awaiting signatures',
+      detail: 'After everyone signs, the Owner or an authorized manager records the signed copy and activates the lease.',
+      tone: 'pending',
+    };
+  }
+  if (contract?.status === 'Terminated') {
+    return {
+      label: 'Lease ended',
+      detail: 'This lease is no longer active.',
+      tone: 'closed',
+    };
+  }
+  if (contract?.status === 'Expired') {
+    return {
+      label: 'Lease expired',
+      detail: 'The lease term has ended.',
+      tone: 'closed',
+    };
+  }
+  if (application.status === 'Converted') {
+    return {
+      label: 'Lease active',
+      detail: 'A lease has been activated for this application.',
+      tone: 'active',
+    };
+  }
+  if (application.status === 'Rejected') {
+    return {
+      label: 'Application declined',
+      detail: 'No lease will be prepared from this application.',
+      tone: 'closed',
+    };
+  }
+  if (application.status === 'Pending Owner Approval') {
+    return {
+      label: 'Owner decision needed',
+      detail: 'Review the manager’s notes, then approve or decline the application.',
+      tone: 'action',
+    };
+  }
+  if (application.status === 'Approved') {
+    return {
+      label: 'Lease preparation',
+      detail: 'The Property Manager prepares the lease once a matching Tenant account is available.',
+      tone: 'pending',
+    };
+  }
+  return {
+    label: 'Property Manager review',
+    detail: application.status === 'Under Review'
+      ? 'The Property Manager is reviewing this application.'
+      : 'The Property Manager reviews the application first.',
+    tone: 'review',
+  };
+}
+
 export default function OwnerDashboard() {
-  const { user } = useAuth();
   const [activeSection, setActiveSection] = useState('overview');
-  const [portfolio, setPortfolio] = useState({ properties: [], contracts: [], maintenanceRequests: [], invoices: [], payments: [], leaseSigningHistory: [] });
+  const [portfolio, setPortfolio] = useState({ summary: null, properties: [], contracts: [], maintenanceRequests: [], invoices: [], payments: [], leaseSigningHistory: [], rentChangeRequests: [] });
   const [ownerApprovals, setOwnerApprovals] = useState([]);
   const [ownerReviewNotes, setOwnerReviewNotes] = useState({});
   const [savingOwnerDecisionId, setSavingOwnerDecisionId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sectionLoading, setSectionLoading] = useState({});
+  const [sectionErrors, setSectionErrors] = useState({});
+  const [sectionPages, setSectionPages] = useState({});
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [activePortfolioTab, setActivePortfolioTab] = useState('properties');
+  const [historyFilter, setHistoryFilter] = useState('all');
   const [showPropertyModal, setShowPropertyModal] = useState(false);
   const [savingProperty, setSavingProperty] = useState(false);
   const [showLeaseAuthorityModal, setShowLeaseAuthorityModal] = useState(false);
@@ -68,41 +153,108 @@ export default function OwnerDashboard() {
     units: [{ unitNumber: '101', monthlyRate: '' }],
   });
 
-  const loadOwnerData = async () => {
-    setLoading(true);
+  const loadedOwnerSections = useRef(new Set());
+  const loadingOwnerSections = useRef(new Set());
+
+  const loadOwnerData = useCallback(async ({ section = activePortfolioTab, force = true, includeSummary = true, page = 1, paymentPage = 1 } = {}) => {
+    const sectionKey = section === 'overview' ? 'overview' : section;
+    if (loadingOwnerSections.current.has(sectionKey)) return;
+    if (!force && loadedOwnerSections.current.has(sectionKey) && !includeSummary) return;
+    loadingOwnerSections.current.add(sectionKey);
+    setSectionLoading((current) => ({ ...current, [sectionKey]: true }));
+    setSectionErrors((current) => ({ ...current, [sectionKey]: '' }));
+    const apiSection = {
+      properties: 'properties',
+      pricing: 'pricing',
+      contracts: 'contracts',
+      history: 'history',
+      maintenance: 'maintenance',
+      payments: 'payments',
+    }[sectionKey];
+    const summaryPromise = includeSummary && (force || !loadedOwnerSections.current.has('overview'))
+      ? fetchOwnerPortfolio('overview')
+      : Promise.resolve(null);
+    const sectionPromise = sectionKey === 'approvals'
+      ? fetchApplicationsPage({ page })
+      : apiSection
+        ? fetchOwnerPortfolioPage(apiSection, {
+          page,
+          ...(sectionKey === 'history' && historyFilter !== 'all' ? { category: historyFilter } : {}),
+        })
+        : Promise.resolve(null);
+    const paymentsPromise = sectionKey === 'payments' ? fetchPaymentsPage({ page: paymentPage }) : Promise.resolve(null);
+
     try {
-      const [portfolioResult, approvalsResult, paymentResult] = await Promise.allSettled([
-        fetchOwnerPortfolio(),
-        fetchApplications(),
-        fetchPayments(),
+      const [summaryResult, sectionResult, paymentResult] = await Promise.allSettled([
+        summaryPromise, sectionPromise, paymentsPromise,
       ]);
-      if (portfolioResult.status === 'rejected') throw portfolioResult.reason;
-      const data = portfolioResult.value;
-      setPortfolio({
-        properties: Array.isArray(data.properties) ? data.properties : [],
-        contracts: Array.isArray(data.contracts) ? data.contracts : [],
-        maintenanceRequests: Array.isArray(data.maintenanceRequests) ? data.maintenanceRequests : [],
-        invoices: Array.isArray(data.invoices) ? data.invoices : [],
-        payments: paymentResult.status === 'fulfilled'
-          ? (Array.isArray(paymentResult.value) ? paymentResult.value : paymentResult.value.results || [])
-          : [],
-        leaseSigningHistory: Array.isArray(data.leaseSigningHistory) ? data.leaseSigningHistory : [],
-      });
-      const warnings = [];
-      if (approvalsResult.status === 'fulfilled') {
-        setOwnerApprovals(Array.isArray(approvalsResult.value) ? approvalsResult.value : []);
-      } else {
-        setOwnerApprovals([]);
-        warnings.push('Application approvals could not be loaded.');
+      const failures = [];
+      if (summaryResult.status === 'fulfilled' && summaryResult.value) {
+        setPortfolio((current) => ({ ...current, summary: summaryResult.value.summary || null }));
+        loadedOwnerSections.current.add('overview');
+      } else if (summaryResult.status === 'rejected') {
+        failures.push('Portfolio summary could not be loaded.');
       }
-      if (paymentResult.status === 'rejected') warnings.push('Payment history could not be loaded.');
-      setError(warnings.length ? warnings.join(' ') : '');
+
+      if (sectionResult.status === 'fulfilled' && sectionResult.value) {
+        if (sectionKey === 'approvals') {
+          setOwnerApprovals(sectionResult.value.results);
+        } else {
+          const responseKey = {
+            properties: 'properties',
+            pricing: 'rentChangeRequests',
+            contracts: 'contracts',
+            history: 'leaseSigningHistory',
+            maintenance: 'maintenanceRequests',
+            payments: 'invoices',
+          }[sectionKey];
+          setPortfolio((current) => ({
+            ...current,
+            [responseKey]: sectionResult.value.results,
+          }));
+        }
+        setSectionPages((current) => ({
+          ...current,
+          [sectionKey]: {
+            count: sectionResult.value.count,
+            page,
+            pageCount: Math.max(1, Math.ceil(sectionResult.value.count / 50)),
+          },
+        }));
+        loadedOwnerSections.current.add(sectionKey);
+      } else if (sectionResult.status === 'rejected') {
+        failures.push('This section could not be loaded. Try again.');
+      }
+
+      if (sectionKey === 'payments' && paymentResult.status === 'fulfilled') {
+        const data = paymentResult.value;
+        setPortfolio((current) => ({
+          ...current,
+          payments: data.results,
+        }));
+        setSectionPages((current) => ({
+          ...current,
+          paymentTransactions: {
+            count: data.count,
+            page: paymentPage,
+            pageCount: Math.max(1, Math.ceil(data.count / 50)),
+          },
+        }));
+      } else if (sectionKey === 'payments' && paymentResult.status === 'rejected') {
+        failures.push('Payment transactions could not be loaded.');
+      }
+
+      setSectionErrors((current) => ({ ...current, [sectionKey]: failures.join(' ') }));
+      setError('');
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to fetch portfolio data.');
+      const message = err.response?.data?.message || 'Failed to fetch portfolio data.';
+      setSectionErrors((current) => ({ ...current, [sectionKey]: message }));
     } finally {
-      setLoading(false);
+      loadingOwnerSections.current.delete(sectionKey);
+      setSectionLoading((current) => ({ ...current, [sectionKey]: false }));
+      if (sectionKey === 'overview') setLoading(false);
     }
-  };
+  }, [activePortfolioTab, historyFilter]);
 
   const handleOwnerDecision = async (application, status) => {
     setError('');
@@ -170,15 +322,24 @@ export default function OwnerDashboard() {
     const propertyId = property._id || property.id;
     const isAuthorized = authorityKind === 'signing'
       ? property.managerLeaseSigningAuthorized
-      : property.managerLeaseTerminationAuthorized;
-    const saveAuthority = authorityKind === 'signing' ? setLeaseSigningAuthority : setLeaseTerminationAuthority;
+      : authorityKind === 'termination'
+        ? property.managerLeaseTerminationAuthorized
+        : property.managerUnitPricingAuthorized;
+    const saveAuthority = authorityKind === 'signing'
+      ? setLeaseSigningAuthority
+      : authorityKind === 'termination'
+        ? setLeaseTerminationAuthority
+        : setUnitPricingAuthority;
+    const authorityLabel = authorityKind === 'signing'
+      ? 'lease signing'
+      : authorityKind === 'termination' ? 'lease termination' : 'rent pricing';
     if (isAuthorized) {
-      if (!window.confirm(`Revoke ${authorityKind === 'signing' ? 'lease signing' : 'lease termination'} authority for ${property.managerDetails?.name || 'the assigned manager'} at ${property.title}?`)) return;
+      if (!window.confirm(`Revoke ${authorityLabel} authority for ${property.managerDetails?.name || 'the assigned manager'} at ${property.title}?`)) return;
       setError('');
       setSuccess('');
       try {
         await saveAuthority(propertyId, { authorized: false });
-        setSuccess(`Lease ${authorityKind === 'signing' ? 'signing' : 'termination'} authority revoked for ${property.title}.`);
+        setSuccess(`${authorityLabel[0].toUpperCase()}${authorityLabel.slice(1)} authority revoked for ${property.title}.`);
         await loadOwnerData();
       } catch (err) {
         setError(err.response?.data?.detail || 'Unable to revoke manager authority.');
@@ -199,14 +360,19 @@ export default function OwnerDashboard() {
     setSuccess('');
     setSavingLeaseAuthority(true);
     try {
-      const saveAuthority = leaseAuthorityKind === 'signing' ? setLeaseSigningAuthority : setLeaseTerminationAuthority;
+      const saveAuthority = leaseAuthorityKind === 'signing'
+        ? setLeaseSigningAuthority
+        : leaseAuthorityKind === 'termination' ? setLeaseTerminationAuthority : setUnitPricingAuthority;
       await saveAuthority(leaseAuthorityProperty._id || leaseAuthorityProperty.id, {
         authorized: true,
         agreementReference: leaseAuthorityReference.trim(),
         confirmWrittenAuthority,
       });
       setShowLeaseAuthorityModal(false);
-      setSuccess(`Lease ${leaseAuthorityKind === 'signing' ? 'signing' : 'termination'} authority recorded for ${leaseAuthorityProperty.title}.`);
+      const authorityLabel = leaseAuthorityKind === 'signing'
+        ? 'lease signing'
+        : leaseAuthorityKind === 'termination' ? 'lease termination' : 'rent pricing';
+      setSuccess(`${authorityLabel[0].toUpperCase()}${authorityLabel.slice(1)} authority recorded for ${leaseAuthorityProperty.title}.`);
       await loadOwnerData();
     } catch (err) {
       const details = err.response?.data;
@@ -216,8 +382,33 @@ export default function OwnerDashboard() {
     }
   };
 
+  const handleRentChangeDecision = async (changeRequest, status) => {
+    if (status === 'Approved' && !window.confirm(`Approve the change to ${changeRequest.targetLabel} at ${changeRequest.propertyTitle} from ₱${Number(changeRequest.currentRate).toLocaleString()} to ₱${Number(changeRequest.proposedRate).toLocaleString()} per month?`)) return;
+    const noteInput = status === 'Rejected'
+      ? window.prompt('Optional: add a note for the Property Manager about this decision.')
+      : '';
+    if (noteInput === null) return;
+    const decisionNote = (noteInput || '').trim();
+    setError('');
+    setSuccess('');
+    try {
+      await decideRentChange(changeRequest.id, { status, decisionNote });
+      setSuccess(status === 'Approved'
+        ? `Rent change approved for ${changeRequest.targetLabel}. New leases will use the approved rate; existing lease amounts stay as written.`
+        : `Rent change declined for ${changeRequest.targetLabel}.`);
+      await loadOwnerData();
+    } catch (err) {
+      if (err.response?.status === 409) {
+        await loadOwnerData();
+        setSuccess(err.response?.data?.detail || 'This proposal was closed because its current rate changed. Ask the Manager to submit a fresh proposal.');
+        return;
+      }
+      const details = err.response?.data;
+      setError(details?.detail || details?.status?.[0] || 'Unable to update this rent-change request.');
+    }
+  };
+
   const handleActivateLease = async (contract) => {
-    const contractId = contract._id || contract.id;
     setContractForActivation(contract);
     setSignedCopyReference('');
     setManualActivationReason('');
@@ -306,22 +497,47 @@ export default function OwnerDashboard() {
   };
 
   useEffect(() => {
-    loadOwnerData();
-  }, []);
+    void loadOwnerData({ section: 'overview', force: false, includeSummary: true });
+  }, [loadOwnerData]);
+
+  useEffect(() => {
+    void loadOwnerData({ section: activePortfolioTab, force: false, includeSummary: false });
+  }, [activePortfolioTab, loadOwnerData]);
+
+  useEffect(() => {
+    if (activePortfolioTab === 'history') {
+      void loadOwnerData({ section: 'history', force: true, includeSummary: false, page: 1 });
+    }
+  }, [historyFilter, activePortfolioTab, loadOwnerData]);
 
   useEffect(() => {
     const handleWorkspaceNavigation = (event) => {
       setActiveSection(event.detail);
       const tab = event.detail === 'billing' ? 'payments' : event.detail;
       if (event.detail === 'portfolio') setActivePortfolioTab('properties');
-      if (['properties', 'approvals', 'contracts', 'maintenance', 'payments'].includes(tab)) setActivePortfolioTab(tab);
+      if (['properties', 'approvals', 'pricing', 'contracts', 'history', 'maintenance', 'payments'].includes(tab)) setActivePortfolioTab(tab);
     };
     window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
     return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
   }, []);
+  useNotificationDeepLink('owner');
 
   // Advanced Metrics Logic (Explicit Numeric Conversion)
   const metrics = useMemo(() => {
+    if (portfolio.summary) {
+      return {
+        totalOwned: Number(portfolio.summary.totalOwned || 0),
+        totalUnits: Number(portfolio.summary.totalUnits || 0),
+        occupiedUnits: Number(portfolio.summary.occupiedUnits || 0),
+        occupancyRate: Number(portfolio.summary.occupancyRate || 0),
+        totalMonthlyIncome: Number(portfolio.summary.totalMonthlyIncome || 0),
+        activeLeasesCount: Number(portfolio.summary.activeLeasesCount || 0),
+        rentInvoiced: Number(portfolio.summary.rentInvoiced || 0),
+        rentCollected: Number(portfolio.summary.rentCollected || 0),
+        outstandingBalance: Number(portfolio.summary.outstandingBalance || 0),
+        paymentsAwaitingReview: Number(portfolio.summary.paymentsAwaitingReview || 0),
+      };
+    }
     const { properties, contracts } = portfolio;
     let totalUnits = 0;
     let occupiedUnits = 0;
@@ -373,6 +589,60 @@ export default function OwnerDashboard() {
       paymentsAwaitingReview,
     };
   }, [portfolio]);
+
+  const ownerHistory = useMemo(() => portfolio.leaseSigningHistory.map((event) => {
+    const action = String(event.action || '').toUpperCase();
+    if (action.includes('APPLICATION APPROVAL RULE')) {
+      return { ...event, category: 'approval', categoryLabel: 'Application approval', title: 'Application review responsibility changed' };
+    }
+    if (action.includes('RENT CHANGE')) {
+      return {
+        ...event,
+        category: 'pricing',
+        categoryLabel: 'Rent changes',
+        title: action.startsWith('PROPOSE')
+          ? 'Manager proposed a rent change'
+          : action.startsWith('APPROVED')
+            ? 'Rent change approved'
+            : action.startsWith('CANCEL') ? 'Rent proposal closed because the rate changed' : 'Rent change declined',
+      };
+    }
+    if (action.includes('LEASE SIGNING AUTHORITY')) {
+      return {
+        ...event,
+        category: 'authority',
+        categoryLabel: 'Manager permissions',
+        title: action.startsWith('GRANT') ? 'Lease signing permission granted' : 'Lease signing permission removed',
+      };
+    }
+    if (action.includes('LEASE TERMINATION AUTHORITY')) {
+      return {
+        ...event,
+        category: 'authority',
+        categoryLabel: 'Manager permissions',
+        title: action.startsWith('GRANT') ? 'Lease ending permission granted' : 'Lease ending permission removed',
+      };
+    }
+    if (action.includes('RENT PRICING AUTHORITY')) {
+      return {
+        ...event,
+        category: 'authority',
+        categoryLabel: 'Manager permissions',
+        title: action.startsWith('GRANT') ? 'Rent-setting permission granted' : 'Rent-setting permission removed',
+      };
+    }
+    if (action === 'ACTIVATE') {
+      return { ...event, category: 'lease', categoryLabel: 'Lease activity', title: 'Lease activated' };
+    }
+    if (action === 'TERMINATE') {
+      return { ...event, category: 'lease', categoryLabel: 'Lease activity', title: 'Lease ended' };
+    }
+    return { ...event, category: 'lease', categoryLabel: 'Lease activity', title: event.action || 'Portfolio record updated' };
+  }).sort((first, second) => new Date(second.createdAt || 0) - new Date(first.createdAt || 0)), [portfolio.leaseSigningHistory]);
+
+  const visibleOwnerHistory = historyFilter === 'all'
+    ? ownerHistory
+    : ownerHistory.filter((event) => event.category === historyFilter);
 
   return (
     <div className="pm-owner" data-active-section={activeSection}>
@@ -439,24 +709,46 @@ export default function OwnerDashboard() {
               </div>
             </div>
 
-            {/* Tabbed Portfolio Views */}
-            <div className="pm-panel mb-4" id="portfolio" data-workspace-section="portfolio approvals contracts maintenance billing">
-              <div className="pm-panel-header">Portfolio Details</div>
+            <div className="pm-panel mb-4" id="portfolio" data-workspace-section="portfolio approvals pricing contracts history maintenance billing">
+              <div className="pm-panel-header">{{
+                properties: 'Properties',
+                approvals: 'Application approvals',
+                pricing: 'Rent change approvals',
+                contracts: 'Lease contracts',
+                history: 'Portfolio history',
+                maintenance: 'Maintenance',
+                payments: 'Payments',
+              }[activePortfolioTab] || 'Properties'}</div>
               <div style={{ padding: '20px' }}>
-                <Tabs activeKey={activePortfolioTab} onSelect={(key) => setActivePortfolioTab(key || 'properties')} id="owner-tabs" className="mb-3">
-                  
+                  {sectionLoading[activePortfolioTab] && (
+                    <div className="pm-loading py-2" role="status">
+                      <Spinner animation="border" size="sm" className="me-2" />Loading this section…
+                    </div>
+                  )}
+                  {sectionErrors[activePortfolioTab] && (
+                    <div className="pm-alert pm-alert-error mb-3" role="alert">
+                      <span>{sectionErrors[activePortfolioTab]}</span>
+                      <Button
+                        size="sm"
+                        variant="outline-danger"
+                        className="ms-2"
+                        onClick={() => loadOwnerData({ section: activePortfolioTab, force: true, includeSummary: false })}
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  )}
                   {/* Tab 1: Owned Properties */}
-                  <Tab eventKey="properties" title={`Assets (${portfolio.properties.length})`}>
-                    <Table responsive className="pm-table mb-0">
+                  {activePortfolioTab === 'properties' && (
+                  <div>
+                    <div className="pm-owner-assets-wrap">
+                    <Table responsive className="pm-table pm-owner-assets-table mb-0">
                       <thead>
                         <tr>
-                          <th>Property title</th>
-                          <th>Address</th>
-                          <th>Type</th>
-                          <th>Occupancy</th>
-                          <th>Monthly Yield</th>
+                          <th>Property</th>
+                          <th>Occupancy &amp; yield</th>
                           <th>Application approval</th>
-                          <th>Manager lease authority</th>
+                          <th>Manager authority</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -481,79 +773,119 @@ export default function OwnerDashboard() {
                               if (activePropContract) yieldAmt = Number(activePropContract.rentAmount || 0);
                             }
 
+                            const savedApprovalMode = prop.applicationApprovalMode || 'Owner';
+                            const selectedApprovalMode = approvalModeDrafts[propId] || savedApprovalMode;
+                            const approvalRuleUnchanged = selectedApprovalMode === savedApprovalMode;
+
                             return (
                               <tr key={propId}>
-                                <td className="pm-cell-title">{prop.title}</td>
-                                <td className="pm-cell-muted">{prop.address}</td>
-                                <td>{prop.propertyType}</td>
-                                <td>
-                                  <StatusPill status={`${occupiedCount}/${totalUnits} Occupied`} />
+                                <td data-label="Property">
+                                  <div className="pm-owner-property-title">{prop.title}</div>
+                                  <div className="pm-owner-property-meta">
+                                    <span>{prop.address}</span>
+                                    <span className="pm-owner-property-type">{prop.propertyType}</span>
+                                  </div>
                                 </td>
-                                <td className="pm-cell-strong text-success">
-                                  ₱{Number(yieldAmt).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                <td data-label="Occupancy &amp; yield">
+                                  <div className="pm-owner-property-metrics">
+                                    <div className="pm-owner-property-metric">
+                                      <span className="pm-owner-control-label">Occupied</span>
+                                      <StatusPill status={`${occupiedCount}/${totalUnits} occupied`} />
+                                    </div>
+                                    <div className="pm-owner-property-metric">
+                                      <span className="pm-owner-control-label">Monthly yield</span>
+                                      <strong className="pm-owner-yield">
+                                        ₱{Number(yieldAmt).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </strong>
+                                    </div>
+                                  </div>
                                 </td>
-                                <td style={{ minWidth: 250 }}>
-                                  <Form.Select
-                                    size="sm"
-                                    className="mb-2"
-                                    aria-label={`Application approval rule for ${prop.title}`}
-                                    value={approvalModeDrafts[propId] || prop.applicationApprovalMode || 'Owner'}
-                                    onChange={(event) => setApprovalModeDrafts((current) => ({ ...current, [propId]: event.target.value }))}
-                                  >
-                                    <option value="Owner">Owner approves applications</option>
-                                    <option value="Manager" disabled={!prop.managerDetails}>Manager decides (delegated)</option>
-                                  </Form.Select>
-                                  <Button
-                                    size="sm"
-                                    variant="outline-primary"
-                                    disabled={savingApprovalPropertyId === propId || (approvalModeDrafts[propId] || prop.applicationApprovalMode || 'Owner') === prop.applicationApprovalMode}
-                                    onClick={() => handleApprovalPolicySave(prop)}
-                                  >
-                                    {savingApprovalPropertyId === propId ? 'Saving…' : 'Save rule'}
-                                  </Button>
-                                  {prop.approvalPolicyHistory?.length > 0 && (
-                                    <details className="small mt-2">
-                                      <summary>Change history</summary>
-                                      {prop.approvalPolicyHistory.map((change, index) => (
-                                        <div key={`${propId}-approval-${index}`} className="border-top mt-1 pt-1">
-                                          {change.previousMode} → {change.newMode} · {change.changedBy} · {new Date(change.changedAt).toLocaleDateString()}
-                                          {change.instructionReference && <div>Instruction: {change.instructionReference}</div>}
-                                        </div>
-                                      ))}
-                                    </details>
-                                  )}
+                                <td data-label="Application approval">
+                                  <div className="pm-owner-policy-control">
+                                    <Form.Select
+                                      id={`approval-rule-${propId}`}
+                                      size="sm"
+                                      aria-label={`Application approval rule for ${prop.title}`}
+                                      value={selectedApprovalMode}
+                                      onChange={(event) => setApprovalModeDrafts((current) => ({ ...current, [propId]: event.target.value }))}
+                                    >
+                                      <option value="Owner">Owner reviews applications</option>
+                                      <option value="Manager" disabled={!prop.managerDetails}>Manager reviews applications</option>
+                                    </Form.Select>
+                                    {savingApprovalPropertyId === propId ? (
+                                      <Button size="sm" className="pm-owner-save-state" variant="outline-secondary" disabled aria-live="polite">
+                                        Saving…
+                                      </Button>
+                                    ) : approvalRuleUnchanged ? (
+                                      <span className="pm-owner-saved-note" aria-live="polite">Saved</span>
+                                    ) : (
+                                      <Button
+                                        size="sm"
+                                        className="pm-owner-save-state"
+                                        variant="outline-primary"
+                                        onClick={() => handleApprovalPolicySave(prop)}
+                                      >
+                                        Save changes
+                                      </Button>
+                                    )}
+                                  </div>
                                 </td>
-                                <td style={{ minWidth: 235 }}>
+                                <td data-label="Manager authority">
                                   {prop.managerDetails ? (
-                                    <>
-                                      <div className="small mb-1">{prop.managerDetails.name || prop.managerDetails.email}</div>
-                                      <div className="mb-2">
-                                        <StatusPill status={prop.managerLeaseSigningAuthorized ? 'Signing authorized' : 'Signing not authorized'} />
+                                    <div className="pm-owner-authority-control">
+                                      <div className="pm-owner-manager-name">{prop.managerDetails.name || prop.managerDetails.email}</div>
+                                      <div className="pm-owner-authority-row">
+                                        <span className="pm-owner-authority-label">Sign leases</span>
+                                        <span className={`pm-owner-authority-state ${prop.managerLeaseSigningAuthorized ? 'is-authorized' : ''}`}>
+                                          {prop.managerLeaseSigningAuthorized ? 'Authorized' : 'Not authorized'}
+                                        </span>
                                         <Button
                                           size="sm"
-                                          className="ms-2"
                                           variant={prop.managerLeaseSigningAuthorized ? 'outline-danger' : 'outline-primary'}
+                                          aria-label={`${prop.managerLeaseSigningAuthorized ? 'Revoke' : 'Grant'} lease signing authority for ${prop.managerDetails.name || prop.managerDetails.email}`}
                                           onClick={() => handleLeaseAuthorityClick(prop, 'signing')}
                                         >
                                           {prop.managerLeaseSigningAuthorized ? 'Revoke' : 'Grant'}
                                         </Button>
                                       </div>
-                                      <div>
-                                        <StatusPill status={prop.managerLeaseTerminationAuthorized ? 'Termination authorized' : 'Termination not authorized'} />
+                                      <div className="pm-owner-authority-row">
+                                        <span className="pm-owner-authority-label">End leases</span>
+                                        <span className={`pm-owner-authority-state ${prop.managerLeaseTerminationAuthorized ? 'is-authorized' : ''}`}>
+                                          {prop.managerLeaseTerminationAuthorized ? 'Authorized' : 'Not authorized'}
+                                        </span>
                                         <Button
                                           size="sm"
-                                          className="ms-2"
                                           variant={prop.managerLeaseTerminationAuthorized ? 'outline-danger' : 'outline-primary'}
+                                          aria-label={`${prop.managerLeaseTerminationAuthorized ? 'Revoke' : 'Grant'} lease termination authority for ${prop.managerDetails.name || prop.managerDetails.email}`}
                                           onClick={() => handleLeaseAuthorityClick(prop, 'termination')}
                                         >
                                           {prop.managerLeaseTerminationAuthorized ? 'Revoke' : 'Grant'}
                                         </Button>
                                       </div>
-                                      {prop.leaseSigningAgreementReference && <div className="small text-muted mt-1">Signing agreement: {prop.leaseSigningAgreementReference}</div>}
-                                      {prop.leaseTerminationAgreementReference && <div className="small text-muted mt-1">Termination agreement: {prop.leaseTerminationAgreementReference}</div>}
-                                    </>
+                                      <div className="pm-owner-authority-row">
+                                        <span className="pm-owner-authority-label">Set rent prices</span>
+                                        <span className={`pm-owner-authority-state ${prop.managerUnitPricingAuthorized ? 'is-authorized' : ''}`}>
+                                          {prop.managerUnitPricingAuthorized ? 'Authorized' : 'Owner approval'}
+                                        </span>
+                                        <Button
+                                          size="sm"
+                                          variant={prop.managerUnitPricingAuthorized ? 'outline-danger' : 'outline-primary'}
+                                          aria-label={`${prop.managerUnitPricingAuthorized ? 'Revoke' : 'Grant'} rent pricing authority for ${prop.managerDetails.name || prop.managerDetails.email}`}
+                                          onClick={() => handleLeaseAuthorityClick(prop, 'pricing')}
+                                        >
+                                          {prop.managerUnitPricingAuthorized ? 'Revoke' : 'Grant'}
+                                        </Button>
+                                      </div>
+                                      {(prop.leaseSigningAgreementReference || prop.leaseTerminationAgreementReference || prop.unitPricingAgreementReference) && (
+                                        <div className="pm-owner-authority-reference">
+                                          {prop.leaseSigningAgreementReference && <div>Lease signing: {prop.leaseSigningAgreementReference}</div>}
+                                          {prop.leaseTerminationAgreementReference && <div>Lease ending: {prop.leaseTerminationAgreementReference}</div>}
+                                          {prop.unitPricingAgreementReference && <div>Rent pricing: {prop.unitPricingAgreementReference}</div>}
+                                        </div>
+                                      )}
+                                    </div>
                                   ) : (
-                                    <span className="small text-muted">Assign a Property Manager first</span>
+                                    <div className="pm-owner-manager-unassigned">Assign a Property Manager to manage lease permissions.</div>
                                   )}
                                 </td>
                               </tr>
@@ -561,16 +893,66 @@ export default function OwnerDashboard() {
                           })
                         ) : (
                           <tr>
-                            <td colSpan="7" className="pm-empty-row">
+                            <td colSpan="4" className="pm-empty-row">
                               No property assets linked to your owner account.
                             </td>
                           </tr>
                         )}
                       </tbody>
                     </Table>
-                  </Tab>
+                    </div>
+                  </div>
+                  )}
 
-                  <Tab eventKey="approvals" title={`Applications (${ownerApprovals.length})`}>
+                  {activePortfolioTab === 'pricing' && (
+                    <section data-workspace-section="pricing" aria-label="Rent change approvals">
+                      <p className="text-muted mb-3">Review each property or unit rent proposal. Approving a unit proposal updates that unit only; its effective date is the approval date. Existing leases keep the rent stated in their signed contract.</p>
+                      <Table responsive className="pm-table mb-0">
+                        <thead>
+                          <tr>
+                            <th>Property / unit</th>
+                            <th>Current rent</th>
+                            <th>Proposed rent</th>
+                            <th>Reason</th>
+                            <th>Status</th>
+                            <th>Effective date</th>
+                            <th>Decision</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {portfolio.rentChangeRequests.length > 0 ? portfolio.rentChangeRequests.map((changeRequest) => (
+                            <tr key={changeRequest.id}>
+                              <td className="pm-cell-title">
+                                {changeRequest.propertyTitle}
+                                <div className="small text-muted">{changeRequest.targetLabel}</div>
+                                <div className="small text-muted">Submitted by {changeRequest.proposedByName} · {new Date(changeRequest.createdAt).toLocaleDateString()}</div>
+                              </td>
+                              <td>₱{Number(changeRequest.currentRate).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / mo</td>
+                              <td className="pm-cell-strong">₱{Number(changeRequest.proposedRate).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / mo</td>
+                              <td>{changeRequest.reason}</td>
+                              <td><StatusPill status={changeRequest.status} /></td>
+                              <td>{getRentChangeEffectiveDate(changeRequest)}</td>
+                              <td>
+                                {changeRequest.status === 'Pending' ? (
+                                  <div className="d-flex flex-wrap gap-2">
+                                    <Button size="sm" variant="primary" onClick={() => handleRentChangeDecision(changeRequest, 'Approved')}>Approve</Button>
+                                    <Button size="sm" variant="outline-danger" onClick={() => handleRentChangeDecision(changeRequest, 'Rejected')}>Decline</Button>
+                                  </div>
+                                ) : (
+                                  <span className="small text-muted">{changeRequest.decidedByName ? `Decided by ${changeRequest.decidedByName}` : 'Decision recorded'}{changeRequest.decisionNote ? <div>{changeRequest.decisionNote}</div> : null}</span>
+                                )}
+                              </td>
+                            </tr>
+                          )) : (
+                            <tr><td colSpan="7" className="pm-empty-row">No rent-change proposals yet.</td></tr>
+                          )}
+                        </tbody>
+                      </Table>
+                    </section>
+                  )}
+
+                  {activePortfolioTab === 'approvals' && (
+                  <div>
                     <Table responsive className="pm-table mb-0">
                       <thead>
                         <tr>
@@ -580,12 +962,21 @@ export default function OwnerDashboard() {
                           <th>Monthly income</th>
                           <th>Requested move-in</th>
                           <th>Manager review</th>
-                          <th>Status / history</th>
+                          <th>Application &amp; lease progress</th>
                           <th>Decision</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {ownerApprovals.map((application) => (
+                        {ownerApprovals.map((application) => {
+                          const relatedContracts = portfolio.contracts.filter(
+                            (contract) => String(contract.sourceApplication || '') === String(application.id),
+                          );
+                          const relatedContract = relatedContracts.find((contract) => contract.status === 'Active')
+                            || relatedContracts.find((contract) => contract.status === 'Pending')
+                            || relatedContracts[0];
+                          const rentalProgress = getOwnerRentalProgress(application, relatedContract);
+
+                          return (
                           <tr key={application.id}>
                             <td>{application.applicantName || 'Applicant'}<div className="small text-muted">{application.applicantEmail}</div></td>
                             <td>{application.propertyDetails?.title || 'Property'}{application.unitDetails?.unitNumber ? ` · Unit ${application.unitDetails.unitNumber}` : ''}</td>
@@ -595,6 +986,10 @@ export default function OwnerDashboard() {
                             <td>{application.reviewNotes || 'No manager notes'}</td>
                             <td>
                               <StatusPill status={application.status} />
+                              <div className={`pm-owner-progress is-${rentalProgress.tone}`}>
+                                <strong>{rentalProgress.label}</strong>
+                                <span>{rentalProgress.detail}</span>
+                              </div>
                               {application.decisionHistory?.length > 0 && (
                                 <details className="small mt-2">
                                   <summary>Decision history</summary>
@@ -628,16 +1023,19 @@ export default function OwnerDashboard() {
                               ) : <span className="small text-muted">Decision is read-only</span>}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                         {ownerApprovals.length === 0 && (
                           <tr><td colSpan="8" className="pm-empty-row">No applications are recorded for your properties.</td></tr>
                         )}
                       </tbody>
                     </Table>
-                  </Tab>
+                  </div>
+                  )}
 
                   {/* Tab 2: Lease Contracts */}
-                  <Tab eventKey="contracts" title={`Lease Contracts (${portfolio.contracts.length})`}>
+                  {activePortfolioTab === 'contracts' && (
+                  <div>
                     <Table responsive className="pm-table mb-0">
                       <thead>
                         <tr>
@@ -673,14 +1071,20 @@ export default function OwnerDashboard() {
                                 </td>
                                 <td>
                                   <StatusPill status={con.status} />
-                                  {con.activatedAt && <div className="small text-muted mt-1">{con.activationBasis} · {new Date(con.activatedAt).toLocaleDateString()}</div>}
+                                  {con.status === 'Pending' && (
+                                    <div className="pm-contract-next-step">
+                                      Lease prepared. Waiting for all parties to sign outside the system.
+                                    </div>
+                                  )}
+                                  {con.activatedAt && <div className="small text-muted mt-1">{con.activationBasis ? `Authority: ${con.activationBasis} · ` : ''}{new Date(con.activatedAt).toLocaleDateString()}</div>}
+                                  {con.signedCopyReference && <div className="pm-contract-reference">Signed copy: {con.signedCopyReference}</div>}
                                   {con.terminationEffectiveDate && <div className="small text-muted mt-1">Ended effective {new Date(con.terminationEffectiveDate).toLocaleDateString()}</div>}
                                   {con.terminationReason && <div className="small text-muted mt-1">{con.terminationReason}</div>}
                                 </td>
                                 <td>
                                   {con.status === 'Pending' ? (
                                     <Button size="sm" variant="primary" disabled={activatingContractId === contractId} onClick={() => handleActivateLease(con)}>
-                                      Confirm signed & activate
+                                      Record signatures & activate
                                     </Button>
                                   ) : con.activatedAt ? (
                                     <span className="small text-muted d-block mb-2">Activated by {con.activatedBy?.name || con.activatedBy?.email || 'Owner'}</span>
@@ -704,31 +1108,72 @@ export default function OwnerDashboard() {
                         )}
                       </tbody>
                     </Table>
-                  </Tab>
+                  </div>
+                  )}
 
-                  <Tab eventKey="signingHistory" title={`Lease signing history (${portfolio.leaseSigningHistory.length})`}>
-                    <Table responsive className="pm-table mb-0">
-                      <thead>
-                        <tr><th>Date</th><th>Event</th><th>Record</th><th>Recorded by</th></tr>
-                      </thead>
-                      <tbody>
-                        {portfolio.leaseSigningHistory.map((event) => (
-                          <tr key={event.id}>
-                            <td>{event.createdAt ? new Date(event.createdAt).toLocaleString() : '—'}</td>
-                            <td className="pm-cell-strong">{event.action}</td>
-                            <td>{event.summary}</td>
-                            <td>{event.actor || 'System'}</td>
-                          </tr>
-                        ))}
-                        {portfolio.leaseSigningHistory.length === 0 && (
-                          <tr><td colSpan="4" className="pm-empty-row">No lease signing events recorded.</td></tr>
-                        )}
-                      </tbody>
-                    </Table>
-                  </Tab>
+                  {activePortfolioTab === 'history' && (
+                    <section className="pm-owner-history" aria-label="Portfolio history">
+                      <div className="pm-owner-history-header">
+                        <div>
+                          <h3>Portfolio history</h3>
+                          <p>Application review, manager permissions, and lease changes are recorded here.</p>
+                        </div>
+                        <div className="pm-owner-history-filter">
+                          <Form.Label htmlFor="owner-history-filter">Show</Form.Label>
+                          <Form.Select
+                            id="owner-history-filter"
+                            size="sm"
+                            value={historyFilter}
+                            onChange={(event) => setHistoryFilter(event.target.value)}
+                          >
+                            <option value="all">All activity</option>
+                            <option value="approval">Application approval</option>
+                            <option value="authority">Manager permissions</option>
+                            <option value="pricing">Rent changes</option>
+                            <option value="lease">Lease activity</option>
+                          </Form.Select>
+                        </div>
+                      </div>
+                      <div className="pm-owner-history-summary" aria-live="polite">
+                        Showing {visibleOwnerHistory.length} of {ownerHistory.length} {ownerHistory.length === 1 ? 'record' : 'records'}
+                      </div>
+                      {visibleOwnerHistory.length > 0 ? (
+                        <ol className="pm-owner-history-timeline">
+                          {visibleOwnerHistory.map((event) => {
+                            const createdAt = event.createdAt ? new Date(event.createdAt) : null;
+                            const dateLabel = createdAt && !Number.isNaN(createdAt.getTime())
+                              ? createdAt.toLocaleString()
+                              : 'Date unavailable';
+                            return (
+                              <li className="pm-owner-history-item" key={event.id}>
+                                <span className={`pm-owner-history-marker is-${event.category}`} aria-hidden="true" />
+                                <article className="pm-owner-history-card">
+                                  <div className="pm-owner-history-card-top">
+                                    <span className={`pm-owner-history-category is-${event.category}`}>{event.categoryLabel}</span>
+                                    <time dateTime={createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString() : undefined}>
+                                      {dateLabel}
+                                    </time>
+                                  </div>
+                                  <h4>{event.title}</h4>
+                                  {event.summary && <p className="pm-owner-history-description">{event.summary}</p>}
+                                  <div className="pm-owner-history-actor">Recorded by {event.actor || 'System'}</div>
+                                </article>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      ) : (
+                        <div className="pm-owner-history-empty">
+                          <strong>{ownerHistory.length === 0 ? 'No history yet' : 'No matching activity'}</strong>
+                          <span>{ownerHistory.length === 0 ? 'Updates to approval rules, manager permissions, and leases will appear here.' : 'Choose another filter to see more portfolio records.'}</span>
+                        </div>
+                      )}
+                    </section>
+                  )}
 
                   {/* Tab 3: Maintenance Oversight */}
-                  <Tab eventKey="maintenance" title={`Maintenance Tickets (${portfolio.maintenanceRequests.length})`}>
+                  {activePortfolioTab === 'maintenance' && (
+                  <div>
                     <Table responsive className="pm-table mb-0">
                       <thead>
                         <tr>
@@ -762,9 +1207,11 @@ export default function OwnerDashboard() {
                         )}
                       </tbody>
                     </Table>
-                  </Tab>
+                  </div>
+                  )}
 
-                  <Tab eventKey="payments" title={`Payment Status (${portfolio.invoices.length})`}>
+                  {activePortfolioTab === 'payments' && (
+                  <div>
                     <h6 className="fw-bold mb-3">Portfolio rent summary</h6>
                     <Row className="g-3 mb-4">
                       <Col sm={6} xl={3}>
@@ -834,9 +1281,31 @@ export default function OwnerDashboard() {
                         {portfolio.payments.length === 0 && <tr><td colSpan="8" className="text-center text-muted py-4">No payment transactions recorded for your properties.</td></tr>}
                       </tbody>
                     </Table>
-                  </Tab>
-
-                </Tabs>
+                    <CollectionPagination
+                      count={sectionPages.paymentTransactions?.count || 0}
+                      page={sectionPages.paymentTransactions?.page || 1}
+                      pageCount={sectionPages.paymentTransactions?.pageCount || 1}
+                      onPageChange={(nextPage) => loadOwnerData({
+                        section: 'payments', force: true, includeSummary: false,
+                        page: sectionPages.payments?.page || 1, paymentPage: nextPage,
+                      })}
+                    />
+                  </div>
+                  )}
+                  {sectionPages[activePortfolioTab] && (
+                    <CollectionPagination
+                      count={sectionPages[activePortfolioTab].count}
+                      page={sectionPages[activePortfolioTab].page}
+                      pageCount={sectionPages[activePortfolioTab].pageCount}
+                      onPageChange={(nextPage) => loadOwnerData({
+                        section: activePortfolioTab,
+                        force: true,
+                        includeSummary: false,
+                        page: nextPage,
+                        paymentPage: sectionPages.paymentTransactions?.page || 1,
+                      })}
+                    />
+                  )}
               </div>
             </div>
           </>
@@ -908,7 +1377,7 @@ export default function OwnerDashboard() {
         </Modal.Header>
         <Form onSubmit={handleActivationSubmit}>
           <Modal.Body>
-            <p>Confirm the parties signed <strong>{contractForActivation?.propertyDetails?.title || 'this lease'}</strong>. This records activation and marks the unit occupied.</p>
+            <p>Once everyone has signed <strong>{contractForActivation?.propertyDetails?.title || 'this lease'}</strong> outside the system, record where the signed copy is kept. Activating the lease marks the unit occupied.</p>
             <Form.Group className="mb-3">
               <Form.Label>Signed-copy reference</Form.Label>
               <Form.Control value={signedCopyReference} onChange={(event) => setSignedCopyReference(event.target.value)} maxLength={500} placeholder="File name, document location, or reference" required />
@@ -965,19 +1434,21 @@ export default function OwnerDashboard() {
         dialogClassName="pm-modal"
       >
         <Modal.Header closeButton>
-          <Modal.Title>Grant lease {leaseAuthorityKind === 'signing' ? 'signing' : 'termination'} authority</Modal.Title>
+          <Modal.Title>
+            {leaseAuthorityKind === 'pricing' ? 'Grant rent pricing authority' : `Grant lease ${leaseAuthorityKind === 'signing' ? 'signing' : 'termination'} authority`}
+          </Modal.Title>
         </Modal.Header>
         <Form onSubmit={handleGrantLeaseAuthority}>
           <Modal.Body>
             <p>
-              This allows <strong>{leaseAuthorityProperty?.managerDetails?.name || 'the assigned Property Manager'}</strong> to
-              {leaseAuthorityKind === 'signing' ? ' activate signed leases for ' : ' end leases for '}
-              <strong>{leaseAuthorityProperty?.title}</strong>
-              It applies only to this property.
+              {leaseAuthorityKind === 'pricing'
+                ? <>This allows <strong>{leaseAuthorityProperty?.managerDetails?.name || 'the assigned Property Manager'}</strong> to set or change the asking rent for <strong>{leaseAuthorityProperty?.title}</strong> and its units without asking you to approve each rate.</>
+                : <>This allows <strong>{leaseAuthorityProperty?.managerDetails?.name || 'the assigned Property Manager'}</strong> to{leaseAuthorityKind === 'signing' ? ' activate signed leases for ' : ' end leases for '}<strong>{leaseAuthorityProperty?.title}</strong>. It applies only to this property.</>}
             </p>
             <p className="small text-muted">
-              Grant this only when your written management agreement gives the manager this authority. This system does not
-              {leaseAuthorityKind === 'signing' ? ' sign leases or determine their legal validity.' : ' decide whether ending a lease is legally justified.'}
+              Grant this only when your written management agreement gives the Manager this authority. {leaseAuthorityKind === 'pricing' && 'Changes apply to future listings and new leases; existing lease amounts will not change.'}
+              {leaseAuthorityKind === 'signing' && 'This system does not sign leases or determine their legal validity.'}
+              {leaseAuthorityKind === 'termination' && 'This system does not decide whether ending a lease is legally justified.'}
             </p>
             <Form.Group className="mb-3">
               <Form.Label>Written agreement reference</Form.Label>
@@ -994,14 +1465,16 @@ export default function OwnerDashboard() {
               id="confirm-written-lease-authority"
               checked={confirmWrittenAuthority}
               onChange={(event) => setConfirmWrittenAuthority(event.target.checked)}
-              label={`I confirm the written agreement grants this manager authority to ${leaseAuthorityKind === 'signing' ? 'activate signed leases' : 'end leases'} for this property.`}
+              label={leaseAuthorityKind === 'pricing'
+                ? 'I confirm the written agreement gives this Manager authority to set and change rent for this property.'
+                : `I confirm the written agreement grants this Manager authority to ${leaseAuthorityKind === 'signing' ? 'activate signed leases' : 'end leases'} for this property.`}
               required
             />
           </Modal.Body>
           <Modal.Footer>
             <Button variant="outline-secondary" onClick={() => setShowLeaseAuthorityModal(false)} disabled={savingLeaseAuthority}>Cancel</Button>
             <Button variant="primary" type="submit" disabled={savingLeaseAuthority}>
-              {savingLeaseAuthority ? 'Saving…' : `Grant ${leaseAuthorityKind === 'signing' ? 'signing' : 'termination'} authority`}
+              {savingLeaseAuthority ? 'Saving…' : leaseAuthorityKind === 'pricing' ? 'Grant pricing authority' : `Grant ${leaseAuthorityKind === 'signing' ? 'signing' : 'termination'} authority`}
             </Button>
           </Modal.Footer>
         </Form>

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, Container, Navbar, Nav } from 'react-bootstrap';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import { fetchSystemSettings } from '../services/systemSettingsService';
+import NotificationCenter from './NotificationCenter';
 
 const ROLE_ROUTES = {
   Admin: { path: '/admin', label: 'Administrator' },
@@ -56,6 +57,7 @@ export default function AppNavbar() {
               <Nav.Link as={Link} to={role.path} className="app-nav-link active">Dashboard</Nav.Link>
             </Nav>
             <div className="app-account">
+              <NotificationCenter />
               <span className="app-role-pill">{role.label}</span>
               <span className="app-avatar" aria-hidden="true">{initials(user.name || user.email)}</span>
               <span className="app-account-name">{user.name || user.email}</span>

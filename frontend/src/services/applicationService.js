@@ -1,4 +1,7 @@
 import api from './api';
+import { fetchPage } from './pagination';
+
+export const fetchApplicationsPage = (params) => fetchPage('/properties/applications/', params);
 
 export const fetchApplications = async () => {
   const response = await api.get('/properties/applications/');

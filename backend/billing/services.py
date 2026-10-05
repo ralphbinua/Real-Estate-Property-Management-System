@@ -5,6 +5,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from contracts.models import Contract
+from notifications.models import Notification
+from notifications.services import create_for_recipients
 from .models import Invoice
 
 
@@ -66,6 +68,14 @@ def generate_monthly_invoices(period=None, contract_queryset=None):
                 total_due=contract.rent_amount,
                 due_date=due_date,
                 status='Overdue' if due_date < today else 'Pending',
+            )
+            create_for_recipients(
+                recipients=[contract.tenant],
+                actor=None,
+                event_type=Notification.EventType.INVOICE,
+                title='New rent invoice',
+                message='A new rent invoice is available in your payments.',
+                destination=Notification.Destination.TENANT_PAYMENTS,
             )
             created_count += 1
 

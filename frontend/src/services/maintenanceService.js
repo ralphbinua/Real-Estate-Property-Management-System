@@ -1,4 +1,7 @@
 import api from './api';
+import { fetchPage } from './pagination';
+
+export const fetchMaintenanceRequestsPage = (params) => fetchPage('/maintenance/', params);
 
 export const fetchMaintenanceRequests = async () => {
   const response = await api.get('/maintenance/');

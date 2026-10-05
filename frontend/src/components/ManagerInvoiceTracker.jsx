@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Alert, Badge, Button, Col, Form, Modal, Row, Spinner, Table } from 'react-bootstrap';
 import {
-  fetchInvoices,
-  fetchPayments,
+  fetchInvoicesPage,
+  fetchPaymentsPage,
   recordPayment,
   rejectPayment,
   reversePayment,
   triggerMonthlyBilling,
   verifyPayment,
 } from '../services/invoiceService';
+import usePaginatedCollection from '../hooks/usePaginatedCollection';
+import CollectionPagination from './CollectionPagination';
 
 const formatCurrency = (value) => `₱${Number(value || 0).toLocaleString('en-PH', {
   minimumFractionDigits: 2,
@@ -51,9 +53,11 @@ const paymentStatusVariant = {
 };
 
 export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
-  const [invoices, setInvoices] = useState([]);
-  const [payments, setPayments] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const invoiceCollection = usePaginatedCollection(fetchInvoicesPage);
+  const paymentCollection = usePaginatedCollection(fetchPaymentsPage);
+  const { items: invoices } = invoiceCollection;
+  const { items: payments } = paymentCollection;
+  const loading = invoiceCollection.loading || paymentCollection.loading;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -70,27 +74,11 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
   const [reasonModal, setReasonModal] = useState({ open: false, payment: null, action: '' });
   const [reason, setReason] = useState('');
 
-  const loadData = async () => {
-    setLoading(true);
-    const [invoiceResult, paymentResult] = await Promise.allSettled([fetchInvoices(), fetchPayments()]);
-    if (invoiceResult.status === 'fulfilled') {
-      const data = invoiceResult.value;
-      setInvoices(Array.isArray(data) ? data : data.results || []);
-    } else {
-      setError(errorMessage(invoiceResult.reason, 'Failed to load invoice ledger.'));
-    }
-    if (paymentResult.status === 'fulfilled') {
-      const data = paymentResult.value;
-      setPayments(Array.isArray(data) ? data : data.results || []);
-    } else {
-      setError((current) => current || errorMessage(paymentResult.reason, 'Failed to load payment records.'));
-    }
-    setLoading(false);
+  const refreshAfterPayment = async () => {
+    paymentCollection.refresh();
+    invoiceCollection.refresh();
+    await onPaymentsUpdated?.();
   };
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   const handleRunBilling = async () => {
     setError('');
@@ -98,8 +86,7 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
     try {
       const response = await triggerMonthlyBilling();
       setSuccess(response?.message || 'Monthly rent invoices generated.');
-      await loadData();
-      await onPaymentsUpdated?.();
+      await refreshAfterPayment();
     } catch (billingError) {
       setError(errorMessage(billingError, 'Failed to run the monthly billing batch.'));
     }
@@ -139,8 +126,7 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
       setShowPaymentModal(false);
       setSelectedInvoice(null);
       setSuccess('Payment recorded as received and verified.');
-      await loadData();
-      await onPaymentsUpdated?.();
+      await refreshAfterPayment();
     } catch (recordError) {
       setError(errorMessage(recordError, 'Could not record this payment. Check the details and try again.'));
     } finally {
@@ -155,8 +141,7 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
     try {
       await verifyPayment(payment.id);
       setSuccess('Payment verified and applied to the invoice balance.');
-      await loadData();
-      await onPaymentsUpdated?.();
+      await refreshAfterPayment();
     } catch (verifyError) {
       setError(errorMessage(verifyError, 'Could not verify this payment.'));
     } finally {
@@ -184,8 +169,7 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
         setSuccess('Payment reversed. The invoice balance has been recalculated.');
       }
       setReasonModal({ open: false, payment: null, action: '' });
-      await loadData();
-      await onPaymentsUpdated?.();
+      await refreshAfterPayment();
     } catch (actionError) {
       setError(errorMessage(actionError, 'Could not update this payment.'));
     } finally {
@@ -211,7 +195,7 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
         </Button>
       </div>
 
-      {error && <Alert variant="danger" dismissible onClose={() => setError('')}>{error}</Alert>}
+      {(error || invoiceCollection.error || paymentCollection.error) && <Alert variant="danger" dismissible onClose={() => setError('')}>{error || invoiceCollection.error || paymentCollection.error}</Alert>}
       {success && <Alert variant="success" dismissible onClose={() => setSuccess('')}>{success}</Alert>}
 
       {loading ? (
@@ -263,6 +247,7 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
               )}
             </tbody>
           </Table>
+          <CollectionPagination count={invoiceCollection.count} page={invoiceCollection.page} pageCount={invoiceCollection.pageCount} onPageChange={invoiceCollection.setPage} />
 
           <h5 className="fw-bold mb-1">Payment records</h5>
           <p className="text-muted small mb-3">Tenant submissions remain pending until verified. Rejected and reversed entries stay in the audit history.</p>
@@ -320,6 +305,7 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
               )}
             </tbody>
           </Table>
+          <CollectionPagination count={paymentCollection.count} page={paymentCollection.page} pageCount={paymentCollection.pageCount} onPageChange={paymentCollection.setPage} />
         </>
       )}
 

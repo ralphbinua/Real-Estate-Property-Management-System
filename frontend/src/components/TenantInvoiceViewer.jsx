@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Alert, Badge, Button, Col, Form, Modal, Row, Spinner, Table } from 'react-bootstrap';
 import {
-  fetchPayments,
-  fetchTenantInvoices,
+  fetchPaymentsPage,
+  fetchTenantInvoicesPage,
   submitTenantPayment,
 } from '../services/invoiceService';
+import usePaginatedCollection from '../hooks/usePaginatedCollection';
+import CollectionPagination from './CollectionPagination';
 
 const formatCurrency = (value) => `₱${Number(value || 0).toLocaleString('en-PH', {
   minimumFractionDigits: 2,
@@ -40,9 +42,18 @@ const paymentStatusVariant = {
 };
 
 export default function TenantInvoiceViewer({ tenantId }) {
-  const [invoices, setInvoices] = useState([]);
-  const [payments, setPayments] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const loadTenantInvoicesPage = useCallback(
+    (params) => fetchTenantInvoicesPage(tenantId, params),
+    [tenantId],
+  );
+  const invoiceCollection = usePaginatedCollection(
+    loadTenantInvoicesPage,
+    {},
+  );
+  const paymentCollection = usePaginatedCollection(fetchPaymentsPage);
+  const invoices = invoiceCollection.items;
+  const payments = paymentCollection.items;
+  const loading = invoiceCollection.loading || paymentCollection.loading;
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [showPayModal, setShowPayModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -57,36 +68,10 @@ export default function TenantInvoiceViewer({ tenantId }) {
     remarks: '',
   });
 
-  const loadBilling = async () => {
-    if (!tenantId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const [invoiceResult, paymentResult] = await Promise.allSettled([
-      fetchTenantInvoices(tenantId),
-      fetchPayments(),
-    ]);
-    if (invoiceResult.status === 'fulfilled') {
-      const value = invoiceResult.value;
-      setInvoices(Array.isArray(value) ? value : value.results || []);
-      setError('');
-    } else {
-      setError(errorMessage(invoiceResult.reason, 'Failed to load billing statements.'));
-    }
-    if (paymentResult.status === 'fulfilled') {
-      const value = paymentResult.value;
-      setPayments(Array.isArray(value) ? value : value.results || []);
-    } else {
-      setPayments([]);
-      setError((current) => current || 'Payment history could not be loaded. Please refresh the page.');
-    }
-    setLoading(false);
+  const loadBilling = () => {
+    invoiceCollection.refresh();
+    paymentCollection.refresh();
   };
-
-  useEffect(() => {
-    loadBilling();
-  }, [tenantId]);
 
   const handleOpenPayModal = (invoice) => {
     const balance = Number(invoice.balanceDue ?? invoice.totalDue ?? invoice.amount ?? 0);
@@ -141,7 +126,7 @@ export default function TenantInvoiceViewer({ tenantId }) {
 
   return (
     <div>
-      {error && <Alert variant="danger" dismissible onClose={() => setError('')}>{error}</Alert>}
+      {(error || invoiceCollection.error || paymentCollection.error) && <Alert variant="danger" dismissible onClose={() => setError('')}>{error || invoiceCollection.error || paymentCollection.error}</Alert>}
       {success && <Alert variant="success" dismissible onClose={() => setSuccess('')}>{success}</Alert>}
 
       <div className="mb-4">
@@ -194,6 +179,7 @@ export default function TenantInvoiceViewer({ tenantId }) {
             )}
           </tbody>
         </Table>
+        <CollectionPagination count={invoiceCollection.count} page={invoiceCollection.page} pageCount={invoiceCollection.pageCount} onPageChange={invoiceCollection.setPage} />
       </div>
 
       <div>
@@ -227,6 +213,7 @@ export default function TenantInvoiceViewer({ tenantId }) {
             )}
           </tbody>
         </Table>
+        <CollectionPagination count={paymentCollection.count} page={paymentCollection.page} pageCount={paymentCollection.pageCount} onPageChange={paymentCollection.setPage} />
       </div>
 
       <Modal show={showPayModal} onHide={() => !submitting && setShowPayModal(false)} centered dialogClassName="pm-modal">

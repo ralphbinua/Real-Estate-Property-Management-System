@@ -1,13 +1,16 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from './context/AuthContext';
+import { useAuth } from './context/useAuth';
 import NavigationBar from './components/Navbar';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
 import Login from './pages/Login';
-import AdminDashboard from './pages/AdminDashboard';
-import TenantDashboard from './pages/TenantDashboard';
-import ManagerDashboard from './pages/ManagerDashboard';
-import AgentDashboard from './pages/AgentDashboard';
-import OwnerDashboard from './pages/OwnerDashboard';
+
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const TenantDashboard = lazy(() => import('./pages/TenantDashboard'));
+const ManagerDashboard = lazy(() => import('./pages/ManagerDashboard'));
+const AgentDashboard = lazy(() => import('./pages/AgentDashboard'));
+const OwnerDashboard = lazy(() => import('./pages/OwnerDashboard'));
+const NotificationInbox = lazy(() => import('./components/NotificationInbox'));
 
 // ProtectedRoute component handling authentication and case-insensitive role checks
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -42,6 +45,7 @@ function AppLayout() {
         <div className={`workspace-frame${showWorkspace ? '' : ' workspace-frame-public'}`}>
           {showWorkspace && <WorkspaceSidebar />}
           <main className="workspace-main">
+            <Suspense fallback={<div className="pm-loading" role="status">Loading your workspace…</div>}>
             <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
@@ -88,10 +92,19 @@ function AppLayout() {
               </ProtectedRoute>
             } 
           />
+          <Route
+            path="/notifications"
+            element={
+              <ProtectedRoute allowedRoles={['Admin', 'Property Manager', 'Agent', 'Owner', 'Tenant']}>
+                <NotificationInbox />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Fallback route */}
           <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
+            </Suspense>
           </main>
         </div>
     </>

@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Container, Table, Form, Row, Col, Modal, Spinner, Button, Badge } from 'react-bootstrap';
 import { fetchProperties, updateProperty, deleteProperty, setApplicationApprovalPolicy } from '../services/propertyService';
-import { fetchContracts, createContract, terminateContract, activateContract } from '../services/contractService';
+import { fetchContractsPage, createContract, terminateContract, activateContract } from '../services/contractService';
 import { fetchUsers } from '../services/userService';
 import { fetchInvoices } from '../services/invoiceService';
+import { fetchOwnerPortfolio } from '../services/ownerService';
 import PropertyForm from '../components/PropertyForm';
 import UserManagement from '../components/UserManagement';
 import AdminMaintenanceManager from '../components/AdminMaintenanceManager';
@@ -14,6 +15,8 @@ import AdminSystemSettings from '../components/AdminSystemSettings';
 import { fetchSystemSettings } from '../services/systemSettingsService';
 import { addMonthsToDate } from '../utils/dateUtils';
 import { createUnit, deleteUnit, updateUnit } from '../services/unitService';
+import CollectionPagination from '../components/CollectionPagination';
+import useNotificationDeepLink from '../hooks/useNotificationDeepLink';
 import './AdminDashboard.css';
 
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
@@ -45,8 +48,12 @@ export default function AdminDashboard() {
   const [activeSection, setActiveSection] = useState('overview');
   const [properties, setProperties] = useState([]);
   const [contracts, setContracts] = useState([]);
+  const [contractPageInfo, setContractPageInfo] = useState({ count: 0, page: 1, pageCount: 1 });
   const [userList, setUserList] = useState([]);
+  const [userChoicesLoaded, setUserChoicesLoaded] = useState(false);
   const [invoices, setInvoices] = useState([]);
+  const [financialSummary, setFinancialSummary] = useState(null);
+  const reportInvoicesLoaded = useRef(false);
   const [leaseTermMonths, setLeaseTermMonths] = useState(12);
   const [showUnitModal, setShowUnitModal] = useState(false);
   const [unitData, setUnitData] = useState({ id: null, property: '', unitNumber: '', monthlyRate: '', status: 'Available' });
@@ -101,66 +108,89 @@ export default function AdminDashboard() {
     manualLeaseReference: '',
   });
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = useCallback(async () => {
     try {
-      const [propData, contractsData, usersData, invoiceData] = await Promise.all([
+      const [propData, contractsPage, summaryData] = await Promise.all([
         fetchProperties(),
-        fetchContracts(),
-        fetchUsers(),
-        fetchInvoices(),
+        fetchContractsPage({ page: 1 }),
+        fetchOwnerPortfolio('overview'),
       ]);
       setProperties(Array.isArray(propData) ? propData : []);
-      setContracts(Array.isArray(contractsData) ? contractsData : []);
-      setUserList(Array.isArray(usersData) ? usersData : []);
-      setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
+      setContracts(contractsPage.results);
+      setContractPageInfo({
+        count: contractsPage.count,
+        page: 1,
+        pageCount: Math.max(1, Math.ceil(contractsPage.count / 50)),
+      });
+      setFinancialSummary(summaryData.summary || null);
       setError('');
-    } catch (err) {
+    } catch {
       setError('Failed to fetch dashboard data.');
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const loadReportInvoices = useCallback(async () => {
+    if (reportInvoicesLoaded.current) return;
+    try {
+      const data = await fetchInvoices();
+      setInvoices(Array.isArray(data) ? data : data.results || []);
+      reportInvoicesLoaded.current = true;
+    } catch {
+      setError('Unable to load financial reports. Please try again.');
+    }
+  }, []);
+
+  const loadUserChoices = async () => {
+    if (userChoicesLoaded) return;
+    try {
+      const users = await fetchUsers();
+      setUserList(Array.isArray(users) ? users : []);
+      setUserChoicesLoaded(true);
+    } catch {
+      setError('Unable to load account choices. Please try again.');
+    }
+  };
+
+  const openNewLeaseForm = async () => {
+    await loadUserChoices();
+    setContractData((current) => ({ ...current, rentDueDay: 1, manualLeaseReason: '', manualLeaseReference: '' }));
+    setShowContractModal(true);
   };
 
   const refreshInvoiceSummaries = async () => {
     try {
-      const data = await fetchInvoices();
-      setInvoices(Array.isArray(data) ? data : []);
+      const summaryData = await fetchOwnerPortfolio('overview');
+      setFinancialSummary(summaryData.summary || null);
+      if (reportInvoicesLoaded.current) {
+        const data = await fetchInvoices();
+        setInvoices(Array.isArray(data) ? data : data.results || []);
+      }
     } catch {
       // The ledger keeps its own refreshed data; the dashboard can refresh on next navigation.
     }
   };
 
   useEffect(() => {
-    loadData();
+    void Promise.resolve().then(loadData);
     fetchSystemSettings().then((settings) => setLeaseTermMonths(settings.default_lease_term_months || 12)).catch(() => {});
-  }, []);
+  }, [loadData]);
 
   useEffect(() => {
     const handleWorkspaceNavigation = (event) => {
       setActiveSection(event.detail);
       if (event.detail === 'users') setShowUserManagement(true);
+      if (event.detail === 'reports') void loadReportInvoices();
     };
     window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
     return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
-  }, []);
+  }, [loadReportInvoices]);
+  useNotificationDeepLink('admin');
 
   const handleDeleteProperty = async (id) => {
     setError('');
     setSuccess('');
-
-    const linkedContracts = contracts.filter((c) => {
-      const propId = c.property?._id || c.property?.id || c.property;
-      const isActive = ['active', 'pending'].includes(c.status?.toLowerCase());
-      return Number(propId) === Number(id) && isActive;
-    });
-
-    if (linkedContracts.length > 0) {
-      setError(
-        `Cannot delete this property: ${linkedContracts.length} active lease contract(s) are still linked to it. Cancel or reassign those leases first.`
-      );
-      return;
-    }
 
     if (window.confirm('Are you sure you want to archive this property?')) {
       try {
@@ -168,12 +198,13 @@ export default function AdminDashboard() {
         setSuccess('Property archived successfully!');
         loadData();
       } catch (err) {
-        setError('Failed to delete property.');
+        setError(err.response?.data?.detail || 'Failed to archive property.');
       }
     }
   };
 
-  const handleEditClick = (prop) => {
+  const handleEditClick = async (prop) => {
+    await loadUserChoices();
     setEditingProperty({
       ...prop,
       _id: prop._id || prop.id,
@@ -204,7 +235,7 @@ export default function AdminDashboard() {
       setSuccess('Property updated successfully!');
       setShowEditModal(false);
       loadData();
-    } catch (err) {
+    } catch {
       setError('Failed to update property details.');
     }
   };
@@ -394,7 +425,6 @@ export default function AdminDashboard() {
   }, [properties, search, filterType, filterStatus]);
 
   const metrics = useMemo(() => {
-    const activeContractsList = contracts.filter((c) => c.status?.toLowerCase() === 'active');
     let totalOccupiedUnits = 0;
     let totalUnits = 0;
 
@@ -414,12 +444,12 @@ export default function AdminDashboard() {
       totalUnits,
       vacantUnits: Math.max(0, totalUnits - totalOccupiedUnits),
       occupancyRate: totalUnits ? Math.round((totalOccupiedUnits / totalUnits) * 100) : 0,
-      activeContracts: activeContractsList.length,
-      totalRevenue: activeContractsList.reduce((acc, curr) => acc + Number(curr.rentAmount || 0), 0),
-      pendingInvoices: invoices.filter((invoice) => invoice.status !== 'Cancelled' && Number(invoice.balanceDue || 0) > 0).length,
-      pendingPaymentReviews: invoices.reduce((total, invoice) => total + Number(invoice.pendingPaymentCount || 0), 0),
+      activeContracts: Number(financialSummary?.activeLeasesCount || 0),
+      totalRevenue: Number(financialSummary?.activeLeasesRent || 0),
+      pendingInvoices: Number(financialSummary?.pendingInvoices || 0),
+      pendingPaymentReviews: Number(financialSummary?.paymentsAwaitingReview || 0),
     };
-  }, [properties, contracts, invoices]);
+  }, [properties, financialSummary]);
 
   const selectedPropertyObj = useMemo(
     () => properties.find((p) => (p._id || p.id)?.toString() === selectedPropertyId?.toString()),
@@ -459,8 +489,7 @@ export default function AdminDashboard() {
           <div className="pm-header-actions">
             {(activeSection === 'overview' || activeSection === 'contracts') && (
               <Button variant="light" className="pm-btn-outline" onClick={() => {
-                setContractData((current) => ({ ...current, rentDueDay: 1, manualLeaseReason: '', manualLeaseReference: '' }));
-                setShowContractModal(true);
+                void openNewLeaseForm();
               }}>
                 New lease
               </Button>
@@ -530,8 +559,8 @@ export default function AdminDashboard() {
                 </div>
                 <div className="pm-admin-summary-item">
                   <span>Active accounts</span>
-                  <strong>{userList.filter((account) => account.isActive).length}</strong>
-                  <small>{tenantUsers.length} tenants · {ownerUsers.length} owners · {managerUsers.length} managers · {agentUsers.length} agents</small>
+                  <strong>{userChoicesLoaded ? userList.filter((account) => account.isActive).length : '—'}</strong>
+                  <small>{userChoicesLoaded ? `${tenantUsers.length} tenants · ${ownerUsers.length} owners · ${managerUsers.length} managers · ${agentUsers.length} agents` : 'Open User accounts to manage roles and access'}</small>
                 </div>
                 <div className="pm-admin-summary-item">
                   <span>Invoices with balance</span>
@@ -542,7 +571,7 @@ export default function AdminDashboard() {
             </section>
 
             {/* User Management Panel */}
-            {showUserManagement && (
+            {showUserManagement && activeSection === 'users' && (
               <div className="pm-panel" id="users" data-workspace-section="users">
                 <div className="pm-panel-header">User accounts</div>
                 <div style={{ padding: '22px' }}>
@@ -715,27 +744,27 @@ export default function AdminDashboard() {
             {/* Active Contracts */}
             <div className="pm-panel mb-4" id="reports" data-workspace-section="reports">
               <div className="pm-panel-header">System-wide property and financial reports</div>
-              <div style={{ padding: '22px' }}><ManagerReports properties={properties} invoices={invoices} /></div>
+              {activeSection === 'reports' && <div style={{ padding: '22px' }}><ManagerReports properties={properties} invoices={invoices} /></div>}
             </div>
 
             <div className="pm-panel mb-4" id="billing" data-workspace-section="billing">
               <div className="pm-panel-header">System-wide rent payments</div>
-              <div style={{ padding: '22px' }}><ManagerInvoiceTracker onPaymentsUpdated={refreshInvoiceSummaries} /></div>
+              {activeSection === 'billing' && <div style={{ padding: '22px' }}><ManagerInvoiceTracker onPaymentsUpdated={refreshInvoiceSummaries} /></div>}
             </div>
 
             <div className="pm-panel mb-4" id="activity" data-workspace-section="activity">
               <div className="pm-panel-header">System activity</div>
-              <div style={{ padding: '22px' }}><AdminActivityLog /></div>
+              {activeSection === 'activity' && <div style={{ padding: '22px' }}><AdminActivityLog /></div>}
             </div>
 
             <div className="pm-panel mb-4" id="settings" data-workspace-section="settings">
               <div className="pm-panel-header">System settings</div>
-              <div style={{ padding: '22px', maxWidth: 640 }}><AdminSystemSettings /></div>
+              {activeSection === 'settings' && <div style={{ padding: '22px', maxWidth: 640 }}><AdminSystemSettings /></div>}
             </div>
 
             {/* Active Contracts */}
             <div className="pm-panel mb-4" id="contracts" data-workspace-section="contracts">
-              <div className="pm-panel-header">Lease contracts</div>
+              <div className="pm-panel-header">Lease contracts ({contractPageInfo.count})</div>
               <Table responsive className="pm-table mb-0">
                 <thead>
                   <tr>
@@ -783,13 +812,27 @@ export default function AdminDashboard() {
                   )}
                 </tbody>
               </Table>
+              <CollectionPagination
+                count={contractPageInfo.count}
+                page={contractPageInfo.page}
+                pageCount={contractPageInfo.pageCount}
+                onPageChange={async (page) => {
+                  try {
+                    const response = await fetchContractsPage({ page });
+                    setContracts(response.results);
+                    setContractPageInfo({ count: response.count, page, pageCount: Math.max(1, Math.ceil(response.count / 50)) });
+                  } catch {
+                    setError('Unable to load this page of leases. Please try again.');
+                  }
+                }}
+              />
             </div>
 
             {/* Maintenance Manager */}
             <div className="pm-panel" id="maintenance" data-workspace-section="maintenance">
               <div className="pm-panel-header">Maintenance queue</div>
               <div style={{ padding: '22px' }}>
-                <AdminMaintenanceManager />
+                {activeSection === 'maintenance' && <AdminMaintenanceManager />}
               </div>
             </div>
           </>
@@ -938,7 +981,7 @@ export default function AdminDashboard() {
         </Modal>
 
         {/* Modal: New Lease Contract */}
-        <Modal show={showContractModal} onHide={() => setShowContractModal(false)} centered dialogClassName="pm-modal">
+          <Modal show={showContractModal} onHide={() => setShowContractModal(false)} centered dialogClassName="pm-modal">
           <Modal.Header closeButton>
             <Modal.Title>Prepare lease contract</Modal.Title>
           </Modal.Header>

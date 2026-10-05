@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 
 const NAVIGATION = {
   admin: [
@@ -10,10 +10,10 @@ const NAVIGATION = {
   ],
   manager: [
     ['overview', 'Overview', 'OV'], ['properties', 'Properties', 'PR'], ['contracts', 'Leases', 'LE'],
-    ['inquiries', 'Inquiries', 'IN'], ['applications', 'Applications', 'AP'], ['reports', 'Performance', 'RE'], ['billing', 'Rent ledger', 'PA'], ['maintenance', 'Maintenance', 'MA'],
+    ['inquiries', 'Inquiries', 'IN'], ['applications', 'Applications', 'AP'], ['pricing', 'Rent changes', '₱'], ['reports', 'Performance', 'RE'], ['billing', 'Rent ledger', 'PA'], ['maintenance', 'Maintenance', 'MA'],
   ],
   agent: [['overview', 'Overview', 'OV'], ['listings', 'Assigned listings', 'PR'], ['inquiries', 'Prospects', 'IN'], ['applications', 'Applications', 'AP']],
-  owner: [['overview', 'Overview', 'OV'], ['portfolio', 'Portfolio', 'PO'], ['approvals', 'Application approvals', 'AP'], ['contracts', 'Lease contracts', 'LE'], ['maintenance', 'Maintenance', 'MA'], ['billing', 'Payments', 'PA']],
+  owner: [['overview', 'Overview', 'OV'], ['portfolio', 'Portfolio', 'PO'], ['approvals', 'Application approvals', 'AP'], ['pricing', 'Rent changes', '₱'], ['contracts', 'Lease contracts', 'LE'], ['history', 'History', 'HI'], ['maintenance', 'Maintenance', 'MA'], ['billing', 'Payments', 'PA']],
   tenant: [['overview', 'Overview', 'OV'], ['payments', 'Rent & payments', 'PA'], ['lease', 'My lease', 'LE'], ['maintenance', 'Maintenance', 'MA']],
 };
 
@@ -35,7 +35,17 @@ export default function WorkspaceSidebar() {
       : location.pathname === '/owner' && user?.role === 'Admin'
         ? 'owner'
         : ROLE_KEY[user?.role] || 'tenant';
-  const [active, setActive] = useState('overview');
+  const [active, setActive] = useState(() => location.pathname === '/notifications' ? '' : 'overview');
+
+  useEffect(() => {
+    if (location.pathname === '/notifications') {
+      setActive('');
+      return;
+    }
+    const requestedSection = new URLSearchParams(location.search).get('section');
+    const validSections = NAVIGATION[roleKey].map(([section]) => section);
+    setActive(validSections.includes(requestedSection) ? requestedSection : 'overview');
+  }, [location.pathname, location.search, roleKey]);
 
   useEffect(() => {
     const syncActiveSection = (event) => setActive(event.detail);

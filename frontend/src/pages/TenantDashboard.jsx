@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Container, Table, Form, Spinner, Button, Modal } from 'react-bootstrap';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
+import useNotificationDeepLink from '../hooks/useNotificationDeepLink';
 import { fetchMaintenanceRequests, createMaintenanceRequest } from '../services/maintenanceService';
 import { fetchProperties } from '../services/propertyService';
 import { fetchContracts } from '../services/contractService';
@@ -33,6 +34,7 @@ export default function TenantDashboard() {
   const [requests, setRequests] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [availableProperties, setAvailableProperties] = useState([]);
+  const tenantPropertiesLoaded = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -46,6 +48,7 @@ export default function TenantDashboard() {
     window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
     return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
   }, []);
+  useNotificationDeepLink('tenant');
 
   const [formData, setFormData] = useState({
     property: '',
@@ -54,31 +57,44 @@ export default function TenantDashboard() {
   });
 
   const loadData = async () => {
-    setLoading(true);
-    try {
-      const [requestsData, propertiesData, contractsData] = await Promise.all([
-        fetchMaintenanceRequests(),
-        fetchProperties(),
-        fetchContracts(),
-      ]);
-      setRequests(Array.isArray(requestsData) ? requestsData : []);
-      setContracts(Array.isArray(contractsData) ? contractsData : []);
-      const props = Array.isArray(propertiesData) ? propertiesData : [];
-      setAvailableProperties(props);
+    const [requestsResult, contractsResult] = await Promise.allSettled([
+      fetchMaintenanceRequests(),
+      fetchContracts(),
+    ]);
+    const failures = [];
+    if (requestsResult.status === 'fulfilled') {
+      const data = requestsResult.value;
+      setRequests(Array.isArray(data) ? data : data?.results || []);
+    } else failures.push('maintenance requests');
+    if (contractsResult.status === 'fulfilled') {
+      const data = contractsResult.value;
+      setContracts(Array.isArray(data) ? data : data?.results || []);
+    } else failures.push('lease records');
+    setError(failures.length ? `Could not load ${failures.join(' and ')}.` : '');
+    setLoading(false);
+  };
 
-      if (props.length === 1) {
-        setFormData((prev) => ({ ...prev, property: props[0]._id }));
+  const openMaintenanceForm = async () => {
+    setError('');
+    if (!tenantPropertiesLoaded.current) {
+      try {
+        const data = await fetchProperties();
+        const properties = Array.isArray(data) ? data : data?.results || [];
+        setAvailableProperties(properties);
+        tenantPropertiesLoaded.current = true;
+        if (properties.length === 1) {
+          setFormData((current) => ({ ...current, property: properties[0]._id || properties[0].id }));
+        }
+      } catch {
+        setError('Could not load your property choices. Please try again.');
+        return;
       }
-      setError('');
-    } catch (err) {
-      setError('Failed to load dashboard records.');
-    } finally {
-      setLoading(false);
     }
+    setShowModal(true);
   };
 
   useEffect(() => {
-    loadData();
+    void Promise.resolve().then(loadData);
   }, []);
 
   useEffect(() => {
@@ -158,7 +174,7 @@ export default function TenantDashboard() {
             <Button
               variant="light"
               className="pm-btn-primary"
-              onClick={() => setShowModal(true)}
+              onClick={() => { void openMaintenanceForm(); }}
             >
               Report new issue
             </Button>
@@ -208,9 +224,9 @@ export default function TenantDashboard() {
             {/* 2. INVOICING & BILLING PANEL ADDED HERE */}
             <div className="pm-panel mb-4" id="payments" data-workspace-section="payments">
               <div className="pm-panel-header">My rent billing statements</div>
-              <div style={{ padding: '22px' }}>
+              {activeSection === 'payments' && <div style={{ padding: '22px' }}>
                 <TenantInvoiceViewer tenantId={user?._id} />
-              </div>
+              </div>}
             </div>
 
             <div className="pm-panel mb-4" id="lease" data-workspace-section="lease">

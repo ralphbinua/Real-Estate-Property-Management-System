@@ -1,11 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState } from 'react';
 import { Table, Badge, Alert, Tabs, Tab, Button, Card, Form, Modal, Spinner, InputGroup } from 'react-bootstrap';
-import { fetchUsers, createUserByAdmin, updateUser, deleteUser } from '../services/userService';
-
-const ROLE_GROUPS = {
-  tenants: ['tenant'],
-  staff: ['admin', 'property manager', 'agent', 'owner'],
-};
+import { fetchUsersPage, createUserByAdmin, updateUser, deleteUser } from '../services/userService';
+import usePaginatedCollection from '../hooks/usePaginatedCollection';
+import CollectionPagination from './CollectionPagination';
 
 const ROLE_COLORS = {
   tenant: 'info',
@@ -25,8 +22,6 @@ function initials(name = '') {
 }
 
 export default function UserManagement() {
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [activeTab, setActiveTab] = useState('tenants');
@@ -55,22 +50,11 @@ export default function UserManagement() {
     password: '',
   });
 
-  const loadUsers = async () => {
-    setLoading(true);
-    try {
-      const data = await fetchUsers();
-      setUsers(Array.isArray(data) ? data : data.results || []);
-      setError('');
-    } catch (err) {
-      setError('Failed to fetch user accounts.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadUsers();
-  }, []);
+  const roles = activeTab === 'tenants' ? ['tenant'] : ['admin', 'property manager', 'agent', 'owner'];
+  const { items: users, count, page, pageCount, loading, error: loadError, setPage, refresh } = usePaginatedCollection(
+    fetchUsersPage,
+    { roles: roles.join(','), search },
+  );
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
@@ -83,7 +67,7 @@ export default function UserManagement() {
       setSuccess(`User ${newUser.name || newUser.email} created successfully!`);
       setShowAddModal(false);
       setNewUser({ name: '', email: '', password: '', role: 'Tenant' });
-      await loadUsers();
+      refresh();
     } catch (err) {
       setError(err.response?.data?.message || err.response?.data?.detail || 'Failed to create user account.');
     } finally {
@@ -121,7 +105,7 @@ export default function UserManagement() {
       await updateUser(editUser.id, payload);
       setSuccess(`User ${editUser.name || editUser.email} updated successfully!`);
       setShowEditModal(false);
-      await loadUsers();
+      refresh();
     } catch (err) {
       setError(err.response?.data?.message || err.response?.data?.detail || 'Failed to update user account.');
     } finally {
@@ -137,33 +121,16 @@ export default function UserManagement() {
       await deleteUser(userId);
       setSuccess(`${pendingDelete.name} was deactivated.`);
       setPendingDelete(null);
-      await loadUsers();
-    } catch (err) {
+      refresh();
+    } catch {
       setError('Failed to delete user.');
     } finally {
       setDeleting(false);
     }
   };
 
-  const counts = useMemo(() => {
-    const c = { tenants: 0, staff: 0 };
-    users.forEach((u) => {
-      const role = u.role?.toLowerCase();
-      if (ROLE_GROUPS.tenants.includes(role)) c.tenants += 1;
-      else if (ROLE_GROUPS.staff.includes(role)) c.staff += 1;
-    });
-    return c;
-  }, [users]);
-
-  const renderUserTable = (roles) => {
+  const renderUserTable = () => {
     const q = search.trim().toLowerCase();
-    const filteredUsers = users.filter((u) => {
-      const role = u.role?.toLowerCase();
-      if (!roles.includes(role)) return false;
-      if (!q) return true;
-      return u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q);
-    });
-
     if (loading) {
       return (
         <div className="text-center text-muted py-5">
@@ -173,7 +140,7 @@ export default function UserManagement() {
       );
     }
 
-    if (filteredUsers.length === 0) {
+    if (users.length === 0) {
       return (
         <div className="text-center text-muted py-5">
           <div className="fs-4 mb-1">No accounts found</div>
@@ -195,7 +162,7 @@ export default function UserManagement() {
           </tr>
         </thead>
         <tbody>
-          {filteredUsers.map((user) => {
+          {users.map((user) => {
             const userId = user._id || user.id;
             return (
               <tr key={userId}>
@@ -264,7 +231,7 @@ export default function UserManagement() {
         </div>
       </div>
 
-      {error && <Alert variant="danger" dismissible onClose={() => setError('')}>{error}</Alert>}
+      {(error || loadError) && <Alert variant="danger" dismissible onClose={() => { setError(''); }}>{error || loadError}</Alert>}
       {success && <Alert variant="success" dismissible onClose={() => setSuccess('')}>{success}</Alert>}
 
       <Card className="border-0 shadow-sm">
@@ -275,13 +242,14 @@ export default function UserManagement() {
             onSelect={(k) => setActiveTab(k)}
             className="border-bottom px-3 pt-2 bg-light"
           >
-            <Tab eventKey="staff" title={`Staff (${counts.staff})`}>
-              {renderUserTable(ROLE_GROUPS.staff)}
+            <Tab eventKey="staff" title="Staff">
+              {renderUserTable()}
             </Tab>
-            <Tab eventKey="tenants" title={`Tenants (${counts.tenants})`}>
-              {renderUserTable(ROLE_GROUPS.tenants)}
+            <Tab eventKey="tenants" title="Tenants">
+              {renderUserTable()}
             </Tab>
           </Tabs>
+          {!loading && <CollectionPagination count={count} page={page} pageCount={pageCount} onPageChange={setPage} />}
         </Card.Body>
       </Card>
 

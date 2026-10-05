@@ -9,7 +9,11 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from contracts.models import Contract
+from core.pagination import OptInPageNumberPagination
 from users.audit import record_activity
+from notifications.models import Notification
+from notifications.services import create_for_recipients
+from .querysets import invoice_serializer_queryset
 
 from .models import Invoice, Payment
 from .serializers import InvoiceSerializer, PaymentSerializer
@@ -46,12 +50,13 @@ class IsTenant(permissions.BasePermission):
 class InvoiceViewSet(viewsets.ModelViewSet):
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = OptInPageNumberPagination
 
     def get_queryset(self):
         user = self.request.user
         invoices = Invoice.objects.filter(
             Q(is_deleted=False) | Q(payments__isnull=False),
-        ).distinct().prefetch_related('payments')
+        ).distinct()
         if user.role == 'Admin':
             pass
         elif user.role == 'Property Manager':
@@ -66,7 +71,19 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         tenant_id = self.request.query_params.get('tenantId')
         if tenant_id and user.role in ('Admin', 'Property Manager'):
             invoices = invoices.filter(tenant_id=tenant_id)
-        return invoices.order_by('-id')
+        invoice_status = self.request.query_params.get('status')
+        search = self.request.query_params.get('search', '').strip()
+        if invoice_status:
+            invoices = invoices.filter(status__iexact=invoice_status)
+        if search:
+            invoices = invoices.filter(
+                Q(property__title__icontains=search)
+                | Q(tenant__email__icontains=search)
+                | Q(tenant__first_name__icontains=search)
+                | Q(tenant__last_name__icontains=search)
+                | Q(remarks__icontains=search)
+            )
+        return invoice_serializer_queryset(invoices.order_by('-id'))
 
     def get_permissions(self):
         if self.action in ('create', 'update', 'partial_update', 'destroy'):
@@ -90,10 +107,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 
         invoices = Invoice.objects.filter(
             tenant_id=tenant_id,
-        ).prefetch_related('payments').order_by('-id')
+        ).order_by('-id')
         invoices = invoices.filter(Q(is_deleted=False) | Q(payments__isnull=False)).distinct()
         if request.user.role == 'Property Manager':
             invoices = invoices.filter(property__manager=request.user)
+        invoices = invoice_serializer_queryset(invoices)
+        page = self.paginate_queryset(invoices)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
         serializer = self.get_serializer(invoices, many=True)
         return Response(serializer.data)
 
@@ -135,9 +157,18 @@ class InvoiceViewSet(viewsets.ModelViewSet):
             invoice.save(update_fields=['is_deleted'])
             record_activity(self.request.user, 'ARCHIVE', 'Invoice', invoice.pk, f'Archived invoice {invoice.pk}.')
 
+    @transaction.atomic
     def perform_create(self, serializer):
         invoice = serializer.save()
         record_activity(self.request.user, 'CREATE', 'Invoice', invoice.pk, f'Created invoice {invoice.pk}.')
+        create_for_recipients(
+            recipients=[invoice.tenant],
+            actor=self.request.user,
+            event_type=Notification.EventType.INVOICE,
+            title='New rent invoice',
+            message='A new rent invoice is available in your payments.',
+            destination=Notification.Destination.TENANT_PAYMENTS,
+        )
 
     def perform_update(self, serializer):
         invoice = serializer.save()
@@ -148,6 +179,7 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
     serializer_class = PaymentSerializer
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ['get', 'post', 'head', 'options']
+    pagination_class = OptInPageNumberPagination
 
     def get_queryset(self):
         user = self.request.user
@@ -172,6 +204,13 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
         payment_status = self.request.query_params.get('status')
         if payment_status:
             payments = payments.filter(status=payment_status)
+        search = self.request.query_params.get('search', '').strip()
+        if search:
+            payments = payments.filter(
+                Q(invoice__property__title__icontains=search)
+                | Q(invoice__tenant__email__icontains=search)
+                | Q(reference_number__icontains=search)
+            )
         return payments.order_by('-created_at', '-id')
 
     def get_permissions(self):
@@ -237,6 +276,22 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
                 payment.pk,
                 f"{'Recorded' if direct_record else 'Submitted'} ₱{payment.amount:.2f} for invoice {invoice.pk}.",
             )
+            if direct_record:
+                self._notify_payment_participants(
+                    invoice,
+                    actor=request.user,
+                    title='Rent payment recorded',
+                    message='A rent payment was recorded for your property or account.',
+                    include_tenant=True,
+                )
+            else:
+                self._notify_payment_participants(
+                    invoice,
+                    actor=request.user,
+                    title='Rent payment submitted',
+                    message='A tenant submitted a rent payment for your property.',
+                    include_tenant=False,
+                )
 
         return Response(self.get_serializer(payment).data, status=status.HTTP_201_CREATED)
 
@@ -246,6 +301,34 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
             status=Payment.Status.VERIFIED,
         ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
         return max(invoice.total_due - paid_total, Decimal('0.00'))
+
+    def _notify_payment_participants(self, invoice, *, actor, title, message, include_tenant):
+        property_obj = invoice.property
+        create_for_recipients(
+            recipients=[property_obj.owner] if property_obj.owner_id else [],
+            actor=actor,
+            event_type=Notification.EventType.PAYMENT,
+            title=title,
+            message=message,
+            destination=Notification.Destination.OWNER_BILLING,
+        )
+        create_for_recipients(
+            recipients=[property_obj.manager] if property_obj.manager_id else [],
+            actor=actor,
+            event_type=Notification.EventType.PAYMENT,
+            title=title,
+            message=message,
+            destination=Notification.Destination.MANAGER_BILLING,
+        )
+        if include_tenant:
+            create_for_recipients(
+                recipients=[invoice.tenant],
+                actor=actor,
+                event_type=Notification.EventType.PAYMENT,
+                title=title,
+                message=message,
+                destination=Notification.Destination.TENANT_PAYMENTS,
+            )
 
     def _assert_mutation_scope(self, user, invoice):
         if user.role == 'Admin':
@@ -285,6 +368,13 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
             payment.verified_at = timezone.now()
             payment.save(update_fields=['status', 'verified_by', 'verified_at'])
             record_activity(request.user, 'VERIFY PAYMENT', 'Payment', payment.pk, f'Verified payment for invoice {invoice.pk}.')
+            self._notify_payment_participants(
+                invoice,
+                actor=request.user,
+                title='Rent payment verified',
+                message='A rent payment was verified.',
+                include_tenant=True,
+            )
         return Response(self.get_serializer(payment).data)
 
     @action(detail=True, methods=['post'])
@@ -302,6 +392,13 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
             payment.rejection_reason = reason
             payment.save(update_fields=['status', 'rejected_by', 'rejected_at', 'rejection_reason'])
             record_activity(request.user, 'REJECT PAYMENT', 'Payment', payment.pk, f'Rejected payment for invoice {invoice.pk}.')
+            self._notify_payment_participants(
+                invoice,
+                actor=request.user,
+                title='Rent payment needs attention',
+                message='A rent payment was not accepted. Review the payment details in your account.',
+                include_tenant=True,
+            )
         return Response(self.get_serializer(payment).data)
 
     @action(detail=True, methods=['post'])
@@ -319,4 +416,11 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
             payment.reversal_reason = reason
             payment.save(update_fields=['status', 'reversed_by', 'reversed_at', 'reversal_reason'])
             record_activity(request.user, 'REVERSE PAYMENT', 'Payment', payment.pk, f'Reversed payment for invoice {invoice.pk}.')
+            self._notify_payment_participants(
+                invoice,
+                actor=request.user,
+                title='Rent payment reversed',
+                message='A rent payment was reversed.',
+                include_tenant=True,
+            )
         return Response(self.get_serializer(payment).data)

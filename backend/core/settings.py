@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'contracts',
     'billing',
     'maintenance',
+    'notifications',
 ]
 
 # Custom User Model (Must be set to users.User)

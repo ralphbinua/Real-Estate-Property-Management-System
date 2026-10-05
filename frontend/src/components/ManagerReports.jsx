@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Row, Col, Card, ProgressBar, Table, Badge, Form } from 'react-bootstrap';
 
 const formatCurrency = (value) => `₱${Number(value || 0).toLocaleString('en-PH', {

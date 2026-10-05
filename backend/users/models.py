@@ -24,7 +24,7 @@ class User(AbstractUser):
 
 class AuditEvent(models.Model):
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='audit_events')
-    action = models.CharField(max_length=30)
+    action = models.CharField(max_length=64)
     entity_type = models.CharField(max_length=50)
     entity_id = models.CharField(max_length=64, blank=True, default='')
     summary = models.CharField(max_length=500)

@@ -1,4 +1,7 @@
 import api from './api';
+import { fetchPage } from './pagination';
+
+export const fetchContractsPage = (params) => fetchPage('/contracts/', params);
 
 export const fetchContracts = async () => {
   const response = await api.get('/contracts/');

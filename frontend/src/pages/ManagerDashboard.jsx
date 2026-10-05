@@ -1,17 +1,21 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Container, Table, Form, Spinner, Button, Row, Col, Badge, Modal } from 'react-bootstrap';
-import { fetchProperties, updateProperty, deleteProperty } from '../services/propertyService';
+import { fetchProperties, updateProperty, deleteProperty, fetchRentChangeRequestsPage, proposeRentChange } from '../services/propertyService';
 import { fetchContracts, createContract, terminateContract, activateContract } from '../services/contractService';
 import { fetchAssignableTenants } from '../services/userService';
 import { fetchInvoices } from '../services/invoiceService';
 import { createUnit, deleteUnit, updateUnit } from '../services/unitService';
 import { fetchSystemSettings } from '../services/systemSettingsService';
 import { addMonthsToDate } from '../utils/dateUtils';
-import { fetchInquiries, updateInquiry } from '../services/inquiryService';
-import { createLeaseFromApplication, fetchApplications, reviewApplication } from '../services/applicationService';
+import { fetchInquiriesPage, updateInquiry } from '../services/inquiryService';
+import { createLeaseFromApplication, fetchApplicationsPage, reviewApplication } from '../services/applicationService';
 import AdminMaintenanceManager from '../components/AdminMaintenanceManager';
+import useNotificationDeepLink from '../hooks/useNotificationDeepLink';
 import ManagerInvoiceTracker from '../components/ManagerInvoiceTracker';
 import ManagerReports from '../components/ManagerReports';
+import ManagerRentChangesSection from './manager/ManagerRentChangesSection';
+import ManagerContractSection from './manager/ManagerContractSection';
+import ManagerProspectsSection from './manager/ManagerProspectsSection';
 import './ManagerDashboard.css';
 
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
@@ -30,6 +34,7 @@ const PILL_CLASS = {
   'pending owner approval': 'pm-pill-pending',
   approved: 'pm-pill-available',
   rejected: 'pm-pill-terminated',
+  cancelled: 'pm-pill-terminated',
   converted: 'pm-pill-occupied',
 };
 
@@ -52,6 +57,8 @@ export default function ManagerDashboard() {
   const [invoices, setInvoices] = useState([]);
   const [inquiries, setInquiries] = useState([]);
   const [applications, setApplications] = useState([]);
+  const [rentChangeRequests, setRentChangeRequests] = useState([]);
+  const [managerPages, setManagerPages] = useState({});
   const [activatingContractId, setActivatingContractId] = useState(null);
   const [showManagerActivationModal, setShowManagerActivationModal] = useState(false);
   const [contractForActivation, setContractForActivation] = useState(null);
@@ -67,7 +74,7 @@ export default function ManagerDashboard() {
 
   // Panel Toggles
   const [showMaintenanceQueue, setShowMaintenanceQueue] = useState(false);
-  const [showInvoices, setShowInvoices] = useState(true);
+  const [showInvoices, setShowInvoices] = useState(false);
   const [showReports, setShowReports] = useState(false);
   
   // Selected property for viewing units
@@ -93,40 +100,86 @@ export default function ManagerDashboard() {
   const [editingProperty, setEditingProperty] = useState(null);
   const [showUnitModal, setShowUnitModal] = useState(false);
   const [unitData, setUnitData] = useState({ id: null, property: '', unitNumber: '', monthlyRate: '', status: 'Available' });
+  const [showRentProposalModal, setShowRentProposalModal] = useState(false);
+  const [rentProposalTarget, setRentProposalTarget] = useState(null);
+  const [rentProposalRate, setRentProposalRate] = useState('');
+  const [rentProposalReason, setRentProposalReason] = useState('');
+  const [savingRentProposal, setSavingRentProposal] = useState(false);
   const [leaseTermMonths, setLeaseTermMonths] = useState(12);
   // Filter State
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
 
-  const loadManagerData = async () => {
-    setLoading(true);
-    const results = await Promise.allSettled([
-      fetchProperties(),
-      fetchContracts(),
-      fetchAssignableTenants(),
-      fetchInvoices(),
-      fetchInquiries(),
-      fetchApplications(),
-    ]);
-    const [propResult, contractResult, tenantResult, invoiceResult, inquiryResult, applicationResult] = results;
-    if (propResult.status === 'fulfilled') setProperties(Array.isArray(propResult.value) ? propResult.value : []);
-    if (contractResult.status === 'fulfilled') setContracts(Array.isArray(contractResult.value) ? contractResult.value : []);
-    if (tenantResult.status === 'fulfilled') setUserList(Array.isArray(tenantResult.value) ? tenantResult.value : []);
-    if (invoiceResult.status === 'fulfilled') setInvoices(Array.isArray(invoiceResult.value) ? invoiceResult.value : []);
-    if (inquiryResult.status === 'fulfilled') setInquiries(Array.isArray(inquiryResult.value) ? inquiryResult.value : []);
-    if (applicationResult.status === 'fulfilled') setApplications(Array.isArray(applicationResult.value) ? applicationResult.value : []);
+  const managerLoadedSections = useRef(new Set());
+  const tenantChoicesLoaded = useRef(false);
 
-    const failedSections = results.flatMap((result, index) => result.status === 'rejected'
-      ? [['properties', 'leases', 'tenant list', 'invoices', 'inquiries', 'applications'][index]]
-      : []);
-    setError(failedSections.length
-      ? `Could not load: ${failedSections.join(', ')}. Other manager records are still available.`
-      : '');
-    setLoading(false);
+  const loadManagerData = useCallback(async (section = activeSection, force = true, page = 1) => {
+    if (!force && managerLoadedSections.current.has(section)) return;
+    const requestMap = {
+      overview: [['properties', fetchProperties], ['pricing', fetchRentChangeRequestsPage]],
+      properties: [['properties', fetchProperties]],
+      pricing: [['pricing', fetchRentChangeRequestsPage]],
+      contracts: [['contracts', fetchContracts]],
+      inquiries: [['inquiries', fetchInquiriesPage]],
+      applications: [['applications', fetchApplicationsPage]],
+      reports: [['invoices', fetchInvoices]],
+    };
+    const requests = requestMap[section] || [];
+    const results = await Promise.allSettled(requests.map(([, fetcher]) => fetcher === fetchProperties || fetcher === fetchContracts || fetcher === fetchInvoices ? fetcher() : fetcher({ page })));
+    const failures = [];
+    results.forEach((result, index) => {
+      const [dataKey] = requests[index];
+      if (result.status === 'rejected') {
+        failures.push(dataKey);
+        return;
+      }
+      const data = Array.isArray(result.value) ? result.value : result.value?.results || [];
+      if (dataKey === 'properties') setProperties(data);
+      if (dataKey === 'contracts') setContracts(data);
+      if (dataKey === 'invoices') setInvoices(data);
+      if (dataKey === 'inquiries') setInquiries(data);
+      if (dataKey === 'applications') setApplications(data);
+      if (dataKey === 'pricing') setRentChangeRequests(data);
+      if (result.value && !Array.isArray(result.value) && Number.isFinite(result.value.count)) {
+        setManagerPages((current) => ({
+          ...current,
+          [dataKey]: { count: result.value.count, page, pageCount: Math.max(1, Math.ceil(result.value.count / 50)) },
+        }));
+      }
+    });
+    if (failures.length) setError(`Could not load ${failures.join(' and ')}. Try opening the section again.`);
+    else {
+      managerLoadedSections.current.add(section);
+      setError('');
+    }
+    if (section === 'overview') setLoading(false);
+  }, [activeSection]);
+
+  const refreshManagerSections = async (...sections) => {
+    await Promise.all(sections.map((section) => loadManagerData(section, true)));
+  };
+
+  const loadTenantChoices = async () => {
+    if (tenantChoicesLoaded.current) return;
+    try {
+      const data = await fetchAssignableTenants();
+      setUserList(Array.isArray(data) ? data : data?.results || []);
+      tenantChoicesLoaded.current = true;
+    } catch {
+      setError('Unable to load tenant choices. Please try again.');
+    }
+  };
+
+  const openNewLeaseForm = async () => {
+    await loadTenantChoices();
+    setApplicationForLease(null);
+    setContractData((current) => ({ ...current, rentDueDay: 1, manualLeaseReason: '', manualLeaseReference: '' }));
+    setShowContractModal(true);
   };
 
   const refreshInvoiceSummaries = async () => {
+    if (!managerLoadedSections.current.has('reports')) return;
     try {
       const data = await fetchInvoices();
       setInvoices(Array.isArray(data) ? data : []);
@@ -136,20 +189,22 @@ export default function ManagerDashboard() {
   };
 
   useEffect(() => {
-    loadManagerData();
+    void Promise.resolve().then(() => loadManagerData('overview', false));
     fetchSystemSettings().then((settings) => setLeaseTermMonths(settings.default_lease_term_months || 12)).catch(() => {});
-  }, []);
+  }, [loadManagerData]);
 
   useEffect(() => {
     const handleWorkspaceNavigation = (event) => {
       setActiveSection(event.detail);
+      void loadManagerData(event.detail, false);
       if (event.detail === 'reports') setShowReports(true);
       if (event.detail === 'billing') setShowInvoices(true);
       if (event.detail === 'maintenance') setShowMaintenanceQueue(true);
     };
     window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
     return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
-  }, []);
+  }, [loadManagerData]);
+  useNotificationDeepLink('manager');
 
   const handlePropertySelect = (propertyId) => {
     const selectedProp = properties.find((p) => (p._id || p.id)?.toString() === propertyId?.toString());
@@ -191,7 +246,8 @@ export default function ManagerDashboard() {
     }
   };
 
-  const handleOpenLeaseForUnit = (propertyId, unit) => {
+  const handleOpenLeaseForUnit = async (propertyId, unit) => {
+    await loadTenantChoices();
     setContractData({
       property: propertyId,
       unitId: unit._id || unit.id,
@@ -248,7 +304,7 @@ export default function ManagerDashboard() {
       }
       setContractData({ property: '', unitId: '', unitNumber: '', tenant: '', startDate: '', endDate: '', rentAmount: '', rentDueDay: 1, manualLeaseReason: '', manualLeaseReference: '' });
       setShowContractModal(false);
-      loadManagerData();
+      await refreshManagerSections('contracts', 'overview');
     } catch (err) {
       const details = err.response?.data || {};
       setError(details.detail || details.tenant?.[0] || details.unit?.[0] || details.manualLeaseReason?.[0] || details.property?.[0] || details.message || 'Failed to create lease contract.');
@@ -256,7 +312,6 @@ export default function ManagerDashboard() {
   };
 
   const handleActivateLease = (contract) => {
-    const contractId = contract._id || contract.id;
     if (!contract.sourceApplication) {
       setError('Managers may prepare manual/offline leases, but only the Owner or an Admin with the Owner’s instruction can activate them.');
       return;
@@ -282,7 +337,7 @@ export default function ManagerDashboard() {
       setShowManagerActivationModal(false);
       setContractForActivation(null);
       setSuccess('Signed lease activated and recorded.');
-      await loadManagerData();
+      await refreshManagerSections('contracts', 'overview');
     } catch (err) {
       setError(err.response?.data?.detail || err.response?.data?.signedCopyReference?.[0] || err.response?.data?.status?.[0] || 'Unable to activate this lease.');
     } finally {
@@ -306,17 +361,15 @@ export default function ManagerDashboard() {
       setSuccess(status === 'Pending Owner Approval'
         ? 'Application sent to the property owner for a decision.'
         : `Application ${status.toLowerCase()}.`);
-      const [updatedApplications, updatedProperties, updatedInquiries] = await Promise.all([fetchApplications(), fetchProperties(), fetchInquiries()]);
-      setApplications(updatedApplications);
-      setProperties(updatedProperties);
-      setInquiries(updatedInquiries);
+      await refreshManagerSections('applications', 'overview', 'inquiries');
     } catch (err) {
       const responseData = err.response?.data;
       setError(responseData?.status?.[0] || responseData?.unit?.[0] || responseData?.detail || `Unable to ${status.toLowerCase()} this application.`);
     }
   };
 
-  const openLeaseForApplication = (application) => {
+  const openLeaseForApplication = async (application) => {
+    await loadTenantChoices();
     const propertyId = application.propertyDetails?._id;
     const unitId = application.unitDetails?._id || '';
     const matchingTenant = userList.find((tenant) => tenant.email?.toLowerCase() === application.applicantEmail?.toLowerCase());
@@ -341,10 +394,49 @@ export default function ManagerDashboard() {
       id: unit?._id || null,
       property: property._id || property.id,
       unitNumber: unit?.unitNumber || '',
-      monthlyRate: unit?.monthlyRate || '',
+      monthlyRate: unit?.monthlyRate ?? property.price ?? '',
       status: unit?.status || 'Available',
     });
     setShowUnitModal(true);
+  };
+
+  const openRentProposal = (property, targetKind = 'Property', unit = null) => {
+    setShowPropertyEditModal(false);
+    setShowUnitModal(false);
+    setRentProposalTarget({
+      property,
+      targetKind,
+      unit,
+      currentRate: targetKind === 'Unit' ? unit?.monthlyRate : property.price,
+    });
+    setRentProposalRate('');
+    setRentProposalReason('');
+    setShowRentProposalModal(true);
+  };
+
+  const handleRentProposalSubmit = async (event) => {
+    event.preventDefault();
+    if (!rentProposalTarget) return;
+    setError('');
+    setSuccess('');
+    setSavingRentProposal(true);
+    try {
+      await proposeRentChange({
+        propertyId: Number(rentProposalTarget.property._id || rentProposalTarget.property.id),
+        targetKind: rentProposalTarget.targetKind,
+        unitId: rentProposalTarget.targetKind === 'Unit' ? Number(rentProposalTarget.unit._id || rentProposalTarget.unit.id) : null,
+        proposedRate: Number(rentProposalRate),
+        reason: rentProposalReason.trim(),
+      });
+      setShowRentProposalModal(false);
+      setSuccess('Rent proposal sent to the Owner. The current rate stays in effect until it is approved.');
+      await loadManagerData('pricing');
+    } catch (err) {
+      const details = err.response?.data;
+      setError(details?.detail || details?.proposedRate?.[0] || details?.reason?.[0] || 'Unable to send the rent proposal.');
+    } finally {
+      setSavingRentProposal(false);
+    }
   };
 
   const handleUnitSave = async (e) => {
@@ -361,7 +453,7 @@ export default function ManagerDashboard() {
       else await createUnit(payload);
       setShowUnitModal(false);
       setSuccess(unitData.id ? 'Unit updated.' : 'Unit added.');
-      await loadManagerData();
+      await loadManagerData('properties');
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to save unit.');
     }
@@ -373,7 +465,7 @@ export default function ManagerDashboard() {
       await deleteUnit(unitData.id);
       setShowUnitModal(false);
       setSuccess('Unit removed.');
-      await loadManagerData();
+      await loadManagerData('properties');
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to remove unit.');
     }
@@ -408,11 +500,13 @@ export default function ManagerDashboard() {
         address: editingProperty.address,
         propertyType: editingProperty.propertyType,
         status: editingProperty.status,
-        price: Number(editingProperty.price),
+        ...(properties.find((property) => Number(property._id || property.id) === Number(editingProperty.id))?.managerUnitPricingAuthorized
+          ? { price: Number(editingProperty.price) }
+          : {}),
       });
       setShowPropertyEditModal(false);
       setSuccess('Property details updated.');
-      await loadManagerData();
+      await loadManagerData('properties');
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to update property.');
     }
@@ -428,7 +522,7 @@ export default function ManagerDashboard() {
     try {
       await deleteProperty(id);
       setSuccess('Property archived.');
-      await loadManagerData();
+      await loadManagerData('overview');
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to archive property.');
     }
@@ -454,7 +548,7 @@ export default function ManagerDashboard() {
       setShowTerminationModal(false);
       setContractForTermination(null);
       setSuccess('Lease ended. Its history remains on the property record.');
-      await loadManagerData();
+      await refreshManagerSections('contracts', 'overview');
     } catch (err) {
       const details = err.response?.data || {};
       setError(details.reason?.[0] || details.effectiveDate?.[0] || details.detail || 'Unable to end this lease.');
@@ -494,6 +588,15 @@ export default function ManagerDashboard() {
     () => properties.find((p) => (p._id || p.id)?.toString() === selectedPropertyId?.toString()),
     [properties, selectedPropertyId]
   );
+  const unitDataProperty = useMemo(
+    () => properties.find((property) => Number(property._id || property.id) === Number(unitData.property)),
+    [properties, unitData.property],
+  );
+  const unitDataUnit = useMemo(
+    () => unitDataProperty?.units?.find((unit) => Number(unit._id || unit.id) === Number(unitData.id)),
+    [unitDataProperty, unitData.id],
+  );
+  const managerCanSetUnitRate = Boolean(unitDataProperty?.managerUnitPricingAuthorized);
 
   return (
     <div className="pm-manager" data-active-section={activeSection}>
@@ -510,32 +613,54 @@ export default function ManagerDashboard() {
           <Button
               variant="light"
               className="pm-btn-ghost"
-            onClick={() => {
-              setApplicationForLease(null);
-              setContractData((current) => ({ ...current, rentDueDay: 1, manualLeaseReason: '', manualLeaseReference: '' }));
-              setShowContractModal(true);
-            }}
+              onClick={() => { void openNewLeaseForm(); }}
             >
               New lease
             </Button>
             <Button
               variant="light"
               className="pm-btn-ghost"
-              onClick={() => setShowReports(!showReports)}
+              onClick={() => {
+                if (activeSection === 'reports' && showReports) {
+                  setShowReports(false);
+                  setActiveSection('overview');
+                } else {
+                  setShowReports(true);
+                  setActiveSection('reports');
+                  void loadManagerData('reports', false);
+                }
+              }}
             >
               {showReports ? 'Hide reports' : 'View performance reports'}
             </Button>
             <Button
               variant="light"
               className="pm-btn-ghost"
-              onClick={() => setShowInvoices(!showInvoices)}
+              onClick={() => {
+                if (activeSection === 'billing' && showInvoices) {
+                  setShowInvoices(false);
+                  setActiveSection('overview');
+                } else {
+                  setShowInvoices(true);
+                  setActiveSection('billing');
+                  void loadManagerData('billing', false);
+                }
+              }}
             >
               {showInvoices ? 'Hide financial ledger' : 'View financial ledger'}
             </Button>
             <Button
               variant="light"
               className="pm-btn-ghost"
-              onClick={() => setShowMaintenanceQueue(!showMaintenanceQueue)}
+              onClick={() => {
+                if (activeSection === 'maintenance' && showMaintenanceQueue) {
+                  setShowMaintenanceQueue(false);
+                  setActiveSection('overview');
+                } else {
+                  setShowMaintenanceQueue(true);
+                  setActiveSection('maintenance');
+                }
+              }}
             >
               {showMaintenanceQueue ? 'Hide maintenance queue' : 'View maintenance queue'}
             </Button>
@@ -578,8 +703,16 @@ export default function ManagerDashboard() {
               </div>
             </div>
 
+            <div className="pm-panel mb-4" id="pricing" data-workspace-section="pricing">
+              <ManagerRentChangesSection
+                requests={rentChangeRequests}
+                pageInfo={managerPages.pricing || { count: 0, page: 1, pageCount: 1 }}
+                onPageChange={(page) => loadManagerData('pricing', true, page)}
+              />
+            </div>
+
             {/* Performance Analytics & Revenue Reports Panel */}
-            {showReports && (
+            {showReports && activeSection === 'reports' && (
               <div className="pm-panel mb-4" id="reports" data-workspace-section="reports">
                 <div className="pm-panel-header">Performance & Revenue Analytics</div>
                 <div style={{ padding: '22px' }}>
@@ -589,7 +722,7 @@ export default function ManagerDashboard() {
             )}
 
             {/* Invoicing Ledger Panel */}
-            {showInvoices && (
+            {showInvoices && activeSection === 'billing' && (
               <div className="pm-panel mb-4" id="billing" data-workspace-section="billing">
                 <div className="pm-panel-header">Financial Ledger & Rent Collection</div>
                 <div style={{ padding: '22px' }}>
@@ -599,7 +732,7 @@ export default function ManagerDashboard() {
             )}
 
             {/* Maintenance Queue Panel */}
-            {showMaintenanceQueue && (
+            {showMaintenanceQueue && activeSection === 'maintenance' && (
               <div className="pm-panel mb-4" id="maintenance" data-workspace-section="maintenance">
                 <div className="pm-panel-header">Maintenance & repair requests</div>
                 <div style={{ padding: '22px' }}>
@@ -764,148 +897,29 @@ export default function ManagerDashboard() {
 
             {/* Active Lease Contracts */}
             <div className="pm-panel mb-4" id="contracts" data-workspace-section="contracts">
-              <div className="pm-panel-header">Lease contracts ({contracts.length})</div>
-              <Table responsive className="pm-table mb-0">
-                <thead>
-                  <tr>
-                    <th>Property / Unit</th>
-                    <th>Tenant</th>
-                    <th>Rent amount</th>
-                    <th>Status</th>
-                    <th className="text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {contracts.length > 0 ? (
-                    contracts.map((con) => {
-                      const contractId = con._id || con.id;
-                      const propertyTitle = con.propertyDetails?.title || con.property?.title || con.property;
-                      const tenantName = con.tenantDetails?.name || con.tenant?.name || con.tenant;
-                      const unitNumber = con.unitDetails?.unitNumber || con.unitNumber;
-                      const unitLabel = unitNumber && unitNumber !== 'Main Unit' ? ` (${unitNumber})` : '';
-
-                      return (
-                        <tr key={contractId}>
-                          <td className="pm-cell-title">
-                            {propertyTitle}{unitLabel}
-                          </td>
-                          <td>{tenantName}</td>
-                          <td className="pm-cell-strong">₱{Number(con.rentAmount || 0).toLocaleString()}</td>
-                          <td>
-                            <StatusPill status={con.status} />
-                            {con.activatedAt && <div className="small text-muted mt-1">{con.activationBasis} · {new Date(con.activatedAt).toLocaleDateString()}</div>}
-                          </td>
-                          <td className="text-center">
-                            {con.status === 'Pending' && con.sourceApplication && con.propertyDetails?.managerLeaseSigningAuthorized && (
-                              <Button variant="primary" size="sm" className="me-2" disabled={activatingContractId === contractId} onClick={() => handleActivateLease(con)}>
-                                {activatingContractId === contractId ? 'Recording…' : 'Record signed lease'}
-                              </Button>
-                            )}
-                            {con.status === 'Pending' && !con.sourceApplication && <span className="small text-muted me-2">Owner/Admin activates manual leases</span>}
-                            {con.status === 'Pending' && con.sourceApplication && !con.propertyDetails?.managerLeaseSigningAuthorized && <span className="small text-muted me-2">Owner can activate or grant signing authority</span>}
-                            {['Pending', 'Active'].includes(con.status) && con.propertyDetails?.managerLeaseTerminationAuthorized && (
-                              <Button variant="light" size="sm" className="pm-btn-end-lease" onClick={() => openTerminationForm(con)}>
-                                {con.status === 'Pending' ? 'Cancel lease' : 'End lease'}
-                              </Button>
-                            )}
-                            {['Pending', 'Active'].includes(con.status) && !con.propertyDetails?.managerLeaseTerminationAuthorized && (
-                              <span className="small text-muted">Owner retains lease-ending authority</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan="5" className="pm-empty-row">No lease contracts recorded.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </Table>
+              <ManagerContractSection
+                contracts={contracts}
+                onActivate={handleActivateLease}
+                onTerminate={openTerminationForm}
+                activatingContractId={activatingContractId}
+              />
             </div>
 
-            <div className="pm-panel mb-4" id="inquiries" data-workspace-section="inquiries">
-              <div className="pm-panel-header">Agent inquiries and applications ({inquiries.length})</div>
-              <Table responsive className="pm-table mb-0">
-                <thead><tr><th>Prospect</th><th>Property</th><th>Viewing</th><th>Agent</th><th>Progress</th></tr></thead>
-                <tbody>
-                  {inquiries.map((inquiry) => (
-                    <tr key={inquiry.id}>
-                      <td>{inquiry.prospect_name}<div className="text-muted small">{inquiry.prospect_email}</div></td>
-                      <td>{properties.find((property) => Number(property._id || property.id) === Number(inquiry.property))?.title || inquiry.property}</td>
-                      <td>{inquiry.viewing_at ? new Date(inquiry.viewing_at).toLocaleString() : '—'}</td>
-                      <td>{inquiry.agentDetails?.name || '—'}</td>
-                      <td><Form.Select size="sm" value={inquiry.status} onChange={(e) => handleInquiryStatusChange(inquiry, e.target.value)}>{['New', 'Viewing Scheduled', 'Application In Progress', 'Converted', 'Closed'].map((status) => <option key={status}>{status}</option>)}</Form.Select></td>
-                    </tr>
-                  ))}
-                  {inquiries.length === 0 && <tr><td colSpan="5" className="pm-empty-row">No agent inquiries for your managed properties.</td></tr>}
-                </tbody>
-              </Table>
-            </div>
-
-            <div className="pm-panel mb-4" data-workspace-section="applications">
-              <div className="pm-panel-header">Rental applications ({applications.length})</div>
-              <Table responsive className="pm-table mb-0">
-                <thead><tr><th>Applicant</th><th>Property / unit</th><th>Employment</th><th>Income</th><th>Move-in</th><th>Status</th><th>Review</th></tr></thead>
-                <tbody>
-                  {applications.map((application) => (
-                    <tr key={application.id}>
-                      <td>{application.applicantName}<div className="small text-muted">{application.applicantEmail}</div></td>
-                      <td>{application.propertyDetails?.title || 'Property'}{application.unitDetails?.unitNumber ? ` · ${application.unitDetails.unitNumber}` : ''}</td>
-                      <td>{application.employment || '—'}</td>
-                      <td>{application.monthlyIncome ? `₱${Number(application.monthlyIncome).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
-                      <td>{application.moveInDate || '—'}</td>
-                      <td>
-                        <StatusPill status={application.status} />
-                        {application.reviewNotes && <div className="small text-muted mt-1">Manager: {application.reviewNotes}</div>}
-                        {application.ownerReviewNotes && <div className="small text-muted mt-1">Owner: {application.ownerReviewNotes}</div>}
-                      </td>
-                      <td>
-                        {application.status === 'Approved' && contracts.some((contract) =>
-                          String(contract.sourceApplication || '') === String(application.id)
-                          && ['Pending', 'Active'].includes(contract.status)
-                        ) ? (
-                          <span className="small text-muted">
-                            {contracts.some((contract) => String(contract.sourceApplication || '') === String(application.id) && contract.status === 'Active')
-                              ? 'Lease active'
-                              : 'Lease prepared · awaiting activation'}
-                          </span>
-                        ) : application.status === 'Approved' ? (
-                          <div className="d-flex flex-wrap gap-1">
-                            <Button size="sm" variant="primary" onClick={() => openLeaseForApplication(application)}>Create lease</Button>
-                            <Button size="sm" variant="outline-danger" onClick={() => handleApplicationReview(application, 'Rejected')}>Reject and release</Button>
-                          </div>
-                        ) : application.applicationApprovalMode === 'Owner' && application.status === 'Pending Owner Approval' ? (
-                          <span className="small text-muted">Awaiting owner decision</span>
-                        ) : application.applicationApprovalMode === 'Owner' && application.status === 'Submitted' ? (
-                          <Button size="sm" variant="outline-secondary" onClick={() => handleApplicationReview(application, 'Under Review')}>Begin review</Button>
-                        ) : application.applicationApprovalMode === 'Owner' && application.status === 'Under Review' ? (
-                          <div style={{ minWidth: 210 }}>
-                            <Form.Control
-                              as="textarea"
-                              rows={2}
-                              className="mb-2"
-                              aria-label={`Manager review notes for ${application.applicantName || 'applicant'}`}
-                              placeholder="Add review notes for the owner (optional)"
-                              value={managerReviewNotes[application.id] || ''}
-                              onChange={(event) => setManagerReviewNotes((current) => ({ ...current, [application.id]: event.target.value }))}
-                            />
-                            <Button size="sm" variant="primary" onClick={() => handleApplicationReview(application, 'Pending Owner Approval')}>Send to owner</Button>
-                          </div>
-                        ) : ['Submitted', 'Under Review'].includes(application.status) ? (
-                          <div className="d-flex flex-wrap gap-1">
-                            {application.status === 'Submitted' && <Button size="sm" variant="outline-secondary" onClick={() => handleApplicationReview(application, 'Under Review')}>Review</Button>}
-                            <Button size="sm" variant="outline-success" onClick={() => handleApplicationReview(application, 'Approved')}>Approve</Button>
-                            <Button size="sm" variant="outline-danger" onClick={() => handleApplicationReview(application, 'Rejected')}>Reject</Button>
-                          </div>
-                        ) : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                  {applications.length === 0 && <tr><td colSpan="7" className="pm-empty-row">No applications are linked to your managed properties yet. Agent-submitted applications appear here when the property is assigned to your account.</td></tr>}
-                </tbody>
-              </Table>
-            </div>
+            <ManagerProspectsSection
+              inquiries={inquiries}
+              applications={applications}
+              properties={properties}
+              contracts={contracts}
+              inquiryPageInfo={managerPages.inquiries || { count: 0, page: 1, pageCount: 1 }}
+              applicationPageInfo={managerPages.applications || { count: 0, page: 1, pageCount: 1 }}
+              onInquiryPageChange={(page) => loadManagerData('inquiries', true, page)}
+              onApplicationPageChange={(page) => loadManagerData('applications', true, page)}
+              onInquiryStatusChange={handleInquiryStatusChange}
+              onOpenLeaseForApplication={openLeaseForApplication}
+              onApplicationReview={handleApplicationReview}
+              managerReviewNotes={managerReviewNotes}
+              onReviewNotesChange={(applicationId, value) => setManagerReviewNotes((current) => ({ ...current, [applicationId]: value }))}
+            />
           </>
         )}
 
@@ -917,7 +931,21 @@ export default function ManagerDashboard() {
               <Form.Group className="mb-3"><Form.Label>Address</Form.Label><Form.Control value={editingProperty.address} onChange={(e) => setEditingProperty({ ...editingProperty, address: e.target.value })} required /></Form.Group>
               <Form.Group className="mb-3"><Form.Label>Property type</Form.Label><Form.Select value={editingProperty.propertyType} onChange={(e) => setEditingProperty({ ...editingProperty, propertyType: e.target.value })}>{PROPERTY_TYPES.map((type) => <option key={type}>{type}</option>)}</Form.Select></Form.Group>
               <Form.Group className="mb-3"><Form.Label>Status</Form.Label><Form.Select value={editingProperty.status} onChange={(e) => setEditingProperty({ ...editingProperty, status: e.target.value })}>{PROPERTY_STATUSES.map((status) => <option key={status}>{status}</option>)}</Form.Select></Form.Group>
-              <Form.Group><Form.Label>Monthly rate (₱)</Form.Label><Form.Control type="number" min="0" step="0.01" value={editingProperty.price} onChange={(e) => setEditingProperty({ ...editingProperty, price: e.target.value })} required /></Form.Group>
+              <Form.Group>
+                <Form.Label>Monthly base rate (₱)</Form.Label>
+                <Form.Control
+                  type="number" min="0.01" step="0.01" value={editingProperty.price}
+                  onChange={(e) => setEditingProperty({ ...editingProperty, price: e.target.value })}
+                  readOnly={!properties.find((property) => Number(property._id || property.id) === Number(editingProperty.id))?.managerUnitPricingAuthorized}
+                  required
+                />
+                {!properties.find((property) => Number(property._id || property.id) === Number(editingProperty.id))?.managerUnitPricingAuthorized && (
+                  <div className="d-flex flex-wrap align-items-center gap-2 mt-2">
+                    <Form.Text className="text-muted">The Owner must approve any rent change.</Form.Text>
+                    <Button type="button" size="sm" variant="outline-primary" onClick={() => openRentProposal(properties.find((property) => Number(property._id || property.id) === Number(editingProperty.id)), 'Property')}>Propose a different rate</Button>
+                  </div>
+                )}
+              </Form.Group>
             </Modal.Body>
             <Modal.Footer><Button variant="light" onClick={() => setShowPropertyEditModal(false)}>Cancel</Button><Button type="submit">Save changes</Button></Modal.Footer>
           </Form>}
@@ -935,7 +963,16 @@ export default function ManagerDashboard() {
               </Form.Group>
               <Form.Group className="mb-3">
                 <Form.Label className="pm-form-label">Monthly rent (₱)</Form.Label>
-                <Form.Control className="pm-input" type="number" min="0" step="0.01" value={unitData.monthlyRate} onChange={(e) => setUnitData({ ...unitData, monthlyRate: e.target.value })} required />
+                <Form.Control className="pm-input" type="number" min="0.01" step="0.01" value={unitData.monthlyRate} onChange={(e) => setUnitData({ ...unitData, monthlyRate: e.target.value })} readOnly={!managerCanSetUnitRate} required />
+                {!managerCanSetUnitRate && (
+                  <div className="d-flex flex-wrap align-items-center gap-2 mt-2">
+                    <Form.Text className="text-muted">
+                      {unitData.id ? 'Owner approval is needed to change this unit’s rent.' : 'New units use the Owner-approved base rate. You can propose a different rate after adding the unit.'}
+                    </Form.Text>
+                    {unitData.id && <Button type="button" size="sm" variant="outline-primary" onClick={() => openRentProposal(unitDataProperty, 'Unit', unitDataUnit)}>Propose rent change</Button>}
+                    {!unitData.id && <Button type="button" size="sm" variant="outline-primary" onClick={() => openRentProposal(unitDataProperty, 'Property')}>Propose base-rate change</Button>}
+                  </div>
+                )}
               </Form.Group>
               <Form.Group>
                 <Form.Label className="pm-form-label">Availability</Form.Label>
@@ -950,6 +987,35 @@ export default function ManagerDashboard() {
                 <Button variant="light" onClick={() => setShowUnitModal(false)}>Cancel</Button>
                 <Button variant="primary" type="submit">Save unit</Button>
               </div>
+            </Modal.Footer>
+          </Form>
+        </Modal>
+
+        <Modal show={showRentProposalModal} onHide={() => !savingRentProposal && setShowRentProposalModal(false)} centered dialogClassName="pm-modal">
+          <Modal.Header closeButton>
+            <Modal.Title>Propose a rent change</Modal.Title>
+          </Modal.Header>
+          <Form onSubmit={handleRentProposalSubmit}>
+            <Modal.Body>
+              <p className="text-muted">
+                {rentProposalTarget?.property?.title} · {rentProposalTarget?.targetKind === 'Unit' ? `Unit ${rentProposalTarget?.unit?.unitNumber}` : 'Property base rate'}
+              </p>
+              <div className="small text-muted mb-3">
+                Current rent: ₱{Number(rentProposalTarget?.currentRate || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per month. It stays in effect unless the Owner approves this proposal.
+              </div>
+              <Form.Group className="mb-3">
+                <Form.Label>Proposed monthly rent (₱)</Form.Label>
+                <Form.Control type="number" min="0.01" step="0.01" value={rentProposalRate} onChange={(event) => setRentProposalRate(event.target.value)} required />
+              </Form.Group>
+              <Form.Group>
+                <Form.Label>Reason for the change</Form.Label>
+                <Form.Control as="textarea" rows={4} maxLength={2000} value={rentProposalReason} onChange={(event) => setRentProposalReason(event.target.value)} placeholder="Explain why you recommend this rent amount." required />
+                <Form.Text className="text-muted">The Owner will review this explanation with the proposed amount.</Form.Text>
+              </Form.Group>
+            </Modal.Body>
+            <Modal.Footer>
+              <Button type="button" variant="outline-secondary" onClick={() => setShowRentProposalModal(false)} disabled={savingRentProposal}>Cancel</Button>
+              <Button type="submit" disabled={savingRentProposal}>{savingRentProposal ? 'Sending…' : 'Send to Owner'}</Button>
             </Modal.Footer>
           </Form>
         </Modal>

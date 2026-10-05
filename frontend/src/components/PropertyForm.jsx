@@ -34,7 +34,7 @@ export default function PropertyForm({ onPropertyCreated }) {
         setOwners(users.filter(u => u.isActive && u.role?.toLowerCase() === 'owner'));
         setManagers(users.filter(u => u.isActive && u.role?.toLowerCase() === 'property manager'));
         setAgents(users.filter(u => u.isActive && u.role?.toLowerCase() === 'agent'));
-      } catch (err) {
+      } catch {
         setError('Failed to load owners/managers list.');
       }
     };

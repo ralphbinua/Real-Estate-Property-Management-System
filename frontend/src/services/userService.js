@@ -1,4 +1,8 @@
 import api from './api';
+import { fetchPage } from './pagination';
+
+export const fetchUsersPage = (params) => fetchPage('/users/', params);
+export const fetchSystemActivityPage = (params) => fetchPage('/users/activity/', params);
 
 export const fetchUsers = async () => {
   const response = await api.get('/users/');

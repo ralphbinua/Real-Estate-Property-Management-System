@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Table, Form, Card, Alert, Spinner } from 'react-bootstrap';
-import { fetchMaintenanceRequests, updateMaintenanceStatus } from '../services/maintenanceService';
+import { fetchMaintenanceRequestsPage, updateMaintenanceStatus } from '../services/maintenanceService';
+import usePaginatedCollection from '../hooks/usePaginatedCollection';
+import CollectionPagination from './CollectionPagination';
 
 const STATUS_PILL_CLASS = {
   open: 'pm-pill-pending',
@@ -21,27 +23,9 @@ function StatusPill({ status }) {
 }
 
 export default function AdminMaintenanceManager() {
-  const [requests, setRequests] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { items: requests, count, page, pageCount, loading, error: loadError, setPage, refresh } = usePaginatedCollection(fetchMaintenanceRequestsPage);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-
-  const loadRequests = async () => {
-    setLoading(true);
-    try {
-      const data = await fetchMaintenanceRequests();
-      setRequests(Array.isArray(data) ? data : data.results || []);
-      setError('');
-    } catch (err) {
-      setError('Failed to load maintenance tickets.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadRequests();
-  }, []);
 
   const handleStatusChange = async (id, newStatus) => {
     setError('');
@@ -49,8 +33,8 @@ export default function AdminMaintenanceManager() {
     try {
       await updateMaintenanceStatus(id, newStatus);
       setSuccess('Maintenance status updated.');
-      loadRequests();
-    } catch (err) {
+      refresh();
+    } catch {
       setError('Failed to update ticket status.');
     }
   };
@@ -61,7 +45,7 @@ export default function AdminMaintenanceManager() {
         System-Wide Maintenance Request Queue
       </Card.Header>
       <Card.Body className="p-0">
-        {error && <Alert variant="danger" className="m-3" dismissible onClose={() => setError('')}>{error}</Alert>}
+        {(error || loadError) && <Alert variant="danger" className="m-3" dismissible onClose={() => setError('')}>{error || loadError}</Alert>}
         {success && <Alert variant="success" className="m-3" dismissible onClose={() => setSuccess('')}>{success}</Alert>}
 
         {loading ? (
@@ -130,6 +114,7 @@ export default function AdminMaintenanceManager() {
             </tbody>
           </Table>
         )}
+        {!loading && <CollectionPagination count={count} page={page} pageCount={pageCount} onPageChange={setPage} />}
       </Card.Body>
     </Card>
   );

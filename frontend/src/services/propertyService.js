@@ -1,4 +1,7 @@
 import api from './api';
+import { fetchPage } from './pagination';
+
+export const fetchPropertiesPage = (params) => fetchPage('/properties/', params);
 
 export const fetchProperties = async () => {
   const response = await api.get('/properties/');
@@ -30,7 +33,29 @@ export const setLeaseTerminationAuthority = async (id, authorityData) => {
   return response.data;
 };
 
+export const setUnitPricingAuthority = async (id, authorityData) => {
+  const response = await api.patch(`/properties/${id}/rent-pricing-authority/`, authorityData);
+  return response.data;
+};
+
 export const setApplicationApprovalPolicy = async (id, policyData) => {
   const response = await api.patch(`/properties/${id}/approval-policy/`, policyData);
+  return response.data;
+};
+
+export const fetchRentChangeRequests = async () => {
+  const response = await api.get('/properties/rent-change-requests/');
+  return Array.isArray(response.data) ? response.data : response.data.results || [];
+};
+
+export const fetchRentChangeRequestsPage = (params) => fetchPage('/properties/rent-change-requests/', params);
+
+export const proposeRentChange = async (proposal) => {
+  const response = await api.post('/properties/rent-change-requests/', proposal);
+  return response.data;
+};
+
+export const decideRentChange = async (id, decision) => {
+  const response = await api.patch(`/properties/rent-change-requests/${id}/decision/`, decision);
   return response.data;
 };

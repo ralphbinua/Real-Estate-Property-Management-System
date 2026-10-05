@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Form, Button } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import './Login.css';
 
 export default function Login() {
@@ -31,7 +31,7 @@ export default function Login() {
       } else {
         setError(result.message || 'Invalid credentials.');
       }
-    } catch (err) {
+    } catch {
       setError('An unexpected connection error occurred.');
     } finally {
       setLoading(false);

@@ -29,5 +29,6 @@ urlpatterns = [
     path('api/invoices/', include('billing.urls')),
     path('api/payments/', include('billing.payment_urls')),
     path('api/maintenance/', include('maintenance.urls')),
+    path('api/notifications/', include('notifications.urls')),
     path('api/owner/portfolio/', OwnerPortfolioView.as_view(), name='owner_portfolio'),
 ]

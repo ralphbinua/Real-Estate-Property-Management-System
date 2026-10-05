@@ -63,7 +63,7 @@ class ContractSerializer(serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if self.instance and self.instance.status != 'Pending':
+        if isinstance(self.instance, Contract) and self.instance.status != 'Pending':
             for field_name in (
                 'property', 'unit', 'tenant', 'startDate', 'endDate', 'rentAmount',
                 'rentDueDay', 'depositAmount', 'manualLeaseReason', 'manualLeaseReference',

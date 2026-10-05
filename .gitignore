@@ -7,4 +7,9 @@ __pycache__/
 # Node / React
 node_modules/
 dist/
+.pnpm-store/
+# Local agent planning notes; keep them in the checkout, out of commits.
+.codex/
+.superpowers/
+docs/superpowers/
 .env

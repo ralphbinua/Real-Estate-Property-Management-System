@@ -1,4 +1,9 @@
 import api from './api';
+import { fetchPage } from './pagination';
+
+export const fetchInvoicesPage = (params) => fetchPage('/invoices/', params);
+export const fetchTenantInvoicesPage = (tenantId, params = {}) => fetchPage('/invoices/tenant/', { ...params, tenantId });
+export const fetchPaymentsPage = (params) => fetchPage('/payments/', params);
 
 export const fetchInvoices = async () => {
   const response = await api.get('/invoices/');

@@ -1,10 +1,21 @@
 from rest_framework import serializers
 from django.utils import timezone
-from .models import Property, Unit, PropertyInquiry, RentalApplication
+from .models import Property, Unit, PropertyInquiry, RentalApplication, UnitPricingAuthorization, UnitPriceChangeRequest
 from users.serializers import UserSerializer
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
+
+
+def manager_has_unit_pricing_authority(property_obj, manager):
+    if not property_obj or not manager or not property_obj.owner_id or property_obj.manager_id != manager.pk:
+        return False
+    return UnitPricingAuthorization.objects.filter(
+        property=property_obj,
+        manager=manager,
+        granted_by_id=property_obj.owner_id,
+        is_active=True,
+    ).exists()
 
 class UnitSerializer(serializers.ModelSerializer):
     _id = serializers.IntegerField(source='id', read_only=True)
@@ -49,6 +60,21 @@ class UnitManagementSerializer(serializers.ModelSerializer):
         if user and getattr(user, 'role', None) == User.Role.PROPERTY_MANAGER:
             if property_obj and property_obj.manager_id != user.id:
                 raise serializers.ValidationError({'property': 'You can only manage units on properties assigned to you.'})
+            requested_rate = attrs.get('monthly_rate', getattr(self.instance, 'monthly_rate', None))
+            has_pricing_authority = manager_has_unit_pricing_authority(property_obj, user)
+            if self.instance and requested_rate != self.instance.monthly_rate and not has_pricing_authority:
+                raise serializers.ValidationError({
+                    'monthlyRate': 'The Owner must approve this rent change. Submit a rent-change request, or ask the Owner to delegate pricing authority.'
+                })
+            if not self.instance and not has_pricing_authority:
+                owner_set_rate = property_obj.price if property_obj else None
+                if requested_rate is None or owner_set_rate is None or requested_rate != owner_set_rate:
+                    raise serializers.ValidationError({
+                        'monthlyRate': 'Without delegated pricing authority, a new unit must use the Owner-approved property rate.'
+                    })
+        if user and getattr(user, 'role', None) == User.Role.OWNER:
+            if property_obj and property_obj.owner_id != user.id:
+                raise serializers.ValidationError({'property': 'You can only manage units on properties you own.'})
         if property_obj and unit_number and Unit.objects.filter(property=property_obj, unit_number=unit_number).exclude(pk=getattr(self.instance, 'pk', None)).exists():
             raise serializers.ValidationError({'unitNumber': 'This unit number is already used on the selected property.'})
         requested_status = attrs.get('status', getattr(self.instance, 'status', 'Available'))
@@ -89,6 +115,9 @@ class PropertySerializer(serializers.ModelSerializer):
     managerLeaseTerminationAuthorized = serializers.SerializerMethodField()
     leaseTerminationAgreementReference = serializers.SerializerMethodField()
     leaseTerminationAuthorizedAt = serializers.SerializerMethodField()
+    managerUnitPricingAuthorized = serializers.SerializerMethodField()
+    unitPricingAgreementReference = serializers.SerializerMethodField()
+    unitPricingAuthorizedAt = serializers.SerializerMethodField()
     approvalPolicyHistory = serializers.SerializerMethodField()
     instructionNote = serializers.CharField(write_only=True, required=False, allow_blank=True, trim_whitespace=True)
     instructionReference = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=500, trim_whitespace=True)
@@ -117,7 +146,8 @@ class PropertySerializer(serializers.ModelSerializer):
             'ownerDetails', 'managerDetails', 'managerLeaseSigningAuthorized',
             'leaseSigningAgreementReference', 'leaseSigningAuthorizedAt',
             'managerLeaseTerminationAuthorized', 'leaseTerminationAgreementReference',
-            'leaseTerminationAuthorizedAt', 'approvalPolicyHistory',
+            'leaseTerminationAuthorizedAt', 'managerUnitPricingAuthorized',
+            'unitPricingAgreementReference', 'unitPricingAuthorizedAt', 'approvalPolicyHistory',
             'instructionNote', 'instructionReference',
         ]
 
@@ -165,12 +195,38 @@ class PropertySerializer(serializers.ModelSerializer):
         authorization = self._active_termination_authorization(instance)
         return authorization.granted_at if authorization else None
 
+    def _active_unit_pricing_authorization(self, instance):
+        authorization = getattr(instance, 'unit_pricing_authorization', None)
+        if (
+            not authorization
+            or not authorization.is_active
+            or authorization.manager_id != instance.manager_id
+            or authorization.granted_by_id != instance.owner_id
+        ):
+            return None
+        return authorization
+
+    def get_managerUnitPricingAuthorized(self, instance):
+        return self._active_unit_pricing_authorization(instance) is not None
+
+    def get_unitPricingAgreementReference(self, instance):
+        authorization = self._active_unit_pricing_authorization(instance)
+        return authorization.agreement_reference if authorization else ''
+
+    def get_unitPricingAuthorizedAt(self, instance):
+        authorization = self._active_unit_pricing_authorization(instance)
+        return authorization.granted_at if authorization else None
+
     def get_approvalPolicyHistory(self, instance):
         request = self.context.get('request')
         user = getattr(request, 'user', None)
         if not user or user.role not in (User.Role.ADMIN, User.Role.OWNER):
             return []
-        changes = instance.approval_policy_changes.select_related('changed_by')[:20]
+        prefetched_changes = getattr(instance, 'prefetched_approval_policy_changes', None)
+        if prefetched_changes is not None:
+            changes = prefetched_changes[:20]
+        else:
+            changes = instance.approval_policy_changes.select_related('changed_by')[:20]
         return [{
             'previousMode': change.previous_mode,
             'newMode': change.new_mode,
@@ -208,15 +264,22 @@ class PropertySerializer(serializers.ModelSerializer):
             data.pop('managerLeaseTerminationAuthorized', None)
             data.pop('leaseTerminationAgreementReference', None)
             data.pop('leaseTerminationAuthorizedAt', None)
+            data.pop('managerUnitPricingAuthorized', None)
+            data.pop('unitPricingAgreementReference', None)
+            data.pop('unitPricingAuthorizedAt', None)
             data.pop('approvalPolicyHistory', None)
         elif user and user.role == User.Role.PROPERTY_MANAGER:
             data.pop('leaseSigningAgreementReference', None)
             data.pop('leaseSigningAuthorizedAt', None)
             data.pop('leaseTerminationAgreementReference', None)
             data.pop('leaseTerminationAuthorizedAt', None)
+            data.pop('unitPricingAgreementReference', None)
+            data.pop('unitPricingAuthorizedAt', None)
         elif user and user.role == User.Role.OWNER and instance.owner_id != user.pk:
             data.pop('leaseSigningAgreementReference', None)
             data.pop('leaseSigningAuthorizedAt', None)
+            data.pop('unitPricingAgreementReference', None)
+            data.pop('unitPricingAuthorizedAt', None)
         return data
 
     def validate_units(self, units):
@@ -258,6 +321,12 @@ class PropertySerializer(serializers.ModelSerializer):
             ).exists()
             if has_approved_application and requested_status != 'Pending':
                 raise serializers.ValidationError({'status': 'This property is reserved for an approved rental application. Convert or reject that application before releasing it.'})
+        if actor and actor.role == User.Role.PROPERTY_MANAGER and self.instance:
+            requested_price = attrs.get('price', self.instance.price)
+            if requested_price != self.instance.price and not manager_has_unit_pricing_authority(self.instance, actor):
+                raise serializers.ValidationError({
+                    'price': 'The Owner must approve this rent change. Submit a rent-change request, or ask the Owner to delegate pricing authority.'
+                })
         return super().validate(attrs)
 
     def create(self, validated_data):
@@ -374,7 +443,11 @@ class RentalApplicationSerializer(serializers.ModelSerializer):
         user = getattr(request, 'user', None)
         can_view_admin_reference = bool(user and user.role in (User.Role.ADMIN, User.Role.OWNER))
         history = []
-        for decision in instance.decisions.select_related('actor').all():
+        if 'decisions' in getattr(instance, '_prefetched_objects_cache', {}):
+            decisions = instance.decisions.all()
+        else:
+            decisions = instance.decisions.select_related('actor').all()
+        for decision in decisions:
             item = {
                 'fromStatus': decision.from_status,
                 'toStatus': decision.to_status,
@@ -449,3 +522,87 @@ class RentalApplicationSerializer(serializers.ModelSerializer):
         if status not in transitions.get(self.instance.status, set()):
             raise serializers.ValidationError(f'An application in {self.instance.status} cannot move to {status}.')
         return status
+
+
+class UnitPriceChangeRequestSerializer(serializers.ModelSerializer):
+    propertyId = serializers.PrimaryKeyRelatedField(
+        source='property', queryset=Property.objects.filter(is_deleted=False),
+    )
+    propertyTitle = serializers.CharField(source='property.title', read_only=True)
+    targetKind = serializers.ChoiceField(source='target_kind', choices=UnitPriceChangeRequest.TARGET_CHOICES)
+    unitId = serializers.PrimaryKeyRelatedField(
+        source='unit', queryset=Unit.objects.filter(property__is_deleted=False),
+        required=False, allow_null=True,
+    )
+    targetLabel = serializers.CharField(read_only=True)
+    currentRate = serializers.DecimalField(source='current_rate', max_digits=12, decimal_places=2, read_only=True)
+    proposedRate = serializers.DecimalField(source='proposed_rate', max_digits=12, decimal_places=2, min_value=0.01)
+    decisionNote = serializers.CharField(source='decision_note', read_only=True)
+    proposedByName = serializers.SerializerMethodField()
+    decidedByName = serializers.SerializerMethodField()
+    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
+    decidedAt = serializers.DateTimeField(source='decided_at', read_only=True)
+
+    class Meta:
+        model = UnitPriceChangeRequest
+        fields = [
+            'id', 'propertyId', 'propertyTitle', 'targetKind', 'unitId', 'targetLabel',
+            'currentRate', 'proposedRate', 'reason', 'status', 'decisionNote',
+            'proposedByName', 'decidedByName', 'createdAt', 'decidedAt',
+        ]
+        read_only_fields = [
+            'id', 'propertyTitle', 'targetLabel', 'currentRate', 'status', 'decisionNote',
+            'proposedByName', 'decidedByName', 'createdAt', 'decidedAt',
+        ]
+
+    def get_proposedByName(self, instance):
+        user = instance.proposed_by
+        return (user.get_full_name() or user.email) if user else 'Former user'
+
+    def get_decidedByName(self, instance):
+        user = instance.decided_by
+        return (user.get_full_name() or user.email) if user else ''
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None)
+        property_obj = attrs['property']
+        target_kind = attrs['target_kind']
+        unit = attrs.get('unit')
+        proposed_rate = attrs['proposed_rate']
+        if not actor or actor.role != User.Role.PROPERTY_MANAGER:
+            raise serializers.ValidationError({'detail': 'Only a Property Manager may submit a rent-change request.'})
+        if property_obj.manager_id != actor.pk:
+            raise serializers.ValidationError({'propertyId': 'You may request rent changes only for properties assigned to you.'})
+        if not property_obj.owner_id:
+            raise serializers.ValidationError({'propertyId': 'An Owner must be assigned before a rent change can be submitted.'})
+        if manager_has_unit_pricing_authority(property_obj, actor):
+            raise serializers.ValidationError({'detail': 'You already have Owner-authorized pricing access for this property. Update the rate directly.'})
+        if target_kind == 'Unit':
+            if not unit:
+                raise serializers.ValidationError({'unitId': 'Choose the unit whose rent should change.'})
+            if unit.property_id != property_obj.pk:
+                raise serializers.ValidationError({'unitId': 'The selected unit does not belong to this property.'})
+            current_rate = unit.monthly_rate
+        else:
+            if unit:
+                raise serializers.ValidationError({'unitId': 'A property base-rate request cannot target a unit.'})
+            current_rate = property_obj.price
+        if proposed_rate == current_rate:
+            raise serializers.ValidationError({'proposedRate': 'Enter a rent amount different from the current rate.'})
+        reason = str(attrs.get('reason') or '').strip()
+        if not reason:
+            raise serializers.ValidationError({'reason': 'Explain why this rent change is being requested.'})
+        if len(reason) > 2000:
+            raise serializers.ValidationError({'reason': 'The explanation cannot exceed 2,000 characters.'})
+        attrs['reason'] = reason
+
+        pending = UnitPriceChangeRequest.objects.filter(
+            property=property_obj,
+            target_kind=target_kind,
+            unit=unit if target_kind == 'Unit' else None,
+            status='Pending',
+        )
+        if pending.exists():
+            raise serializers.ValidationError({'detail': 'There is already a pending rent-change request for this rate.'})
+        return attrs

@@ -1,8 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Container, Row, Col, Card, Form, Spinner, Button, Badge, Modal, Table } from 'react-bootstrap';
 import { fetchProperties } from '../services/propertyService';
-import { createInquiry, fetchInquiries, updateInquiry } from '../services/inquiryService';
-import { createApplication, fetchApplications } from '../services/applicationService';
+import { createInquiry, fetchInquiriesPage, updateInquiry } from '../services/inquiryService';
+import { createApplication, fetchApplicationsPage } from '../services/applicationService';
+import CollectionPagination from '../components/CollectionPagination';
+import useNotificationDeepLink from '../hooks/useNotificationDeepLink';
 import './AgentDashboard.css';
 
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
@@ -55,6 +57,8 @@ export default function AgentDashboard() {
   const [properties, setProperties] = useState([]);
   const [inquiries, setInquiries] = useState([]);
   const [applications, setApplications] = useState([]);
+  const [inquiryPageInfo, setInquiryPageInfo] = useState({ count: 0, page: 1, pageCount: 1 });
+  const [applicationPageInfo, setApplicationPageInfo] = useState({ count: 0, page: 1, pageCount: 1 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -83,34 +87,47 @@ export default function AgentDashboard() {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const loadedAgentSections = useRef(new Set());
+
+  const loadAgentData = useCallback(async (section = activeSection, force = true, page = 1) => {
+    const sectionKey = ['overview', 'listings'].includes(section) ? 'properties' : section;
+    const fetcher = {
+      properties: () => fetchProperties(),
+      inquiries: (page) => fetchInquiriesPage({ page }),
+      applications: (page) => fetchApplicationsPage({ page }),
+    }[sectionKey];
+    if (!fetcher || (!force && loadedAgentSections.current.has(sectionKey))) return;
+    try {
+      const data = await fetcher(page);
+      const rows = Array.isArray(data) ? data : data?.results || [];
+      if (sectionKey === 'properties') setProperties(rows);
+      if (sectionKey === 'inquiries') {
+        setInquiries(rows);
+        setInquiryPageInfo({ count: data.count, page, pageCount: Math.max(1, Math.ceil(data.count / 50)) });
+      }
+      if (sectionKey === 'applications') {
+        setApplications(rows);
+        setApplicationPageInfo({ count: data.count, page, pageCount: Math.max(1, Math.ceil(data.count / 50)) });
+      }
+      loadedAgentSections.current.add(sectionKey);
+      setError('');
+    } catch {
+      setError(`Could not load ${sectionKey}. Try opening the section again.`);
+    } finally {
+      if (sectionKey === 'properties') setLoading(false);
+    }
+  }, [activeSection]);
 
   useEffect(() => {
     const handleWorkspaceNavigation = (event) => setActiveSection(event.detail);
     window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
     return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
   }, []);
-
-  const loadAgentData = async () => {
-    setLoading(true);
-    try {
-      const [propData, inquiryData] = await Promise.all([
-        fetchProperties(),
-        fetchInquiries(),
-      ]);
-      setProperties(Array.isArray(propData) ? propData : []);
-      setInquiries(Array.isArray(inquiryData) ? inquiryData : []);
-      setApplications(await fetchApplications());
-      setError('');
-    } catch (err) {
-      setError('Failed to fetch assigned property listings and inquiries.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useNotificationDeepLink('agent');
 
   useEffect(() => {
-    loadAgentData();
-  }, []);
+    void Promise.resolve().then(() => loadAgentData(activeSection, false));
+  }, [activeSection, loadAgentData]);
 
   const filteredProperties = useMemo(() => {
     const q = search.toLowerCase();
@@ -183,8 +200,10 @@ export default function AgentDashboard() {
       setInquiries((items) => viewingData.inquiryId
         ? items.map((item) => item.id === savedInquiry.id ? savedInquiry : item)
         : [savedInquiry, ...items.filter((item) => item.id !== savedInquiry.id)]);
+      loadedAgentSections.current.add('inquiries');
       setSuccess(viewingData.inquiryId ? 'Viewing updated successfully.' : 'Viewing scheduled successfully.');
       setShowViewingModal(false);
+      await loadAgentData('inquiries', true, viewingData.inquiryId ? inquiryPageInfo.page : 1);
       setActiveSection('inquiries');
       window.dispatchEvent(new CustomEvent('workspace:navigate', { detail: 'inquiries' }));
     } catch (err) {
@@ -224,9 +243,10 @@ export default function AgentDashboard() {
       });
       setSuccess(`Rental application submitted for ${selectedInquiry.prospect_name}.`);
       setShowApplicationModal(false);
-      const [updatedInquiries, updatedApplications] = await Promise.all([fetchInquiries(), fetchApplications()]);
-      setInquiries(updatedInquiries);
-      setApplications(updatedApplications);
+      await Promise.all([
+        loadAgentData('inquiries', true, inquiryPageInfo.page),
+        loadAgentData('applications', true, 1),
+      ]);
     } catch (err) {
       const apiError = err.response?.data;
       const fieldError = apiError && typeof apiError === 'object'
@@ -460,7 +480,7 @@ export default function AgentDashboard() {
                   <h2>Prospect pipeline</h2>
                   <p>Manage inquiries, scheduled viewings, and rental applications.</p>
                 </div>
-                <Badge className="pm-prospects-count">{inquiries.length} {inquiries.length === 1 ? 'prospect' : 'prospects'}</Badge>
+                <Badge className="pm-prospects-count">{inquiryPageInfo.count} {inquiryPageInfo.count === 1 ? 'prospect' : 'prospects'}</Badge>
               </div>
               <Table responsive className="pm-table mb-0">
                 <thead><tr><th>Prospect</th><th>Property / unit</th><th>Viewing appointment</th><th>Notes</th><th>Status</th><th>Application</th><th>Actions</th></tr></thead>
@@ -522,10 +542,11 @@ export default function AgentDashboard() {
                   {inquiries.length === 0 && <tr><td colSpan="7" className="pm-empty-row"><strong>No prospects yet</strong><span>New inquiries and scheduled appointments will appear here.</span></td></tr>}
                 </tbody>
               </Table>
+              <CollectionPagination count={inquiryPageInfo.count} page={inquiryPageInfo.page} pageCount={inquiryPageInfo.pageCount} onPageChange={(page) => loadAgentData('inquiries', true, page)} />
             </div>
 
             <div className="pm-panel mt-2" data-workspace-section="applications">
-              <div className="pm-panel-header">Rental applications ({applications.length})</div>
+              <div className="pm-panel-header">Rental applications ({applicationPageInfo.count})</div>
               <Table responsive className="pm-table mb-0">
                 <thead><tr><th>Applicant</th><th>Property / unit</th><th>Employment</th><th>Monthly income</th><th>Move-in date</th><th>Status</th></tr></thead>
                 <tbody>
@@ -542,6 +563,7 @@ export default function AgentDashboard() {
                   {applications.length === 0 && <tr><td colSpan="6" className="pm-empty-row">No rental applications have been started.</td></tr>}
                 </tbody>
               </Table>
+              <CollectionPagination count={applicationPageInfo.count} page={applicationPageInfo.page} pageCount={applicationPageInfo.pageCount} onPageChange={(page) => loadAgentData('applications', true, page)} />
             </div>
           </>
         )}

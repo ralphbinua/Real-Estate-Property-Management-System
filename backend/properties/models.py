@@ -270,10 +270,97 @@ class LeaseTerminationAuthorization(models.Model):
         return f"Lease termination authority for {self.property.title} ({state})"
 
 
+class UnitPricingAuthorization(models.Model):
+    property = models.OneToOneField(
+        Property,
+        on_delete=models.CASCADE,
+        related_name='unit_pricing_authorization',
+    )
+    manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='unit_pricing_authorizations',
+    )
+    agreement_reference = models.CharField(max_length=500)
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='granted_unit_pricing_authorizations',
+    )
+    granted_at = models.DateTimeField(default=timezone.now)
+    is_active = models.BooleanField(default=True)
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='revoked_unit_pricing_authorizations',
+    )
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        state = 'active' if self.is_active else 'revoked'
+        return f"Rent pricing authority for {self.property.title} ({state})"
+
+
+class UnitPriceChangeRequest(models.Model):
+    TARGET_CHOICES = [
+        ('Property', 'Property base rate'),
+        ('Unit', 'Unit'),
+    ]
+    STATUS_CHOICES = [
+        ('Pending', 'Pending Owner review'),
+        ('Approved', 'Approved'),
+        ('Rejected', 'Rejected'),
+        ('Cancelled', 'Cancelled — rate or unit changed'),
+    ]
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='rent_change_requests')
+    target_kind = models.CharField(max_length=20, choices=TARGET_CHOICES, default='Unit')
+    unit = models.ForeignKey(
+        Unit,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='rent_change_requests',
+    )
+    target_label = models.CharField(max_length=120)
+    current_rate = models.DecimalField(max_digits=12, decimal_places=2)
+    proposed_rate = models.DecimalField(max_digits=12, decimal_places=2)
+    reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
+    decision_note = models.TextField(blank=True, default='')
+    proposed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name='proposed_unit_price_changes',
+    )
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='decided_unit_price_changes',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f"Rent change for {self.property.title} — {self.target_label} ({self.status})"
+
+
 class PropertyAuthorityEvent(models.Model):
     AUTHORITY_CHOICES = [
         ('Lease signing', 'Lease signing'),
         ('Lease termination', 'Lease termination'),
+        ('Rent pricing', 'Rent pricing'),
     ]
     ACTION_CHOICES = [
         ('Granted', 'Granted'),
