@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Container, Table, Spinner, Badge, Button, Form, Modal, Row, Col } from 'react-bootstrap';
+import { Container, Spinner, Button, Form, Modal, Row, Col } from 'react-bootstrap';
+import Table from '../components/ResponsiveTable.jsx';
 import { fetchOwnerPortfolio, fetchOwnerPortfolioPage } from '../services/ownerService';
 import { fetchPaymentsPage } from '../services/invoiceService';
 import { fetchApplicationsPage, reviewApplication } from '../services/applicationService';
@@ -10,6 +11,8 @@ import {
   setUnitPricingAuthority, setApplicationApprovalPolicy, decideRentChange,
 } from '../services/propertyService';
 import { activateContract, terminateContract } from '../services/contractService';
+import DashboardHeader from '../components/DashboardHeader';
+import PaymentAcknowledgmentButton from '../components/PaymentAcknowledgmentButton';
 import './OwnerDashboard.css';
 
 const PILL_CLASS = {
@@ -647,19 +650,9 @@ export default function OwnerDashboard() {
   return (
     <div className="pm-owner" data-active-section={activeSection}>
       <Container>
-        {/* Header */}
-        <div className="pm-header" id="overview">
-          <div>
-            <h1 className="pm-title">Owner Portfolio Overview</h1>
-            <p className="pm-subtitle">
-              Register properties you own and monitor occupancy, leases, maintenance, and rental income
-            </p>
-          </div>
-          <div className="d-flex align-items-center gap-2">
-            <Button variant="dark" onClick={() => setShowPropertyModal(true)}>Add property</Button>
-            <Badge bg="dark" className="px-3 py-2 fs-6">Owner</Badge>
-          </div>
-        </div>
+        <DashboardHeader role="owner" section={activeSection} overviewTitle="Owner Portfolio Overview" overviewDescription="Register properties you own and monitor occupancy, leases, maintenance, and rental income.">
+          {(activeSection === 'overview' || activeSection === 'portfolio') && <Button variant="dark" onClick={() => setShowPropertyModal(true)}>Add property</Button>}
+        </DashboardHeader>
 
         {error && (
           <div className="pm-alert pm-alert-error" role="alert">
@@ -682,7 +675,7 @@ export default function OwnerDashboard() {
         ) : (
           <>
             {/* Metrics Strip */}
-            <div className="pm-metrics">
+            <div className="pm-metrics" data-workspace-section="overview">
               <div className="pm-metric">
                 <span className="pm-metric-label">Owned properties</span>
                 <span className="pm-metric-value">{metrics.totalOwned}</span>
@@ -1263,8 +1256,8 @@ export default function OwnerDashboard() {
                     </Table>
 
                     <h6 className="fw-bold mb-3">Payment history</h6>
-                    <Table responsive className="pm-table mb-0">
-                      <thead><tr><th>Property</th><th>Tenant</th><th>Payment date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th><th>Review note</th></tr></thead>
+                    <Table responsive className="pm-table pm-payment-history mb-0">
+                      <thead><tr><th>Property</th><th>Tenant</th><th>Payment date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th><th>Details</th></tr></thead>
                       <tbody>
                         {portfolio.payments.map((payment) => (
                           <tr key={payment.id}>
@@ -1275,7 +1268,7 @@ export default function OwnerDashboard() {
                             <td>{payment.paymentMethod || '—'}</td>
                             <td>{payment.referenceNumber || '—'}</td>
                             <td><StatusPill status={payment.status} /></td>
-                            <td>{payment.rejectionReason || payment.reversalReason || '—'}</td>
+                            <td>{payment.status === 'Verified' ? <PaymentAcknowledgmentButton payment={payment} /> : payment.rejectionReason || payment.reversalReason || '—'}</td>
                           </tr>
                         ))}
                         {portfolio.payments.length === 0 && <tr><td colSpan="8" className="text-center text-muted py-4">No payment transactions recorded for your properties.</td></tr>}

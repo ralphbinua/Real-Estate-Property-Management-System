@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Container, Row, Col, Card, Form, Spinner, Button, Badge, Modal, Table } from 'react-bootstrap';
+import { Container, Row, Col, Card, Form, Spinner, Button, Badge, Modal } from 'react-bootstrap';
+import Table from '../components/ResponsiveTable.jsx';
 import { fetchProperties } from '../services/propertyService';
 import { createInquiry, fetchInquiriesPage, updateInquiry } from '../services/inquiryService';
 import { createApplication, fetchApplicationsPage } from '../services/applicationService';
 import CollectionPagination from '../components/CollectionPagination';
 import useNotificationDeepLink from '../hooks/useNotificationDeepLink';
+import DashboardHeader from '../components/DashboardHeader';
 import './AgentDashboard.css';
 
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
@@ -281,15 +283,7 @@ export default function AgentDashboard() {
   return (
     <div className="pm-agent" data-active-section={activeSection}>
       <Container>
-        {/* Header */}
-        <div className="pm-header" id="overview">
-          <div>
-            <h1 className="pm-title">Agent Property Directory</h1>
-            <p className="pm-subtitle">
-              Browse real-time listings, inspect unit pricing, and schedule viewings for clients
-            </p>
-          </div>
-        </div>
+        <DashboardHeader role="agent" section={activeSection} overviewTitle="Agent Property Directory" overviewDescription="Browse assigned listings, inspect unit pricing, and schedule viewings." />
 
         {error && (
           <div className="pm-alert pm-alert-error" role="alert">

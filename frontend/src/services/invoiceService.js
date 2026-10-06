@@ -5,18 +5,13 @@ export const fetchInvoicesPage = (params) => fetchPage('/invoices/', params);
 export const fetchTenantInvoicesPage = (tenantId, params = {}) => fetchPage('/invoices/tenant/', { ...params, tenantId });
 export const fetchPaymentsPage = (params) => fetchPage('/payments/', params);
 
+export const fetchPaymentAcknowledgment = async (paymentId) => {
+  const response = await api.get(`/payments/${paymentId}/acknowledgment/`, { responseType: 'blob' });
+  return response.data;
+};
+
 export const fetchInvoices = async () => {
   const response = await api.get('/invoices/');
-  return response.data;
-};
-
-export const fetchTenantInvoices = async (tenantId) => {
-  const response = await api.get(`/invoices/tenant/?tenantId=${tenantId}`);
-  return response.data;
-};
-
-export const fetchPayments = async (params = {}) => {
-  const response = await api.get('/payments/', { params });
   return response.data;
 };
 

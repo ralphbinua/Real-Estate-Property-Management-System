@@ -8,6 +8,7 @@ from rest_framework.test import APITestCase
 from billing.models import Invoice, Payment
 from contracts.models import Contract
 from maintenance.models import MaintenanceRequest
+from notifications.models import Notification
 from .models import Property, PropertyInquiry, RentalApplication, Unit
 
 
@@ -201,6 +202,180 @@ class RentalLifecycleApiTests(APITestCase):
         self.assertEqual(self.unit.status, 'Available')
         self.assertIsNone(self.unit.tenant_id)
         self.assertTrue(Payment.objects.filter(pk=payment.pk).exists())
+
+
+    def test_new_applicant_account_through_delegated_activation_and_rent_collection(self):
+        # No Tenant account exists when the prospect submits an application.
+        applicant_email = 'new-applicant@example.test'
+        self.act_as(self.agent)
+        response = self.client.post('/api/properties/inquiries/', {
+            'property': self.property.pk,
+            'unit': self.unit.pk,
+            'prospect_name': 'New Applicant',
+            'prospect_email': applicant_email,
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        inquiry_id = response.data['id']
+        response = self.client.post('/api/properties/applications/', {
+            'inquiry': inquiry_id,
+            'applicantEmail': applicant_email,
+            'employment': 'Test occupation',
+            'monthlyIncome': '85000.00',
+            'moveInDate': timezone.localdate().isoformat(),
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        application_id = response.data['id']
+        application_url = f'/api/properties/applications/{application_id}/'
+
+        self.act_as(self.manager)
+        response = self.client.patch(application_url, {'status': 'Under Review'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        response = self.client.patch(application_url, {
+            'status': 'Pending Owner Approval',
+        }, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.act_as(self.owner)
+        response = self.client.patch(application_url, {'status': 'Approved'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.unit.refresh_from_db()
+        self.assertEqual(self.unit.status, 'Reserved')
+
+        # Account creation belongs to Admin, and the email must match the applicant.
+        account_data = {
+            'email': applicant_email,
+            'name': 'New Applicant',
+            'password': 'test-only-password',
+            'role': 'Tenant',
+        }
+        self.act_as(self.manager)
+        response = self.client.post('/api/users/', account_data, format='json')
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertFalse(User.objects.filter(email=applicant_email).exists())
+        self.act_as(self.admin)
+        response = self.client.post('/api/users/', account_data, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        tenant = User.objects.get(email=applicant_email)
+        self.assertEqual(tenant.role, User.Role.TENANT)
+        response = self.client.post('/api/auth/login/', {
+            'email': applicant_email, 'password': 'test-only-password',
+        }, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['_id'], tenant.pk)
+        self.assertEqual(response.data['role'], 'Tenant')
+
+        self.act_as(self.manager)
+        start_date = timezone.localdate().replace(day=1)
+        lease_data = {
+            'tenant': self.tenant.pk,
+            'startDate': start_date.isoformat(),
+            'endDate': (start_date + timedelta(days=365)).isoformat(),
+            'rentDueDay': 1,
+        }
+        lease_url = application_url + 'create-lease/'
+        response = self.client.post(lease_url, lease_data, format='json')
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertFalse(Contract.objects.exists())
+        lease_data['tenant'] = tenant.pk
+        response = self.client.post(lease_url, lease_data, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        contract_id = response.data['contract']['_id']
+        activation_url = f'/api/contracts/{contract_id}/activate/'
+        activation_data = {
+            'signaturesComplete': True,
+            'signedCopyReference': 'test-only/signed-lease.pdf',
+        }
+        response = self.client.post(activation_url, activation_data, format='json')
+        self.assertEqual(response.status_code, 400, response.data)
+
+        self.act_as(self.owner)
+        response = self.client.patch(
+            f'/api/properties/{self.property.pk}/lease-signing-authority/',
+            {
+                'authorized': True,
+                'confirmWrittenAuthority': True,
+                'agreementReference': 'test-only/management-agreement.pdf',
+            }, format='json',
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.act_as(self.manager)
+        response = self.client.post(activation_url, {
+            **activation_data, 'signaturesComplete': False,
+        }, format='json')
+        self.assertEqual(response.status_code, 400, response.data)
+        response = self.client.post(activation_url, activation_data, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        contract = Contract.objects.get(pk=contract_id)
+        self.assertEqual(contract.status, 'Active')
+        self.assertEqual(contract.activation_basis, 'Manager Delegation')
+        self.assertEqual(contract.activated_by_id, self.manager.pk)
+        self.assertEqual(RentalApplication.objects.get(pk=application_id).status, 'Converted')
+        self.assertEqual(PropertyInquiry.objects.get(pk=inquiry_id).status, 'Converted')
+        self.unit.refresh_from_db()
+        self.assertEqual(self.unit.tenant_id, tenant.pk)
+        self.assertEqual(self.unit.status, 'Occupied')
+        response = self.client.post(activation_url, activation_data, format='json')
+        self.assertEqual(response.status_code, 400, response.data)
+
+        # Billing is repeatable; pending submissions do not count as collected rent.
+        for expected_count in (1, 0):
+            response = self.client.post('/api/invoices/run-monthly-billing/', {}, format='json')
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(response.data['generatedCount'], expected_count)
+        invoice = Invoice.objects.get(contract=contract)
+        invoice_url = f'/api/invoices/{invoice.pk}/'
+        for amount, paid, balance in (('12000.00', '12000.00', '20000.00'), ('20000.00', '32000.00', '0.00')):
+            self.act_as(tenant)
+            response = self.client.post('/api/payments/', {
+                'invoice': invoice.pk,
+                'amount': amount,
+                'paymentDate': timezone.localdate().isoformat(),
+                'paymentMethod': 'Bank Transfer',
+                'referenceNumber': f'TEST-PARTIAL-{amount}',
+            }, format='json')
+            self.assertEqual(response.status_code, 201, response.data)
+            payment_id = response.data['id']
+            response = self.client.get(invoice_url)
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(Decimal(str(response.data['balanceDue'])), Decimal('32000.00') if amount == '12000.00' else Decimal('20000.00'))
+            self.assertEqual(response.data['pendingPaymentCount'], 1)
+            verify_url = f'/api/payments/{payment_id}/verify/'
+            response = self.client.post(verify_url, {}, format='json')
+            self.assertEqual(response.status_code, 403, response.data)
+            self.act_as(self.manager)
+            response = self.client.post(verify_url, {}, format='json')
+            self.assertEqual(response.status_code, 200, response.data)
+            response = self.client.post(verify_url, {}, format='json')
+            self.assertEqual(response.status_code, 400, response.data)
+            response = self.client.get(invoice_url)
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(Decimal(str(response.data['amountPaid'])), Decimal(paid))
+            self.assertEqual(Decimal(str(response.data['balanceDue'])), Decimal(balance))
+            self.assertEqual(response.data['pendingPaymentCount'], 0)
+        self.assertEqual(response.data['status'], 'Paid')
+        self.assertEqual(Payment.objects.filter(invoice=invoice).count(), 2)
+
+        self.act_as(tenant)
+        response = self.client.post('/api/maintenance/', {
+            'property': self.property.pk,
+            'unit': self.unit.pk,
+            'issueDescription': 'Test-only leaking tap',
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        maintenance_id = response.data['_id']
+        self.act_as(self.manager)
+        response = self.client.patch(f'/api/maintenance/{maintenance_id}/', {
+            'status': 'Resolved',
+        }, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(MaintenanceRequest.objects.get(pk=maintenance_id).status, 'Resolved')
+        for event_type, destination in (
+            ('lease', 'tenant.lease'),
+            ('payment', 'tenant.payments'),
+            ('maintenance', 'tenant.maintenance'),
+        ):
+            self.assertTrue(Notification.objects.filter(
+                recipient=tenant, event_type=event_type, destination=destination,
+            ).exists(), destination)
 
 
 class RoleDataIsolationApiTests(APITestCase):

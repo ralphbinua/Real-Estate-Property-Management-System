@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Table, Badge, Alert, Tabs, Tab, Button, Card, Form, Modal, Spinner, InputGroup } from 'react-bootstrap';
+import { Badge, Alert, Tabs, Tab, Button, Card, Form, Modal, Spinner, InputGroup } from 'react-bootstrap';
+import Table from './ResponsiveTable.jsx';
 import { fetchUsersPage, createUserByAdmin, updateUser, deleteUser } from '../services/userService';
 import usePaginatedCollection from '../hooks/usePaginatedCollection';
 import CollectionPagination from './CollectionPagination';

@@ -8,72 +8,51 @@ import {
 } from '../services/notificationService';
 import { resolveNotificationDestination } from '../services/notificationNavigation';
 import './NotificationCenter.css';
-
-function formatNotificationTime(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const seconds = Math.round((date.getTime() - Date.now()) / 1000);
-  const absoluteSeconds = Math.abs(seconds);
-  const [unit, amount] = absoluteSeconds < 60
-    ? ['second', seconds]
-    : absoluteSeconds < 3600
-      ? ['minute', Math.round(seconds / 60)]
-      : absoluteSeconds < 86400
-        ? ['hour', Math.round(seconds / 3600)]
-        : absoluteSeconds < 604800
-          ? ['day', Math.round(seconds / 86400)]
-          : absoluteSeconds < 2629800
-            ? ['week', Math.round(seconds / 604800)]
-            : absoluteSeconds < 31557600
-              ? ['month', Math.round(seconds / 2629800)]
-              : ['year', Math.round(seconds / 31557600)];
-  return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(amount, unit);
-}
+import formatNotificationTime from '../utils/formatNotificationTime';
 
 export default function NotificationCenter() {
   const { user } = useAuth();
+  return user ? <SignedInNotificationCenter key={user._id || user.id || user.email} /> : null;
+}
+
+function SignedInNotificationCenter() {
   const navigate = useNavigate();
   const rootRef = useRef(null);
   const requestSequence = useRef(0);
-  const signedIn = Boolean(user);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [savingReadState, setSavingReadState] = useState(false);
 
-  const refresh = useCallback(async () => {
-    if (!signedIn) return;
+  const refresh = useCallback(() => {
     const requestId = ++requestSequence.current;
-    if (items.length === 0) setLoading(true);
-    try {
-      const data = await listNotifications({ page: 1, pageSize: 5 });
+    return listNotifications({ page: 1, pageSize: 5 }).then((data) => {
       if (requestId !== requestSequence.current) return;
       setItems(Array.isArray(data?.results) ? data.results : []);
       setUnreadCount(Number(data?.unread_count || 0));
       setError('');
-    } catch {
+    }).catch(() => {
       if (requestId === requestSequence.current) setError('Notifications are temporarily unavailable.');
-    } finally {
+    }).finally(() => {
       if (requestId === requestSequence.current) setLoading(false);
-    }
-  }, [items.length, signedIn]);
+    });
+  }, []);
 
   useEffect(() => {
-    if (!signedIn) {
-      setItems([]);
-      setUnreadCount(0);
-      setOpen(false);
-      setError('');
-      return undefined;
-    }
-
     void refresh();
-    const interval = window.setInterval(() => void refresh(), 60000);
-    const refreshOnFocus = () => void refresh();
+    return () => { requestSequence.current += 1; };
+  }, [refresh]);
+
+  useEffect(() => {
+    const refreshOnFocus = () => {
+      if (items.length === 0) setLoading(true);
+      void refresh();
+    };
+    const interval = window.setInterval(refreshOnFocus, 60000);
     const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') void refresh();
+      if (document.visibilityState === 'visible') refreshOnFocus();
     };
     window.addEventListener('focus', refreshOnFocus);
     window.addEventListener('notifications:read-state-changed', refreshOnFocus);
@@ -83,9 +62,8 @@ export default function NotificationCenter() {
       window.removeEventListener('focus', refreshOnFocus);
       window.removeEventListener('notifications:read-state-changed', refreshOnFocus);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
-      requestSequence.current += 1;
     };
-  }, [refresh, signedIn]);
+  }, [items.length, refresh]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -141,8 +119,6 @@ export default function NotificationCenter() {
     }
   };
 
-  if (!signedIn) return null;
-
   return (
     <div className="notification-center" ref={rootRef}>
       <button
@@ -154,7 +130,10 @@ export default function NotificationCenter() {
         onClick={() => {
           const nextOpen = !open;
           setOpen(nextOpen);
-          if (nextOpen) void refresh();
+          if (nextOpen) {
+            if (items.length === 0) setLoading(true);
+            void refresh();
+          }
         }}
       >
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">

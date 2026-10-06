@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Container, Table, Form, Spinner, Button, Row, Col, Badge, Modal } from 'react-bootstrap';
+import { Container, Form, Spinner, Button, Row, Col, Badge, Modal } from 'react-bootstrap';
+import Table from '../components/ResponsiveTable.jsx';
 import { fetchProperties, updateProperty, deleteProperty, fetchRentChangeRequestsPage, proposeRentChange } from '../services/propertyService';
 import { fetchContracts, createContract, terminateContract, activateContract } from '../services/contractService';
 import { fetchAssignableTenants } from '../services/userService';
@@ -16,6 +17,7 @@ import ManagerReports from '../components/ManagerReports';
 import ManagerRentChangesSection from './manager/ManagerRentChangesSection';
 import ManagerContractSection from './manager/ManagerContractSection';
 import ManagerProspectsSection from './manager/ManagerProspectsSection';
+import DashboardHeader from '../components/DashboardHeader';
 import './ManagerDashboard.css';
 
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
@@ -72,10 +74,6 @@ export default function ManagerDashboard() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Panel Toggles
-  const [showMaintenanceQueue, setShowMaintenanceQueue] = useState(false);
-  const [showInvoices, setShowInvoices] = useState(false);
-  const [showReports, setShowReports] = useState(false);
   
   // Selected property for viewing units
   const [selectedPropertyId, setSelectedPropertyId] = useState(null);
@@ -112,7 +110,6 @@ export default function ManagerDashboard() {
   const [filterStatus, setFilterStatus] = useState('');
 
   const managerLoadedSections = useRef(new Set());
-  const tenantChoicesLoaded = useRef(false);
 
   const loadManagerData = useCallback(async (section = activeSection, force = true, page = 1) => {
     if (!force && managerLoadedSections.current.has(section)) return;
@@ -161,18 +158,20 @@ export default function ManagerDashboard() {
   };
 
   const loadTenantChoices = async () => {
-    if (tenantChoicesLoaded.current) return;
     try {
       const data = await fetchAssignableTenants();
-      setUserList(Array.isArray(data) ? data : data?.results || []);
-      tenantChoicesLoaded.current = true;
+      const tenants = Array.isArray(data) ? data : data?.results || [];
+      setUserList(tenants);
+      return tenants;
     } catch {
       setError('Unable to load tenant choices. Please try again.');
+      return null;
     }
   };
 
   const openNewLeaseForm = async () => {
-    await loadTenantChoices();
+    const tenants = await loadTenantChoices();
+    if (!tenants) return;
     setApplicationForLease(null);
     setContractData((current) => ({ ...current, rentDueDay: 1, manualLeaseReason: '', manualLeaseReference: '' }));
     setShowContractModal(true);
@@ -197,9 +196,6 @@ export default function ManagerDashboard() {
     const handleWorkspaceNavigation = (event) => {
       setActiveSection(event.detail);
       void loadManagerData(event.detail, false);
-      if (event.detail === 'reports') setShowReports(true);
-      if (event.detail === 'billing') setShowInvoices(true);
-      if (event.detail === 'maintenance') setShowMaintenanceQueue(true);
     };
     window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
     return () => window.removeEventListener('workspace:navigate', handleWorkspaceNavigation);
@@ -369,10 +365,11 @@ export default function ManagerDashboard() {
   };
 
   const openLeaseForApplication = async (application) => {
-    await loadTenantChoices();
+    const tenants = await loadTenantChoices();
+    if (!tenants) return;
     const propertyId = application.propertyDetails?._id;
     const unitId = application.unitDetails?._id || '';
-    const matchingTenant = userList.find((tenant) => tenant.email?.toLowerCase() === application.applicantEmail?.toLowerCase());
+    const matchingTenant = tenants.find((tenant) => tenant.email?.trim().toLowerCase() === application.applicantEmail?.trim().toLowerCase());
     setApplicationForLease(application);
     setContractData({
       property: propertyId || '',
@@ -601,71 +598,9 @@ export default function ManagerDashboard() {
   return (
     <div className="pm-manager" data-active-section={activeSection}>
       <Container>
-        {/* Header */}
-        <div className="pm-header" id="overview">
-          <div>
-            <h1 className="pm-title">Property Manager Dashboard</h1>
-            <p className="pm-subtitle">
-              Oversee property operations, maintenance requests, and monthly billing ledgers
-            </p>
-          </div>
-          <div className="d-flex gap-2">
-          <Button
-              variant="light"
-              className="pm-btn-ghost"
-              onClick={() => { void openNewLeaseForm(); }}
-            >
-              New lease
-            </Button>
-            <Button
-              variant="light"
-              className="pm-btn-ghost"
-              onClick={() => {
-                if (activeSection === 'reports' && showReports) {
-                  setShowReports(false);
-                  setActiveSection('overview');
-                } else {
-                  setShowReports(true);
-                  setActiveSection('reports');
-                  void loadManagerData('reports', false);
-                }
-              }}
-            >
-              {showReports ? 'Hide reports' : 'View performance reports'}
-            </Button>
-            <Button
-              variant="light"
-              className="pm-btn-ghost"
-              onClick={() => {
-                if (activeSection === 'billing' && showInvoices) {
-                  setShowInvoices(false);
-                  setActiveSection('overview');
-                } else {
-                  setShowInvoices(true);
-                  setActiveSection('billing');
-                  void loadManagerData('billing', false);
-                }
-              }}
-            >
-              {showInvoices ? 'Hide financial ledger' : 'View financial ledger'}
-            </Button>
-            <Button
-              variant="light"
-              className="pm-btn-ghost"
-              onClick={() => {
-                if (activeSection === 'maintenance' && showMaintenanceQueue) {
-                  setShowMaintenanceQueue(false);
-                  setActiveSection('overview');
-                } else {
-                  setShowMaintenanceQueue(true);
-                  setActiveSection('maintenance');
-                }
-              }}
-            >
-              {showMaintenanceQueue ? 'Hide maintenance queue' : 'View maintenance queue'}
-            </Button>
-          </div>
-        </div>
+        <DashboardHeader role="manager" section={activeSection} overviewTitle="Property Manager Dashboard" overviewDescription="Oversee assigned properties, leases, maintenance, and rent records.">
+          {activeSection === 'contracts' && <Button variant="light" className="pm-btn-ghost" onClick={() => { void openNewLeaseForm(); }}>New lease</Button>}
+        </DashboardHeader>
 
         {error && (
           <div className="pm-alert pm-alert-error" role="alert">
@@ -712,7 +647,7 @@ export default function ManagerDashboard() {
             </div>
 
             {/* Performance Analytics & Revenue Reports Panel */}
-            {showReports && activeSection === 'reports' && (
+            {activeSection === 'reports' && (
               <div className="pm-panel mb-4" id="reports" data-workspace-section="reports">
                 <div className="pm-panel-header">Performance & Revenue Analytics</div>
                 <div style={{ padding: '22px' }}>
@@ -722,7 +657,7 @@ export default function ManagerDashboard() {
             )}
 
             {/* Invoicing Ledger Panel */}
-            {showInvoices && activeSection === 'billing' && (
+            {activeSection === 'billing' && (
               <div className="pm-panel mb-4" id="billing" data-workspace-section="billing">
                 <div className="pm-panel-header">Financial Ledger & Rent Collection</div>
                 <div style={{ padding: '22px' }}>
@@ -732,7 +667,7 @@ export default function ManagerDashboard() {
             )}
 
             {/* Maintenance Queue Panel */}
-            {showMaintenanceQueue && activeSection === 'maintenance' && (
+            {activeSection === 'maintenance' && (
               <div className="pm-panel mb-4" id="maintenance" data-workspace-section="maintenance">
                 <div className="pm-panel-header">Maintenance & repair requests</div>
                 <div style={{ padding: '22px' }}>

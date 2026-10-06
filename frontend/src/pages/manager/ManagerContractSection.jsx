@@ -1,4 +1,5 @@
-import { Button, Table } from 'react-bootstrap';
+import { Button } from 'react-bootstrap';
+import Table from '../../components/ResponsiveTable.jsx';
 
 const STATUS_CLASS = {
   pending: 'pm-pill-pending',

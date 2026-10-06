@@ -14,18 +14,8 @@ export const fetchAssignableTenants = async () => {
   return response.data;
 };
 
-export const fetchSystemActivity = async () => {
-  const response = await api.get('/users/activity/');
-  return response.data;
-};
-
 export const createUserByAdmin = async (userData) => {
   const response = await api.post('/users/', userData);
-  return response.data;
-};
-
-export const updateUserRole = async (userId, role) => {
-  const response = await api.patch(`/users/${userId}/`, { role });
   return response.data;
 };
 

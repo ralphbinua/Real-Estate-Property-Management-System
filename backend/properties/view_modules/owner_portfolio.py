@@ -1,35 +1,22 @@
-from rest_framework import viewsets, permissions, status
+from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.decorators import action
-from rest_framework.exceptions import MethodNotAllowed, ValidationError
-from django.db import transaction
 from django.db.models import Exists, Prefetch, Q
-from django.utils import timezone
 from django.contrib.auth import get_user_model
-from ..models import (
-    Property, Unit, PropertyInquiry, RentalApplication, RentalApplicationDecision,
-    LeaseSigningAuthorization, LeaseTerminationAuthorization, PropertyAuthorityEvent,
-    PropertyApprovalPolicyChange, UnitPricingAuthorization, UnitPriceChangeRequest,
-)
-from ..serializers import (
-    PropertySerializer, UnitManagementSerializer, PropertyInquirySerializer,
-    RentalApplicationSerializer, UnitPriceChangeRequestSerializer,
-    manager_has_unit_pricing_authority,
-)
+from ..models import Property, Unit, UnitPriceChangeRequest
+from ..serializers import PropertySerializer, UnitPriceChangeRequestSerializer
 from ..querysets import property_serializer_queryset
 from contracts.models import Contract
 from contracts.serializers import ContractSerializer
 from maintenance.models import MaintenanceRequest
 from maintenance.serializers import MaintenanceRequestSerializer
-from users.audit import record_activity
 from users.models import AuditEvent
 from core.pagination import OptInPageNumberPagination
 
 User = get_user_model()
 
 
-from .permissions import IsAdminOrPropertyManager, IsPropertyManager, IsApplicationReviewer, IsAdminOrOwner, IsOwner, IsOwnerOrAdmin, IsAdminOrPropertyManagerOrAgent, IsAdminOrPropertyManagerOrAssignedAgent
+from .permissions import IsAdminOrOwner
 
 class OwnerPortfolioView(APIView):
     permission_classes = [IsAdminOrOwner]

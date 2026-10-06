@@ -1,8 +1,6 @@
 import api from './api';
 import { fetchPage } from './pagination';
 
-export const fetchPropertiesPage = (params) => fetchPage('/properties/', params);
-
 export const fetchProperties = async () => {
   const response = await api.get('/properties/');
   return Array.isArray(response.data) ? response.data : response.data.results;
@@ -41,11 +39,6 @@ export const setUnitPricingAuthority = async (id, authorityData) => {
 export const setApplicationApprovalPolicy = async (id, policyData) => {
   const response = await api.patch(`/properties/${id}/approval-policy/`, policyData);
   return response.data;
-};
-
-export const fetchRentChangeRequests = async () => {
-  const response = await api.get('/properties/rent-change-requests/');
-  return Array.isArray(response.data) ? response.data : response.data.results || [];
 };
 
 export const fetchRentChangeRequestsPage = (params) => fetchPage('/properties/rent-change-requests/', params);

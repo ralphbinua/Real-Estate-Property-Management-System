@@ -1,4 +1,5 @@
-import { Button, Spinner, Table } from 'react-bootstrap';
+import { Button, Spinner } from 'react-bootstrap';
+import Table from './ResponsiveTable.jsx';
 import { fetchSystemActivityPage } from '../services/userService';
 import usePaginatedCollection from '../hooks/usePaginatedCollection';
 import CollectionPagination from './CollectionPagination';

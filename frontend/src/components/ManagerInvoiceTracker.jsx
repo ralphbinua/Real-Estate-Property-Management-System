@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Alert, Badge, Button, Col, Form, Modal, Row, Spinner, Table } from 'react-bootstrap';
+import { Alert, Badge, Button, Col, Form, Modal, Row, Spinner } from 'react-bootstrap';
+import Table from './ResponsiveTable.jsx';
+import formatCurrency from '../utils/formatCurrency';
 import {
   fetchInvoicesPage,
   fetchPaymentsPage,
@@ -11,11 +13,7 @@ import {
 } from '../services/invoiceService';
 import usePaginatedCollection from '../hooks/usePaginatedCollection';
 import CollectionPagination from './CollectionPagination';
-
-const formatCurrency = (value) => `₱${Number(value || 0).toLocaleString('en-PH', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})}`;
+import PaymentAcknowledgmentButton from './PaymentAcknowledgmentButton';
 
 const localDateValue = () => {
   const now = new Date();
@@ -187,7 +185,6 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
     <div className="pm-invoice-tracker">
       <div className="d-flex justify-content-between align-items-start gap-3 mb-4">
         <div>
-          <h4 className="fw-bold mb-1">Rent invoices and payments</h4>
           <p className="text-muted small mb-0">Review tenant submissions or record rent already received.</p>
         </div>
         <Button variant="light" className="pm-btn-primary" onClick={handleRunBilling} disabled={loading || saving}>
@@ -251,7 +248,7 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
 
           <h5 className="fw-bold mb-1">Payment records</h5>
           <p className="text-muted small mb-3">Tenant submissions remain pending until verified. Rejected and reversed entries stay in the audit history.</p>
-          <Table responsive className="pm-table mb-0">
+          <Table responsive className="pm-table pm-payment-history mb-0">
             <thead>
               <tr>
                 <th>Invoice</th>
@@ -295,7 +292,10 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
                       </div>
                     )}
                     {payment.status === 'Verified' && (
-                      <Button size="sm" variant="outline-secondary" disabled={saving} onClick={() => openReasonModal(payment, 'reverse')}>Reverse</Button>
+                      <div className="d-flex flex-column align-items-center gap-2">
+                        <PaymentAcknowledgmentButton payment={payment} />
+                        <Button size="sm" variant="outline-secondary" disabled={saving} onClick={() => openReasonModal(payment, 'reverse')}>Reverse</Button>
+                      </div>
                     )}
                     {!['Pending Verification', 'Verified'].includes(payment.status) && '—'}
                   </td>

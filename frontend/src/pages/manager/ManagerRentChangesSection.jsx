@@ -1,4 +1,4 @@
-import { Table } from 'react-bootstrap';
+import Table from '../../components/ResponsiveTable.jsx';
 import CollectionPagination from '../../components/CollectionPagination';
 
 const STATUS_CLASS = {

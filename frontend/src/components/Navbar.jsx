@@ -1,17 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Button, Container, Navbar, Nav } from 'react-bootstrap';
+import { Button, Container, Navbar } from 'react-bootstrap';
 import { useAuth } from '../context/useAuth';
 import { fetchSystemSettings } from '../services/systemSettingsService';
 import NotificationCenter from './NotificationCenter';
-
-const ROLE_ROUTES = {
-  Admin: { path: '/admin', label: 'Administrator' },
-  'Property Manager': { path: '/manager', label: 'Property manager' },
-  Agent: { path: '/agent', label: 'Agent' },
-  Owner: { path: '/owner', label: 'Property owner' },
-  Tenant: { path: '/tenant', label: 'Tenant' },
-};
+import { ROLE_WORKSPACES } from '../config/workspaceNavigation';
 
 function initials(name = '') {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'U';
@@ -21,7 +14,8 @@ export default function AppNavbar() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [systemName, setSystemName] = useState('PropManage');
-  const role = ROLE_ROUTES[user?.role] || ROLE_ROUTES.Tenant;
+  const [expanded, setExpanded] = useState(false);
+  const role = ROLE_WORKSPACES[user?.role] || ROLE_WORKSPACES.Tenant;
 
   useEffect(() => {
     if (!user) return undefined;
@@ -34,12 +28,13 @@ export default function AppNavbar() {
   }, [user]);
 
   const handleLogout = () => {
+    setExpanded(false);
     logout();
     navigate('/login');
   };
 
   return (
-    <Navbar expand="lg" className="app-navbar sticky-top">
+    <Navbar expand="lg" expanded={expanded} onToggle={setExpanded} className="app-navbar sticky-top">
       <Container>
         <Navbar.Brand as={Link} to={user ? role.path : '/login'} className="app-brand">
           <span className="app-brand-mark" aria-hidden="true">
@@ -50,12 +45,9 @@ export default function AppNavbar() {
           <span>{systemName}</span>
         </Navbar.Brand>
 
-        {user && <Navbar.Toggle aria-controls="app-primary-navigation" aria-label="Toggle navigation" />}
+        {user && <Navbar.Toggle aria-controls="app-primary-navigation" aria-expanded={expanded} aria-label="Toggle navigation" />}
         {user && (
           <Navbar.Collapse id="app-primary-navigation">
-            <Nav className="me-auto ms-lg-5">
-              <Nav.Link as={Link} to={role.path} className="app-nav-link active">Dashboard</Nav.Link>
-            </Nav>
             <div className="app-account">
               <NotificationCenter />
               <span className="app-role-pill">{role.label}</span>

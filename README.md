@@ -57,7 +57,7 @@ From the project folder, open PowerShell and run:
 cd backend
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install Django djangorestframework djangorestframework-simplejwt django-cors-headers "psycopg[binary]" python-dotenv
+python -m pip install Django djangorestframework djangorestframework-simplejwt django-cors-headers "psycopg[binary]" python-dotenv "reportlab>=5.0.1,<6"
 ```
 
 The backend reads its environment settings from `backend/.env`. Create that file with your database connection details:
@@ -157,6 +157,8 @@ Only **Verified** payments reduce the invoice balance or count as collected rent
 The payment ledger does not process money online and does not upload receipt files. It stores a receipt link when one is provided. The billing migration preserves existing Paid and Pending Verification invoices as marked historical payment records; the old system did not store an amount per transaction, so those imported entries use the invoice's full amount.
 
 Admin and Manager financial reports can be filtered by invoice due month and show rent invoiced, verified rent collected, and the remaining balance separately.
+
+Verified payment rows offer **Download PDF** in the Tenant, Admin, Manager, and Owner payment views. The acknowledgment identifies the Tenant, property/unit, rental invoice, payment amount/date/method/reference, and verification. Its remaining balance is labeled with the download time, so later partial payments are reflected correctly. Downloads use the existing payment access scope through `GET /api/payments/{id}/acknowledgment/`; pending, rejected, and reversed payments cannot be downloaded. Install ReportLab using the backend setup command above when updating an existing environment.
 
 ## Project layout
 

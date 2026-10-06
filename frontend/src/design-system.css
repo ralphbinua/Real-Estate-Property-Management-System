@@ -49,6 +49,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .workspace-frame { display: grid; min-height: calc(100vh - 72px); grid-template-columns: 238px minmax(0, 1fr); }
 .workspace-frame-public { display: block; }
 .workspace-main { min-width: 0; }
+.workspace-main .pm-header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.workspace-mobile-toggle { display: none; }
+.workspace-table-cell-content { display: contents; }
+@media (min-width: 992px) {
+  .workspace-main .pm-table.pm-payment-history { width: 100%; table-layout: fixed; }
+  .workspace-main .pm-table.pm-payment-history :is(th, td) { padding-left: 12px; padding-right: 12px; overflow-wrap: anywhere; }
+  .workspace-main .pm-payment-history :is(.btn, .badge) { max-width: 100%; white-space: normal; }
+}
 .workspace-sidebar {
   position: sticky;
   top: 72px;
@@ -111,7 +119,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   backdrop-filter: blur(12px);
 }
 
-.app-navbar .container { min-height: 72px; }
+.app-navbar .container { min-height: 71px; }
 .app-brand {
   display: inline-flex;
   align-items: center;
@@ -135,26 +143,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 .app-brand-mark svg { width: 23px; height: 23px; }
-.app-navbar .navbar-collapse { align-items: center; }
-.app-nav-link {
-  position: relative;
-  padding: 25px 13px !important;
-  color: #657086 !important;
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-.app-nav-link:hover, .app-nav-link.active { color: var(--app-ink) !important; }
-.app-nav-link.active::after {
-  position: absolute;
-  right: 13px;
-  bottom: 0;
-  left: 13px;
-  height: 3px;
-  background: var(--app-accent);
-  border-radius: 3px 3px 0 0;
-  content: "";
-}
-
+.app-navbar .navbar-collapse { align-items: center; justify-content: flex-end; }
 .app-account { display: flex; align-items: center; gap: 11px; }
 .app-role-pill {
   padding: 6px 10px;
@@ -210,6 +199,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .workspace-main .pm-admin .container, .workspace-main .pm-manager .container, .workspace-main .pm-agent .container,
 .workspace-main .pm-owner .container, .workspace-main .pm-tenant .container { width: 100%; }
+.workspace-frame .workspace-main > :is(.pm-admin, .pm-manager, .pm-agent, .pm-owner, .pm-tenant) {
+  min-height: calc(100vh - 72px);
+  min-height: calc(100dvh - 72px);
+  padding: 32px 28px 48px;
+}
+.workspace-frame .workspace-main > :is(.pm-admin, .pm-manager, .pm-agent, .pm-owner, .pm-tenant) > .container {
+  padding-right: 0;
+  padding-left: 0;
+}
 .workspace-main [id] { scroll-margin-top: 94px; }
 /* Sidebar navigation swaps dashboard sections instead of scrolling a long page. */
 .pm-admin [data-workspace-section], .pm-manager [data-workspace-section], .pm-agent [data-workspace-section],
@@ -423,21 +421,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .workspace-sidebar { padding-right: 10px; padding-left: 10px; }
   .app-navbar .container { padding-top: 10px; padding-bottom: 10px; }
   .app-navbar .navbar-collapse { padding: 8px 0 4px; }
-  .app-nav-link { padding: 11px 0 !important; }
-  .app-nav-link.active::after { right: auto; bottom: 3px; left: 0; width: 34px; height: 2px; }
   .app-account { flex-wrap: wrap; padding-top: 13px; border-top: 1px solid var(--app-line); }
   .pm-admin, .pm-manager, .pm-agent, .pm-owner, .pm-tenant { padding-top: 26px; }
 }
 
 @media (max-width: 575.98px) {
-  .workspace-frame { display: block; }
-  .workspace-sidebar { position: static; display: block; height: auto; padding: 10px 14px; border-right: 0; border-bottom: 1px solid var(--app-line); }
-  .workspace-sidebar-heading, .workspace-sidebar-bottom { display: none; }
-  .workspace-side-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
-  .workspace-side-link { min-height: 38px; flex: 0 1 auto; gap: 7px; padding: 5px 8px; font-size: 0.75rem; white-space: nowrap; }
-  .workspace-side-icon { width: 23px; height: 23px; flex-basis: 23px; font-size: 0.52rem; }
-  .app-account-name { max-width: 135px; }
-  .app-role-pill { order: 4; width: 100%; text-align: center; }
   .pm-admin .pm-header, .pm-manager .pm-header, .pm-agent .pm-header, .pm-owner .pm-header, .pm-tenant .pm-header {
     align-items: flex-start;
     padding-bottom: 18px;
@@ -455,4 +443,140 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .pm-user-toolbar-actions { width: 100%; }
   .pm-user-search { width: auto; flex: 1 1 auto; }
   .pm-user-add { flex: 0 0 auto; }
+}
+
+/* One mobile workspace layout for every role. */
+@media (max-width: 991.98px) {
+  html, body { min-width: 0; }
+  .workspace-frame { display: block; min-height: calc(100dvh - 64px); }
+  .workspace-sidebar { position: static; height: auto; padding: 8px 16px; border-right: 0; border-bottom: 1px solid var(--app-line); }
+  .workspace-sidebar-heading, .workspace-sidebar-bottom { display: none; }
+  .workspace-mobile-toggle {
+    display: flex;
+    width: 100%;
+    min-height: 44px;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    color: var(--app-ink);
+    background: #f4f7f5;
+    border: 1px solid #dce8e2;
+    border-radius: 9px;
+    font-size: 0.82rem;
+    text-align: left;
+  }
+  .workspace-mobile-toggle > span { color: #687286; }
+  .workspace-mobile-toggle > strong { margin-left: auto; min-width: 0; overflow-wrap: anywhere; }
+  .workspace-mobile-toggle svg { width: 18px; height: 18px; flex: 0 0 18px; }
+  .workspace-mobile-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+  .workspace-sidebar .workspace-side-nav { display: none; margin: 8px 0 0; }
+  .workspace-sidebar.is-mobile-open .workspace-side-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .workspace-side-link { min-width: 0; min-height: 44px; gap: 7px; padding: 7px 8px; font-size: 0.78rem; }
+  .workspace-side-icon { width: 25px; height: 25px; flex-basis: 25px; }
+
+  .app-navbar { min-height: 64px; }
+  .app-navbar .container { min-height: 63px; padding: 9px 16px; }
+  .app-navbar .app-brand { min-width: 0; max-width: calc(100% - 64px); padding: 0; font-size: 1rem; }
+  .app-brand-mark { flex-shrink: 0; }
+  .app-brand > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app-navbar .navbar-toggler { display: grid; min-width: 44px; width: 44px; min-height: 44px; height: 44px; place-items: center; padding: 6px; }
+  .app-navbar .navbar-toggler-icon { width: 24px; height: 24px; }
+  .app-navbar .navbar-collapse {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    padding: 16px;
+    background: #fff;
+    border-bottom: 1px solid var(--app-line);
+    box-shadow: 0 12px 18px rgba(23, 35, 63, 0.09);
+  }
+  .app-navbar .app-account { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px 10px; padding: 0; border: 0; }
+  .app-navbar .notification-trigger { width: 44px; height: 44px; }
+  .app-avatar { grid-column: 1; grid-row: 1; }
+  .app-account-name { grid-column: 2; grid-row: 1; max-width: none; }
+  .app-role-pill { grid-column: 2; grid-row: 2; justify-self: start; max-width: 100%; font-size: 0.68rem; white-space: normal; }
+  .app-account .notification-center { grid-column: 1; grid-row: 2; }
+  .app-navbar .app-account .notification-panel { position: fixed; top: 76px; right: 12px; left: 12px; width: auto; }
+  .app-logout { grid-column: 3; grid-row: 1 / span 2; min-height: 44px; }
+
+  .workspace-frame .workspace-main > :is(.pm-admin, .pm-manager, .pm-agent, .pm-owner, .pm-tenant) {
+    min-height: calc(100dvh - 125px);
+    padding: 22px 16px 32px;
+  }
+  .workspace-frame .workspace-main .pm-header { flex-direction: column; align-items: stretch; gap: 14px; padding-bottom: 18px; margin-bottom: 18px; }
+  .workspace-frame .workspace-main .pm-title { font-family: inherit; font-size: 1.5rem; line-height: 1.25; overflow-wrap: anywhere; }
+  .workspace-frame .workspace-main .pm-subtitle { font-size: 0.85rem; overflow-wrap: anywhere; }
+  .workspace-frame .workspace-main .pm-header > div:last-child:not(:first-child) { display: flex; flex-wrap: wrap; gap: 8px; }
+  .workspace-frame .workspace-main .pm-header > div:empty { display: none !important; }
+  .workspace-frame .workspace-main .pm-header .btn { min-height: 44px; margin: 0 !important; white-space: normal; }
+  .workspace-frame .workspace-main .pm-filterbar { gap: 10px; }
+  .workspace-frame .workspace-main .pm-filterbar > :is(.pm-search, .pm-select) { flex: 1 1 100%; min-width: 0; width: 100%; }
+  .workspace-frame .workspace-main .pm-metric { min-width: 0; flex: 1 1 50%; padding: 16px; }
+  .workspace-frame .workspace-main .pm-metric-value { font-family: inherit; font-size: 1.4rem; overflow-wrap: anywhere; }
+  .workspace-frame .workspace-main .pm-panel-header { flex-wrap: wrap; gap: 10px; padding: 14px 16px; font-size: 0.9rem; }
+  .workspace-frame .workspace-main .pm-panel > div[style*="padding"] { padding: 14px !important; }
+  .workspace-frame .workspace-main .pm-prospects-header { flex-wrap: wrap; gap: 10px; padding: 16px; }
+  .workspace-frame .workspace-main .pm-card-footer { flex-wrap: wrap; gap: 10px; }
+  .workspace-frame .workspace-main .pm-user-toolbar-actions { flex-wrap: wrap; }
+  .workspace-frame .workspace-main .pm-user-search { flex: 1 1 100%; width: 100%; }
+  .workspace-frame .workspace-main .form-control, .workspace-frame .workspace-main .form-select { min-height: 44px; font-size: 16px; }
+  .workspace-frame .workspace-main .btn { min-height: 44px; white-space: normal; }
+  .workspace-frame .workspace-main .workspace-pagination { flex-direction: column; align-items: stretch !important; gap: 8px !important; }
+  .workspace-pagination > div { flex-wrap: wrap; align-items: center; justify-content: space-between; }
+  .workspace-pagination .btn { min-height: 44px; }
+
+  .workspace-frame .workspace-main .table-responsive:has(> .workspace-responsive-table) { width: 100%; max-width: 100%; overflow: visible; }
+  .workspace-frame .workspace-main .workspace-responsive-table.table { display: block; width: 100% !important; min-width: 0 !important; table-layout: auto !important; }
+  .workspace-responsive-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .workspace-frame .workspace-main .workspace-responsive-table.table tbody { display: grid; gap: 12px; padding: 12px; }
+  .workspace-frame .workspace-main .pm-panel > div[style*="padding"] .workspace-responsive-table tbody { padding: 0; }
+  .workspace-frame .workspace-main .workspace-responsive-table.table tbody tr { display: block; min-width: 0; padding: 4px 12px; border: 1px solid var(--app-line); border-radius: 10px; background: #fff; }
+  .workspace-frame .workspace-main .workspace-responsive-table.table tbody :is(td, th) {
+    display: grid;
+    grid-template-columns: minmax(80px, 0.7fr) minmax(0, 1.5fr);
+    align-items: start;
+    gap: 12px;
+    width: 100%;
+    min-width: 0 !important;
+    padding: 11px 0;
+    color: var(--app-ink-soft);
+    border: 0;
+    border-bottom: 1px solid #efeee9;
+    font-size: 0.86rem;
+    text-align: left !important;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .workspace-frame .workspace-main .workspace-responsive-table.table tbody td:last-child { border-bottom: 0; }
+  .workspace-frame .workspace-main .workspace-responsive-table.table tbody td::before {
+    display: block;
+    padding-top: 2px;
+    color: #778194;
+    content: attr(data-label);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .workspace-frame .workspace-main .workspace-responsive-table.table tbody :is(.workspace-table-full-row, [data-label="Actions"], [data-label="Controls"], [data-label="Decision"], [data-label="Review"], [data-label="Manager authority"]) { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .workspace-frame .workspace-main .workspace-responsive-table.table tbody td:has(:is(input, select, textarea)) { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .workspace-frame .workspace-main .workspace-responsive-table.table .workspace-table-full-row::before { content: none; }
+  .workspace-frame .workspace-main .workspace-table-cell-content { display: block; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+  .workspace-frame .workspace-main .workspace-table-cell-content [style*="min-width"] { min-width: 0 !important; max-width: 100%; }
+  .workspace-table-cell-content > .btn { min-height: 40px; margin-top: 4px; margin-bottom: 4px; white-space: normal; }
+  .workspace-frame .workspace-main .workspace-responsive-table :is(input, select, textarea) { min-width: 0 !important; max-width: 100%; }
+  .workspace-frame .workspace-main .workspace-responsive-table .pm-pill { max-width: 100%; white-space: normal; }
+  .workspace-frame .workspace-main .workspace-responsive-table .badge { max-width: 100%; white-space: normal; text-align: left; }
+  .workspace-frame .workspace-main .pm-prospect-notes { max-width: none; overflow: visible; text-overflow: clip; white-space: normal; }
+  .workspace-frame .workspace-main .pm-property-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workspace-frame .workspace-main .pm-property-actions .btn { min-height: 44px; padding: 8px; white-space: normal; }
+  .workspace-frame .workspace-main .pm-owner-authority-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .workspace-frame .workspace-main .pm-owner-authority-state { grid-column: 1; }
+  .workspace-frame .workspace-main .pm-owner-authority-row .btn { grid-column: 2; grid-row: 1 / span 2; min-height: 44px; }
+  .workspace-frame .workspace-main .pm-owner-history-card-top { flex-wrap: wrap; }
+  .modal-dialog { margin: 12px; }
+  .modal-header, .modal-body, .modal-footer { padding: 16px !important; }
+  .modal :is(.form-control, .form-select) { min-height: 44px; font-size: 16px; }
+  .modal-footer { gap: 8px; }
+  .modal-footer .btn { min-height: 44px; }
 }

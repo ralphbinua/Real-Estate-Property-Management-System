@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import CollectionPagination from './CollectionPagination';
 import {
@@ -8,58 +8,36 @@ import {
 } from '../services/notificationService';
 import { resolveNotificationDestination } from '../services/notificationNavigation';
 import './NotificationCenter.css';
+import formatNotificationTime from '../utils/formatNotificationTime';
 
 const PAGE_SIZE = 20;
-
-function formatNotificationTime(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const seconds = Math.round((date.getTime() - Date.now()) / 1000);
-  const absoluteSeconds = Math.abs(seconds);
-  const [unit, amount] = absoluteSeconds < 60
-    ? ['second', seconds]
-    : absoluteSeconds < 3600
-      ? ['minute', Math.round(seconds / 60)]
-      : absoluteSeconds < 86400
-        ? ['hour', Math.round(seconds / 3600)]
-        : absoluteSeconds < 604800
-          ? ['day', Math.round(seconds / 86400)]
-          : absoluteSeconds < 2629800
-            ? ['week', Math.round(seconds / 604800)]
-            : absoluteSeconds < 31557600
-              ? ['month', Math.round(seconds / 2629800)]
-              : ['year', Math.round(seconds / 31557600)];
-  return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(amount, unit);
-}
 
 export default function NotificationInbox() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [data, setData] = useState({ count: 0, unread_count: 0, results: [] });
-  const [loading, setLoading] = useState(true);
+  const [loadedPage, setLoadedPage] = useState(null);
+  const loading = loadedPage !== page;
   const [error, setError] = useState('');
   const [savingReadState, setSavingReadState] = useState(false);
 
-  const loadPage = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await listNotifications({ page, pageSize: PAGE_SIZE });
+  useEffect(() => {
+    let current = true;
+    listNotifications({ page, pageSize: PAGE_SIZE }).then((result) => {
+      if (!current) return;
       setData({
         count: Number(result?.count || 0),
         unread_count: Number(result?.unread_count || 0),
         results: Array.isArray(result?.results) ? result.results : [],
       });
       setError('');
-    } catch {
-      setError('Notifications could not be loaded. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+    }).catch(() => {
+      if (current) setError('Notifications could not be loaded. Please try again.');
+    }).finally(() => {
+      if (current) setLoadedPage(page);
+    });
+    return () => { current = false; };
   }, [page]);
-
-  useEffect(() => {
-    void loadPage();
-  }, [loadPage]);
 
   const openNotification = async (notification) => {
     const destination = resolveNotificationDestination(notification.destination);
@@ -172,6 +150,7 @@ export default function NotificationInbox() {
               count={data.count}
               page={page}
               pageCount={pageCount}
+              pageSize={PAGE_SIZE}
               onPageChange={setPage}
             />
           </div>

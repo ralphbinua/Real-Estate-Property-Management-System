@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Q, Sum
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -18,6 +19,8 @@ from .querysets import invoice_serializer_queryset
 from .models import Invoice, Payment
 from .serializers import InvoiceSerializer, PaymentSerializer
 from .services import generate_monthly_invoices
+from .acknowledgments import build_payment_acknowledgment
+from users.models import SystemSettings
 
 
 class IsAdminOrPropertyManager(permissions.BasePermission):
@@ -222,6 +225,18 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
 
     def create(self, request, *args, **kwargs):
         return self._create_payment(request, direct_record=False)
+
+    @action(detail=True, methods=['get'])
+    def acknowledgment(self, request, pk=None):
+        payment = self.get_object()
+        if payment.status != Payment.Status.VERIFIED:
+            raise serializers.ValidationError({'detail': 'Only verified payments have a downloadable acknowledgment.'})
+        system_name = SystemSettings.objects.values_list('system_name', flat=True).first() or 'PropManage'
+        response = HttpResponse(build_payment_acknowledgment(payment, system_name), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="payment-acknowledgment-{payment.pk}.pdf"'
+        response['Cache-Control'] = 'private, no-store'
+        response['X-Content-Type-Options'] = 'nosniff'
+        return response
 
     @action(detail=False, methods=['post'], url_path='record')
     def record(self, request):

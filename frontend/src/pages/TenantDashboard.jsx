@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Container, Table, Form, Spinner, Button, Modal } from 'react-bootstrap';
+import { Container, Form, Spinner, Button, Modal } from 'react-bootstrap';
+import Table from '../components/ResponsiveTable.jsx';
 import { useAuth } from '../context/useAuth';
 import useNotificationDeepLink from '../hooks/useNotificationDeepLink';
 import { fetchMaintenanceRequests, createMaintenanceRequest } from '../services/maintenanceService';
@@ -8,6 +9,7 @@ import { fetchContracts } from '../services/contractService';
 import { fetchMyProfile, updateMyProfile } from '../services/profileService';
 import { fetchSystemSettings } from '../services/systemSettingsService';
 import TenantInvoiceViewer from '../components/TenantInvoiceViewer';
+import DashboardHeader from '../components/DashboardHeader';
 import './TenantDashboard.css';
 
 const TICKET_PILL_CLASS = {
@@ -160,26 +162,15 @@ export default function TenantDashboard() {
   return (
     <div className="pm-tenant" data-active-section={activeSection}>
       <Container>
-        {/* Header */}
-        <div className="pm-header" id="overview">
-          <div>
-            <h1 className="pm-title">Welcome back, {user?.name || 'Tenant'}</h1>
-            <p className="pm-subtitle">
-              Tenant Portal: Track your repair requests, billing statements, and report maintenance issues
-              {supportEmail && <> · Support: <a href={`mailto:${supportEmail}`}>{supportEmail}</a></>}
-            </p>
-          </div>
-          <div>
-            <Button variant="outline-secondary" className="me-2" onClick={() => setShowProfileModal(true)}>Edit profile</Button>
-            <Button
-              variant="light"
-              className="pm-btn-primary"
-              onClick={() => { void openMaintenanceForm(); }}
-            >
-              Report new issue
-            </Button>
-          </div>
-        </div>
+        <DashboardHeader
+          role="tenant"
+          section={activeSection}
+          overviewTitle={`Welcome back, ${user?.name || 'Tenant'}`}
+          overviewDescription={<>Track your repair requests and rent records.{supportEmail && <> Support: <a href={`mailto:${supportEmail}`}>{supportEmail}</a></>}</>}
+        >
+          {activeSection === 'overview' && <Button variant="outline-secondary" onClick={() => setShowProfileModal(true)}>Edit profile</Button>}
+          {(activeSection === 'overview' || activeSection === 'maintenance') && <Button variant="light" className="pm-btn-primary" onClick={() => { void openMaintenanceForm(); }}>Report new issue</Button>}
+        </DashboardHeader>
 
         {error && (
           <div className="pm-alert pm-alert-error" role="alert">

@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react';
-import { Alert, Badge, Button, Col, Form, Modal, Row, Spinner, Table } from 'react-bootstrap';
+import { Alert, Badge, Button, Col, Form, Modal, Row, Spinner } from 'react-bootstrap';
+import Table from './ResponsiveTable.jsx';
+import formatCurrency from '../utils/formatCurrency';
 import {
   fetchPaymentsPage,
   fetchTenantInvoicesPage,
@@ -7,11 +9,7 @@ import {
 } from '../services/invoiceService';
 import usePaginatedCollection from '../hooks/usePaginatedCollection';
 import CollectionPagination from './CollectionPagination';
-
-const formatCurrency = (value) => `₱${Number(value || 0).toLocaleString('en-PH', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})}`;
+import PaymentAcknowledgmentButton from './PaymentAcknowledgmentButton';
 
 const localDateValue = () => {
   const now = new Date();
@@ -185,7 +183,7 @@ export default function TenantInvoiceViewer({ tenantId }) {
       <div>
         <h5 className="fw-bold mb-1">Payment history</h5>
         <p className="text-muted small mb-3">Only verified payments reduce your invoice balance.</p>
-        <Table responsive className="pm-table mb-0">
+        <Table responsive className="pm-table pm-payment-history mb-0">
           <thead>
             <tr>
               <th>Property</th>
@@ -194,7 +192,7 @@ export default function TenantInvoiceViewer({ tenantId }) {
               <th>Method</th>
               <th>Reference</th>
               <th>Status</th>
-              <th>Review note</th>
+              <th>Details</th>
             </tr>
           </thead>
           <tbody>
@@ -206,7 +204,7 @@ export default function TenantInvoiceViewer({ tenantId }) {
                 <td>{payment.paymentMethod}</td>
                 <td>{payment.referenceNumber || '—'}</td>
                 <td><Badge bg={paymentStatusVariant[payment.status] || 'secondary'}>{payment.status}</Badge></td>
-                <td>{payment.rejectionReason || payment.reversalReason || '—'}</td>
+                <td>{payment.status === 'Verified' ? <PaymentAcknowledgmentButton payment={payment} /> : payment.rejectionReason || payment.reversalReason || '—'}</td>
               </tr>
             )) : (
               <tr><td colSpan="7" className="pm-empty-row">No payment submissions yet.</td></tr>

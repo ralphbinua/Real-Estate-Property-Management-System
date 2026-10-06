@@ -1,10 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Row, Col, Card, ProgressBar, Table, Badge, Form } from 'react-bootstrap';
-
-const formatCurrency = (value) => `₱${Number(value || 0).toLocaleString('en-PH', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-})}`;
+import { Row, Col, Card, ProgressBar, Badge, Form } from 'react-bootstrap';
+import Table from './ResponsiveTable.jsx';
+import formatCurrency from '../utils/formatCurrency';
 
 const currentMonth = () => {
   const now = new Date();
@@ -75,7 +72,6 @@ export default function ManagerReports({ properties = [], invoices = [] }) {
     <div>
       <div className="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-3">
         <div>
-          <h6 className="fw-bold text-dark mb-1">Property and rent performance</h6>
           <div className="small text-muted">Collections include verified payments only.</div>
         </div>
         <Form.Group>

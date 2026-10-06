@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Container, Table, Form, Row, Col, Modal, Spinner, Button, Badge } from 'react-bootstrap';
+import { Container, Form, Row, Col, Modal, Spinner, Button, Badge } from 'react-bootstrap';
+import Table from '../components/ResponsiveTable.jsx';
 import { fetchProperties, updateProperty, deleteProperty, setApplicationApprovalPolicy } from '../services/propertyService';
 import { fetchContractsPage, createContract, terminateContract, activateContract } from '../services/contractService';
 import { fetchUsers } from '../services/userService';
@@ -17,6 +18,7 @@ import { addMonthsToDate } from '../utils/dateUtils';
 import { createUnit, deleteUnit, updateUnit } from '../services/unitService';
 import CollectionPagination from '../components/CollectionPagination';
 import useNotificationDeepLink from '../hooks/useNotificationDeepLink';
+import DashboardHeader from '../components/DashboardHeader';
 import './AdminDashboard.css';
 
 const PROPERTY_TYPES = ['Condo', 'House', 'Apartment', 'Commercial'];
@@ -92,7 +94,6 @@ export default function AdminDashboard() {
   const [approvalPolicyInstruction, setApprovalPolicyInstruction] = useState('');
   const [approvalPolicyInstructionReference, setApprovalPolicyInstructionReference] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showUserManagement, setShowUserManagement] = useState(false);
 
   // Form States
   const [editingProperty, setEditingProperty] = useState(null);
@@ -180,7 +181,6 @@ export default function AdminDashboard() {
   useEffect(() => {
     const handleWorkspaceNavigation = (event) => {
       setActiveSection(event.detail);
-      if (event.detail === 'users') setShowUserManagement(true);
       if (event.detail === 'reports') void loadReportInvoices();
     };
     window.addEventListener('workspace:navigate', handleWorkspaceNavigation);
@@ -478,29 +478,10 @@ export default function AdminDashboard() {
   return (
     <div className="pm-admin" data-active-section={activeSection}>
       <Container>
-        {/* Header */}
-        <div className="pm-header" id="overview">
-          <div>
-            <h1 className="pm-title">Admin Portal</h1>
-            <p className="pm-subtitle">
-              System performance overview, user accounts, and full CRUD property controls
-            </p>
-          </div>
-          <div className="pm-header-actions">
-            {(activeSection === 'overview' || activeSection === 'contracts') && (
-              <Button variant="light" className="pm-btn-outline" onClick={() => {
-                void openNewLeaseForm();
-              }}>
-                New lease
-              </Button>
-            )}
-            {(activeSection === 'overview' || activeSection === 'properties') && (
-              <Button variant="light" className="pm-btn-primary" onClick={() => setShowPropertyModal(true)}>
-                Add property
-              </Button>
-            )}
-          </div>
-        </div>
+        <DashboardHeader role="admin" section={activeSection} overviewTitle="Admin Portal" overviewDescription="Review the portfolio, accounts, rent records, and maintenance.">
+          {activeSection === 'contracts' && <Button variant="light" className="pm-btn-outline" onClick={() => { void openNewLeaseForm(); }}>New lease</Button>}
+          {(activeSection === 'overview' || activeSection === 'properties') && <Button variant="light" className="pm-btn-primary" onClick={() => setShowPropertyModal(true)}>Add property</Button>}
+        </DashboardHeader>
 
         {error && (
           <div className="pm-alert pm-alert-error" role="alert">
@@ -571,9 +552,8 @@ export default function AdminDashboard() {
             </section>
 
             {/* User Management Panel */}
-            {showUserManagement && activeSection === 'users' && (
+            {activeSection === 'users' && (
               <div className="pm-panel" id="users" data-workspace-section="users">
-                <div className="pm-panel-header">User accounts</div>
                 <div style={{ padding: '22px' }}>
                   <UserManagement />
                 </div>
@@ -615,7 +595,7 @@ export default function AdminDashboard() {
               <div className="pm-panel-header">
                 Property directory ({filteredProperties.length})
               </div>
-              <Table responsive className="pm-table mb-0">
+              <Table responsive className="pm-table pm-properties-table mb-0">
                 <thead>
                   <tr>
                     <th>Title</th>
@@ -639,44 +619,47 @@ export default function AdminDashboard() {
                           <td className="pm-cell-title">{prop.title}</td>
                           <td className="pm-cell-muted">{prop.address}</td>
                           <td>{prop.propertyType}</td>
-                          <td className="pm-cell-strong">
-                            ₱{Number(rateDisplay).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{prop.units?.length > 0 ? '/mo up' : ''}
+                          <td className="pm-cell-strong pm-property-rate">
+                            ₱{Number(rateDisplay).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {prop.units?.length > 0 && <span className="pm-property-rate-note">per month and up</span>}
                           </td>
                           <td>
                             <StatusPill status={occupiedCount > 0 ? `${occupiedCount}/${totalUnits} Occupied` : prop.status || 'Available'} />
                           </td>
                           <td className="text-center">
-                            {(['Apartment', 'Condo'].includes(prop.propertyType) || prop.units?.length > 0) && (
+                            <div className="pm-property-actions">
+                              {(['Apartment', 'Condo'].includes(prop.propertyType) || prop.units?.length > 0) && (
+                                <Button
+                                  variant="light"
+                                  size="sm"
+                                  className="pm-btn-edit-outline"
+                                  onClick={() =>
+                                    setSelectedPropertyId(selectedPropertyId === propId ? null : propId)
+                                  }
+                                >
+                                  {selectedPropertyId === propId ? 'Hide Units' : `Manage Units (${prop.units?.length || 0})`}
+                                </Button>
+                              )}
                               <Button
                                 variant="light"
                                 size="sm"
-                                className="pm-btn-edit-outline me-2"
-                                onClick={() =>
-                                  setSelectedPropertyId(selectedPropertyId === propId ? null : propId)
-                                }
+                                className="pm-btn-edit-outline"
+                                onClick={() => handleEditClick(prop)}
                               >
-                                {selectedPropertyId === propId ? 'Hide Units' : `Manage Units (${prop.units?.length || 0})`}
+                                Edit
                               </Button>
-                            )}
-                            <Button
-                              variant="light"
-                              size="sm"
-                              className="pm-btn-edit-outline me-2"
-                              onClick={() => handleEditClick(prop)}
-                            >
-                              Edit
-                            </Button>
-                            <Button variant="outline-secondary" size="sm" className="me-2" onClick={() => openApprovalPolicyForm(prop)}>
-                              Approval rule
-                            </Button>
-                            <Button
-                              variant="light"
-                              size="sm"
-                              className="pm-btn-danger-outline"
-                              onClick={() => handleDeleteProperty(propId)}
-                            >
-                              Archive
-                            </Button>
+                              <Button variant="outline-secondary" size="sm" className="pm-btn-edit-outline" onClick={() => openApprovalPolicyForm(prop)}>
+                                Approval rule
+                              </Button>
+                              <Button
+                                variant="light"
+                                size="sm"
+                                className="pm-btn-danger-outline"
+                                onClick={() => handleDeleteProperty(propId)}
+                              >
+                                Archive
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       );

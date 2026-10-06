@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Table, Form, Card, Alert, Spinner } from 'react-bootstrap';
+import { Form, Alert, Spinner } from 'react-bootstrap';
+import Table from './ResponsiveTable.jsx';
 import { fetchMaintenanceRequestsPage, updateMaintenanceStatus } from '../services/maintenanceService';
 import usePaginatedCollection from '../hooks/usePaginatedCollection';
 import CollectionPagination from './CollectionPagination';
@@ -40,11 +41,7 @@ export default function AdminMaintenanceManager() {
   };
 
   return (
-    <Card className="shadow-sm border-0 mb-4">
-      <Card.Header className="bg-white fw-bold py-3 text-dark border-bottom">
-        System-Wide Maintenance Request Queue
-      </Card.Header>
-      <Card.Body className="p-0">
+    <>
         {(error || loadError) && <Alert variant="danger" className="m-3" dismissible onClose={() => setError('')}>{error || loadError}</Alert>}
         {success && <Alert variant="success" className="m-3" dismissible onClose={() => setSuccess('')}>{success}</Alert>}
 
@@ -115,7 +112,6 @@ export default function AdminMaintenanceManager() {
           </Table>
         )}
         {!loading && <CollectionPagination count={count} page={page} pageCount={pageCount} onPageChange={setPage} />}
-      </Card.Body>
-    </Card>
+    </>
   );
 }

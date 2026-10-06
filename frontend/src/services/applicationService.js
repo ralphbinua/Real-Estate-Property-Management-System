@@ -3,11 +3,6 @@ import { fetchPage } from './pagination';
 
 export const fetchApplicationsPage = (params) => fetchPage('/properties/applications/', params);
 
-export const fetchApplications = async () => {
-  const response = await api.get('/properties/applications/');
-  return Array.isArray(response.data) ? response.data : response.data.results || [];
-};
-
 export const createApplication = async (payload) => {
   const response = await api.post('/properties/applications/', payload);
   return response.data;
