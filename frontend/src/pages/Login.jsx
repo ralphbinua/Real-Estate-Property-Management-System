@@ -9,7 +9,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, sessionExpired } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -44,6 +44,12 @@ export default function Login() {
         <div className="pm-login-overline">WORKSPACE ACCESS</div>
         <h1 className="pm-login-title">Sign in</h1>
         <p className="pm-login-subtitle">Enter your account details to continue.</p>
+
+        {sessionExpired && (
+          <div className="pm-alert" role="alert">
+            <span>Your session expired. Please sign in again.</span>
+          </div>
+        )}
 
         {error && (
           <div className="pm-alert" role="alert">

@@ -73,6 +73,7 @@ export default function ManagerDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [summaryRefreshError, setSummaryRefreshError] = useState('');
 
   
   // Selected property for viewing units
@@ -178,12 +179,13 @@ export default function ManagerDashboard() {
   };
 
   const refreshInvoiceSummaries = async () => {
+    setSummaryRefreshError('');
     if (!managerLoadedSections.current.has('reports')) return;
     try {
       const data = await fetchInvoices();
       setInvoices(Array.isArray(data) ? data : []);
     } catch {
-      // The ledger keeps its own refreshed data; the dashboard can refresh on next navigation.
+      setSummaryRefreshError('The billing action succeeded, but report totals could not be refreshed. Retry to update them.');
     }
   };
 
@@ -612,6 +614,13 @@ export default function ManagerDashboard() {
           <div className="pm-alert pm-alert-success" role="alert">
             <span>{success}</span>
             <button className="pm-alert-close" onClick={() => setSuccess('')} aria-label="Dismiss">×</button>
+          </div>
+        )}
+        {summaryRefreshError && (
+          <div className="pm-alert pm-alert-error" role="alert">
+            <span>{summaryRefreshError}</span>
+            <Button variant="outline-danger" size="sm" onClick={() => { void refreshInvoiceSummaries(); }}>Retry</Button>
+            <button className="pm-alert-close" onClick={() => setSummaryRefreshError('')} aria-label="Dismiss">×</button>
           </div>
         )}
 

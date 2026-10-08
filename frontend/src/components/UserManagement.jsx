@@ -4,6 +4,7 @@ import Table from './ResponsiveTable.jsx';
 import { fetchUsersPage, createUserByAdmin, updateUser, deleteUser } from '../services/userService';
 import usePaginatedCollection from '../hooks/usePaginatedCollection';
 import CollectionPagination from './CollectionPagination';
+import { formatUserManagementError } from './userManagementErrors';
 
 const ROLE_COLORS = {
   tenant: 'info',
@@ -23,12 +24,14 @@ function initials(name = '') {
 }
 
 export default function UserManagement() {
-  const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [activeTab, setActiveTab] = useState('tenants');
   const [search, setSearch] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [editError, setEditError] = useState('');
+  const [deactivateError, setDeactivateError] = useState('');
 
   // Add User Form State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -57,10 +60,22 @@ export default function UserManagement() {
     { roles: roles.join(','), search },
   );
 
+  const handleOpenAddModal = () => {
+    setCreateError('');
+    setSuccess('');
+    setShowAddModal(true);
+  };
+
+  const handleCloseAddModal = () => {
+    if (creating) return;
+    setShowAddModal(false);
+    setCreateError('');
+  };
+
   const handleCreateUser = async (e) => {
     e.preventDefault();
     setCreating(true);
-    setError('');
+    setCreateError('');
     setSuccess('');
 
     try {
@@ -70,13 +85,15 @@ export default function UserManagement() {
       setNewUser({ name: '', email: '', password: '', role: 'Tenant' });
       refresh();
     } catch (err) {
-      setError(err.response?.data?.message || err.response?.data?.detail || 'Failed to create user account.');
+      setCreateError(formatUserManagementError(err, 'Failed to create user account.'));
     } finally {
       setCreating(false);
     }
   };
 
   const handleOpenEditModal = (user) => {
+    setEditError('');
+    setSuccess('');
     setEditUser({
       id: user._id || user.id,
       name: user.name || '',
@@ -87,10 +104,16 @@ export default function UserManagement() {
     setShowEditModal(true);
   };
 
+  const handleCloseEditModal = () => {
+    if (updating) return;
+    setShowEditModal(false);
+    setEditError('');
+  };
+
   const handleUpdateUser = async (e) => {
     e.preventDefault();
     setUpdating(true);
-    setError('');
+    setEditError('');
     setSuccess('');
 
     try {
@@ -108,23 +131,37 @@ export default function UserManagement() {
       setShowEditModal(false);
       refresh();
     } catch (err) {
-      setError(err.response?.data?.message || err.response?.data?.detail || 'Failed to update user account.');
+      setEditError(formatUserManagementError(err, 'Failed to update user account.'));
     } finally {
       setUpdating(false);
     }
   };
 
+  const handleOpenDeactivateModal = (user) => {
+    setDeactivateError('');
+    setSuccess('');
+    setPendingDelete(user);
+  };
+
+  const handleCloseDeactivateModal = () => {
+    if (deleting) return;
+    setPendingDelete(null);
+    setDeactivateError('');
+  };
+
   const confirmDelete = async () => {
     if (!pendingDelete) return;
     setDeleting(true);
+    setDeactivateError('');
+    setSuccess('');
     try {
       const userId = pendingDelete._id || pendingDelete.id;
       await deleteUser(userId);
       setSuccess(`${pendingDelete.name} was deactivated.`);
       setPendingDelete(null);
       refresh();
-    } catch {
-      setError('Failed to delete user.');
+    } catch (err) {
+      setDeactivateError(formatUserManagementError(err, 'Failed to deactivate user account.'));
     } finally {
       setDeleting(false);
     }
@@ -196,7 +233,7 @@ export default function UserManagement() {
                     <Button
                       variant="outline-danger"
                       size="sm"
-                      onClick={() => setPendingDelete(user)}
+                      onClick={() => handleOpenDeactivateModal(user)}
                     >
                       Deactivate
                     </Button>
@@ -226,13 +263,13 @@ export default function UserManagement() {
               size="sm"
             />
           </InputGroup>
-          <Button variant="primary" className="pm-user-add" onClick={() => setShowAddModal(true)}>
+          <Button variant="primary" className="pm-user-add" onClick={handleOpenAddModal}>
             + Add User
           </Button>
         </div>
       </div>
 
-      {(error || loadError) && <Alert variant="danger" dismissible onClose={() => { setError(''); }}>{error || loadError}</Alert>}
+      {loadError && <Alert variant="danger">{loadError}</Alert>}
       {success && <Alert variant="success" dismissible onClose={() => setSuccess('')}>{success}</Alert>}
 
       <Card className="border-0 shadow-sm">
@@ -255,12 +292,13 @@ export default function UserManagement() {
       </Card>
 
       {/* Modal: Create User Account */}
-      <Modal show={showAddModal} onHide={() => setShowAddModal(false)} centered>
+      <Modal show={showAddModal} onHide={handleCloseAddModal} centered>
         <Modal.Header closeButton>
           <Modal.Title className="fs-5">Create New User Account</Modal.Title>
         </Modal.Header>
         <Form onSubmit={handleCreateUser}>
           <Modal.Body>
+            {createError && <Alert variant="danger" role="alert" aria-live="assertive">{createError}</Alert>}
             <Form.Group className="mb-3">
               <Form.Label className="fw-semibold small">Full Name</Form.Label>
               <Form.Control
@@ -317,12 +355,13 @@ export default function UserManagement() {
       </Modal>
 
       {/* Modal: Edit User Account */}
-      <Modal show={showEditModal} onHide={() => setShowEditModal(false)} centered>
+      <Modal show={showEditModal} onHide={handleCloseEditModal} centered>
         <Modal.Header closeButton>
           <Modal.Title className="fs-5">Edit User Account</Modal.Title>
         </Modal.Header>
         <Form onSubmit={handleUpdateUser}>
           <Modal.Body>
+            {editError && <Alert variant="danger" role="alert" aria-live="assertive">{editError}</Alert>}
             <Form.Group className="mb-3">
               <Form.Label className="fw-semibold small">Full Name</Form.Label>
               <Form.Control
@@ -378,11 +417,12 @@ export default function UserManagement() {
       </Modal>
 
       {/* Modal: Deactivate User Account */}
-      <Modal show={!!pendingDelete} onHide={() => setPendingDelete(null)} centered>
+      <Modal show={!!pendingDelete} onHide={handleCloseDeactivateModal} centered>
         <Modal.Header closeButton>
           <Modal.Title className="fs-5">Deactivate user account</Modal.Title>
         </Modal.Header>
         <Modal.Body>
+          {deactivateError && <Alert variant="danger" role="alert" aria-live="assertive">{deactivateError}</Alert>}
           Deactivate <strong>{pendingDelete?.name}</strong> ({pendingDelete?.email})? They will no longer be able to sign in. Their records will be retained.
         </Modal.Body>
         <Modal.Footer>

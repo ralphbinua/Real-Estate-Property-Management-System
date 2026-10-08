@@ -1,14 +1,27 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AuthContext from './AuthContextValue';
-import api from '../services/api';
+import api, { resetSessionExpiry } from '../services/api';
 
 export const AuthProvider = ({ children }) => {
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem('user');
     return savedUser ? JSON.parse(savedUser) : null;
   });
 
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      setUser(null);
+      localStorage.removeItem('user');
+      setSessionExpired(true);
+    };
+
+    window.addEventListener('auth:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('auth:session-expired', handleSessionExpired);
+  }, []);
+
   const login = async (email, password) => {
+    setSessionExpired(false);
     try {
       const response = await api.post('/auth/login/', {
         email,
@@ -16,6 +29,8 @@ export const AuthProvider = ({ children }) => {
       });
 
       const userData = response.data;
+      resetSessionExpiry();
+      setSessionExpired(false);
       setUser(userData);
       localStorage.setItem('user', JSON.stringify(userData));
       return { success: true, user: userData };
@@ -32,6 +47,8 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
+    resetSessionExpiry();
+    setSessionExpired(false);
     setUser(null);
     localStorage.removeItem('user');
   };
@@ -45,7 +62,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, login, logout, updateUser, sessionExpired }}>
       {children}
     </AuthContext.Provider>
   );

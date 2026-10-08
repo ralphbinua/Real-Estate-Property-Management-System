@@ -113,13 +113,15 @@ The backend API is served under `/api`:
 | Area | Path |
 | --- | --- |
 | Sign in | `/api/auth/login/` |
+| System settings | `/api/settings/` |
 | Users and activity | `/api/users/` |
-| Properties, units, inquiries, applications, and Owner portfolio | `/api/properties/` |
+| Properties, units, inquiries, and applications | `/api/properties/` |
+| Owner portfolio | `/api/owner/portfolio/` |
 | Lease contracts | `/api/contracts/` |
 | Rent invoices and payment records | `/api/invoices/` |
 | Rent payment transactions | `/api/payments/` |
 | Maintenance requests | `/api/maintenance/` |
-| System settings | `/api/settings/` |
+| Notifications | `/api/notifications/` |
 
 Most API requests require a valid sign-in token. The frontend adds it automatically after login.
 
@@ -173,16 +175,22 @@ A pending lease on a property without units keeps that property reserved as Pend
 
 ```text
 backend/                 Django project and API
-  core/                  Settings and main URL routes
+  core/                  Settings and root URL routes
   users/                 Accounts, roles, activity, and system settings
   properties/            Properties, units, inquiries, and applications
+    view_modules/        Focused API view modules
   contracts/             Lease contracts
-  billing/               Invoices and payment records
+  billing/               Invoices and payment ledger
   maintenance/           Maintenance requests
+  notifications/         In-app notifications and inbox API
 frontend/                React and Vite user interface
-  src/pages/             Role dashboards and sign-in page
-  src/components/        Shared forms, navigation, and workflow sections
-  src/services/          Frontend calls to the backend API
+  src/                   Application source
+    pages/               Role dashboards and sign-in page
+    components/          Shared forms, navigation, and workflow sections
+    context/             Authentication context
+    hooks/               Shared React hooks
+    services/            API calls and data helpers
+    utils/               Formatting and domain utilities
 ```
 
 ## Before deployment

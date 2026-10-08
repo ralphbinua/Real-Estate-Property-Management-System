@@ -1,16 +1,17 @@
 real-estate-management/
 ├── .gitignore
-├── README.md
-├── file_structure.txt
-├── backend/                                      # Django REST API
+├── README.md                                      # Product guide, setup, API, and workflows
+├── file_structure.txt                             # Detailed repository map
+├── backend/                                       # Django REST API
 │   ├── manage.py
-│   ├── core/                                     # Django project configuration
+│   ├── core/                                      # Project settings, routes, and shared API utilities
 │   │   ├── __init__.py
 │   │   ├── asgi.py
+│   │   ├── pagination.py
 │   │   ├── settings.py
 │   │   ├── urls.py
 │   │   └── wsgi.py
-│   ├── users/                                    # Accounts, roles, settings, and audit events
+│   ├── users/                                     # Accounts, roles, settings, and audit events
 │   │   ├── admin.py
 │   │   ├── audit.py
 │   │   ├── models.py
@@ -21,15 +22,26 @@ real-estate-management/
 │   │       ├── __init__.py
 │   │       ├── 0001_initial.py
 │   │       ├── 0002_auditevent.py
-│   │       └── 0003_systemsettings.py
-│   ├── properties/                               # Properties, units, inquiries, and applications
+│   │       ├── 0003_systemsettings.py
+│   │       └── 0004_alter_auditevent_action.py
+│   ├── properties/                                # Properties, units, inquiries, and applications
 │   │   ├── __init__.py
 │   │   ├── admin.py
 │   │   ├── apps.py
 │   │   ├── models.py
+│   │   ├── querysets.py
 │   │   ├── serializers.py
 │   │   ├── urls.py
-│   │   ├── views.py
+│   │   ├── views.py                               # View exports
+│   │   ├── view_modules/                          # Focused property workflow views
+│   │   │   ├── __init__.py
+│   │   │   ├── applications.py
+│   │   │   ├── inquiries.py
+│   │   │   ├── owner_portfolio.py
+│   │   │   ├── permissions.py
+│   │   │   ├── properties.py
+│   │   │   └── rent_changes.py
+│   │   ├── tests.py
 │   │   └── migrations/
 │   │       ├── __init__.py
 │   │       ├── 0001_initial.py
@@ -38,39 +50,68 @@ real-estate-management/
 │   │       ├── 0004_propertyinquiry.py
 │   │       ├── 0005_rentalapplication.py
 │   │       ├── 0006_owner_application_approval.py
-│   │       └── 0007_lease_signing_authorization.py
-│   ├── contracts/                                # Lease contracts and signing authority
+│   │       ├── 0007_lease_signing_authorization.py
+│   │       ├── 0008_lease_authority_controls.py
+│   │       ├── 0009_rentalapplication_approval_mode_snapshot.py
+│   │       └── 0010_rent_pricing_authority_and_change_requests.py
+│   ├── contracts/                                 # Lease contracts and signing authority
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── urls.py
+│   │   ├── views.py
+│   │   ├── tests.py
+│   │   └── migrations/
+│   │       ├── __init__.py
+│   │       ├── 0001_initial.py
+│   │       ├── 0002_lease_signing_authority.py
+│   │       ├── 0003_contract_rent_due_day.py
+│   │       ├── 0004_lease_activation_and_termination_audit.py
+│   │       └── 0005_lease_instruction_references.py
+│   ├── billing/                                   # Invoices, payment ledger, and acknowledgments
+│   │   ├── __init__.py
+│   │   ├── acknowledgments.py
+│   │   ├── models.py
+│   │   ├── payment_urls.py
+│   │   ├── querysets.py
+│   │   ├── serializers.py
+│   │   ├── services.py
+│   │   ├── urls.py
+│   │   ├── views.py
+│   │   ├── tests.py
+│   │   ├── test_payment_workflow.py
+│   │   ├── management/
+│   │   │   ├── __init__.py
+│   │   │   └── commands/
+│   │   │       ├── __init__.py
+│   │   │       └── generate_monthly_invoices.py
+│   │   └── migrations/
+│   │       ├── __init__.py
+│   │       ├── 0001_initial.py
+│   │       ├── 0002_payment_ledger.py
+│   │       └── 0003_protect_payment_invoice_history.py
+│   ├── maintenance/                               # Tenant maintenance requests
 │   │   ├── models.py
 │   │   ├── serializers.py
 │   │   ├── urls.py
 │   │   ├── views.py
 │   │   └── migrations/
 │   │       ├── __init__.py
-│   │       ├── 0001_initial.py
-│   │       ├── 0002_lease_signing_authority.py
-│   │       └── 0003_contract_rent_due_day.py
-│   ├── billing/                                  # Rent invoices and payment records
-│   │   ├── models.py
-│   │   ├── serializers.py
-│   │   ├── services.py
-│   │   ├── urls.py
-│   │   ├── views.py
-│   │   ├── migrations/
-│   │   │   ├── __init__.py
-│   │   │   └── 0001_initial.py
-│   │   └── management/
-│   │       ├── __init__.py
-│   │       └── commands/
-│   │           ├── __init__.py
-│   │           └── generate_monthly_invoices.py
-│   └── maintenance/                              # Tenant maintenance requests
+│   │       └── 0001_initial.py
+│   └── notifications/                             # In-app notifications and inbox API
+│       ├── __init__.py
+│       ├── apps.py
 │       ├── models.py
+│       ├── pagination.py
 │       ├── serializers.py
+│       ├── services.py
 │       ├── urls.py
 │       ├── views.py
 │       └── migrations/
 │           ├── __init__.py
-│           └── 0001_initial.py
+│           ├── 0001_initial.py
+│           └── 0002_alter_notification_destination.py
+├── docs/
+│   └── superpowers/                              # Local planning notes; ignored by Git
 └── frontend/                                     # React application built with Vite
     ├── .gitignore
     ├── eslint.config.js
@@ -81,49 +122,75 @@ real-estate-management/
     ├── public/
     │   └── favicon.svg
     └── src/
-        ├── App.jsx                               # App routes and role-based dashboards
+        ├── App.jsx                               # Application routes and role dashboards
         ├── main.jsx                              # Frontend entry point
         ├── design-system.css                     # Shared application styles
-        ├── context/
-        │   └── AuthContext.jsx
-        ├── components/                           # Shared dashboard and form components
+        ├── config/
+        │   └── workspaceNavigation.js
+        ├── context/                              # Authentication context and helpers
+        │   ├── AuthContext.jsx
+        │   ├── AuthContextValue.js
+        │   └── useAuth.js
+        ├── hooks/                                # Shared collection and notification hooks
+        │   ├── useNotificationDeepLink.js
+        │   └── usePaginatedCollection.js
+        ├── components/                           # Shared dashboard, form, and workflow UI
         │   ├── AdminActivityLog.jsx
         │   ├── AdminMaintenanceManager.jsx
         │   ├── AdminSystemSettings.jsx
+        │   ├── CollectionPagination.jsx
+        │   ├── DashboardHeader.jsx
         │   ├── ManagerInvoiceTracker.jsx
         │   ├── ManagerReports.jsx
         │   ├── Navbar.jsx
+        │   ├── NotificationCenter.css
+        │   ├── NotificationCenter.jsx
+        │   ├── NotificationInbox.jsx
+        │   ├── PaymentAcknowledgmentButton.jsx
         │   ├── PropertyForm.jsx
+        │   ├── ResponsiveTable.jsx
+        │   ├── responsiveTable.test.js
+        │   ├── responsiveTableLayout.js
         │   ├── TenantInvoiceViewer.jsx
         │   ├── UserManagement.jsx
         │   └── WorkspaceSidebar.jsx
-        ├── pages/                                # Login and role-specific dashboards
-        │   ├── AdminDashboard.jsx
+        ├── pages/                                # Sign-in and role-specific dashboards
         │   ├── AdminDashboard.css
-        │   ├── AgentDashboard.jsx
+        │   ├── AdminDashboard.jsx
         │   ├── AgentDashboard.css
-        │   ├── Login.jsx
+        │   ├── AgentDashboard.jsx
         │   ├── Login.css
-        │   ├── ManagerDashboard.jsx
+        │   ├── Login.jsx
         │   ├── ManagerDashboard.css
-        │   ├── OwnerDashboard.jsx
+        │   ├── ManagerDashboard.jsx
         │   ├── OwnerDashboard.css
+        │   ├── OwnerDashboard.jsx
+        │   ├── TenantDashboard.css
         │   ├── TenantDashboard.jsx
-        │   └── TenantDashboard.css
-        ├── services/                             # Frontend API request modules
+        │   └── manager/                           # Manager dashboard workflow sections
+        │       ├── ManagerContractSection.jsx
+        │       ├── ManagerProspectsSection.jsx
+        │       └── ManagerRentChangesSection.jsx
+        ├── services/                             # API clients and pagination helpers
         │   ├── api.js
         │   ├── applicationService.js
         │   ├── contractService.js
         │   ├── inquiryService.js
         │   ├── invoiceService.js
         │   ├── maintenanceService.js
+        │   ├── notificationNavigation.js
+        │   ├── notificationService.js
         │   ├── ownerService.js
+        │   ├── pagination.js
         │   ├── profileService.js
         │   ├── propertyService.js
         │   ├── systemSettingsService.js
         │   ├── unitService.js
         │   └── userService.js
-        └── utils/
-            └── dateUtils.js
-
-Local environment files, installed dependencies, generated files, and build output are excluded from this source tree.
+        └── utils/                                # Date, currency, and lease calculations
+            ├── dateUtils.js
+            ├── formatCurrency.js
+            ├── formatNotificationTime.js
+            ├── formatters.test.js
+            ├── leaseIncome.js
+            └── leaseIncome.test.js

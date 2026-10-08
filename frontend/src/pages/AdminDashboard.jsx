@@ -62,6 +62,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [summaryRefreshError, setSummaryRefreshError] = useState('');
 
   // Selected property for viewing units
   const [selectedPropertyId, setSelectedPropertyId] = useState(null);
@@ -161,6 +162,7 @@ export default function AdminDashboard() {
   };
 
   const refreshInvoiceSummaries = async () => {
+    setSummaryRefreshError('');
     try {
       const summaryData = await fetchOwnerPortfolio('overview');
       setFinancialSummary(summaryData.summary || null);
@@ -169,7 +171,7 @@ export default function AdminDashboard() {
         setInvoices(Array.isArray(data) ? data : data.results || []);
       }
     } catch {
-      // The ledger keeps its own refreshed data; the dashboard can refresh on next navigation.
+      setSummaryRefreshError('The billing action succeeded, but dashboard totals could not be refreshed. Retry to update them.');
     }
   };
 
@@ -493,6 +495,13 @@ export default function AdminDashboard() {
           <div className="pm-alert pm-alert-success" role="alert">
             <span>{success}</span>
             <button className="pm-alert-close" onClick={() => setSuccess('')} aria-label="Dismiss">×</button>
+          </div>
+        )}
+        {summaryRefreshError && (
+          <div className="pm-alert pm-alert-error" role="alert">
+            <span>{summaryRefreshError}</span>
+            <Button variant="outline-danger" size="sm" onClick={() => { void refreshInvoiceSummaries(); }}>Retry</Button>
+            <button className="pm-alert-close" onClick={() => setSummaryRefreshError('')} aria-label="Dismiss">×</button>
           </div>
         )}
 
