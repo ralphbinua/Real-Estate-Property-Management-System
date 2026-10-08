@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Container, Spinner, Button, Form, Modal, Row, Col } from 'react-bootstrap';
-import Table from '../components/ResponsiveTable.jsx';
 import { fetchOwnerPortfolio, fetchOwnerPortfolioPage } from '../services/ownerService';
 import { fetchPaymentsPage } from '../services/invoiceService';
 import { fetchApplicationsPage, reviewApplication } from '../services/applicationService';
@@ -12,108 +11,17 @@ import {
 } from '../services/propertyService';
 import { activateContract, terminateContract } from '../services/contractService';
 import DashboardHeader from '../components/DashboardHeader';
-import PaymentAcknowledgmentButton from '../components/PaymentAcknowledgmentButton';
 import { resolveMonthlyIncome } from '../utils/leaseIncome';
+import OwnerMetricsSection from './owner/OwnerMetricsSection.jsx';
+import OwnerPropertiesSection from './owner/OwnerPropertiesSection.jsx';
+import OwnerPricingSection from './owner/OwnerPricingSection.jsx';
+import OwnerApprovalsSection from './owner/OwnerApprovalsSection.jsx';
+import OwnerContractsSection from './owner/OwnerContractsSection.jsx';
+import OwnerHistorySection from './owner/OwnerHistorySection.jsx';
+import OwnerMaintenanceSection from './owner/OwnerMaintenanceSection.jsx';
+import OwnerBillingSection from './owner/OwnerBillingSection.jsx';
+import { mapOwnerHistory } from './owner/ownerDashboardPresentation.js';
 import './OwnerDashboard.css';
-
-const PILL_CLASS = {
-  available: 'pm-pill-available',
-  rented: 'pm-pill-occupied',
-  occupied: 'pm-pill-occupied',
-  'under maintenance': 'pm-pill-maintenance',
-  active: 'pm-pill-active',
-  terminated: 'pm-pill-terminated',
-  pending: 'pm-pill-pending',
-  cancelled: 'pm-pill-terminated',
-};
-
-function StatusPill({ status }) {
-  if (!status) return null;
-  const cls = PILL_CLASS[status.toLowerCase()] || 'pm-pill-default';
-  return (
-    <span className={`pm-pill ${cls}`}>
-      <span className="pm-pill-dot" />
-      {status}
-    </span>
-  );
-}
-
-function getRentChangeEffectiveDate(changeRequest) {
-  if (changeRequest.status === 'Pending') return 'After Owner approval';
-  if (changeRequest.status !== 'Approved') return '—';
-  if (!changeRequest.decidedAt) return 'On approval';
-
-  const effectiveAt = new Date(changeRequest.decidedAt);
-  return Number.isNaN(effectiveAt.getTime())
-    ? 'On approval'
-    : effectiveAt.toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' });
-}
-
-function getOwnerRentalProgress(application, contract) {
-  if (contract?.status === 'Active') {
-    return {
-      label: 'Lease active',
-      detail: 'The lease has been activated and the unit is occupied.',
-      tone: 'active',
-    };
-  }
-  if (contract?.status === 'Pending') {
-    return {
-      label: 'Lease awaiting signatures',
-      detail: 'After everyone signs, the Owner or an authorized manager records the signed copy and activates the lease.',
-      tone: 'pending',
-    };
-  }
-  if (contract?.status === 'Terminated') {
-    return {
-      label: 'Lease ended',
-      detail: 'This lease is no longer active.',
-      tone: 'closed',
-    };
-  }
-  if (contract?.status === 'Expired') {
-    return {
-      label: 'Lease expired',
-      detail: 'The lease term has ended.',
-      tone: 'closed',
-    };
-  }
-  if (application.status === 'Converted') {
-    return {
-      label: 'Lease active',
-      detail: 'A lease has been activated for this application.',
-      tone: 'active',
-    };
-  }
-  if (application.status === 'Rejected') {
-    return {
-      label: 'Application declined',
-      detail: 'No lease will be prepared from this application.',
-      tone: 'closed',
-    };
-  }
-  if (application.status === 'Pending Owner Approval') {
-    return {
-      label: 'Owner decision needed',
-      detail: 'Review the manager’s notes, then approve or decline the application.',
-      tone: 'action',
-    };
-  }
-  if (application.status === 'Approved') {
-    return {
-      label: 'Lease preparation',
-      detail: 'The Property Manager prepares the lease once a matching Tenant account is available.',
-      tone: 'pending',
-    };
-  }
-  return {
-    label: 'Property Manager review',
-    detail: application.status === 'Under Review'
-      ? 'The Property Manager is reviewing this application.'
-      : 'The Property Manager reviews the application first.',
-    tone: 'review',
-  };
-}
 
 export default function OwnerDashboard() {
   const [activeSection, setActiveSection] = useState('overview');
@@ -590,59 +498,10 @@ export default function OwnerDashboard() {
     };
   }, [portfolio, sectionPages.contracts?.count]);
 
-  const ownerHistory = useMemo(() => portfolio.leaseSigningHistory.map((event) => {
-    const action = String(event.action || '').toUpperCase();
-    if (action.includes('APPLICATION APPROVAL RULE')) {
-      return { ...event, category: 'approval', categoryLabel: 'Application approval', title: 'Application review responsibility changed' };
-    }
-    if (action.includes('RENT CHANGE')) {
-      return {
-        ...event,
-        category: 'pricing',
-        categoryLabel: 'Rent changes',
-        title: action.startsWith('PROPOSE')
-          ? 'Manager proposed a rent change'
-          : action.startsWith('APPROVED')
-            ? 'Rent change approved'
-            : action.startsWith('CANCEL') ? 'Rent proposal closed because the rate changed' : 'Rent change declined',
-      };
-    }
-    if (action.includes('LEASE SIGNING AUTHORITY')) {
-      return {
-        ...event,
-        category: 'authority',
-        categoryLabel: 'Manager permissions',
-        title: action.startsWith('GRANT') ? 'Lease signing permission granted' : 'Lease signing permission removed',
-      };
-    }
-    if (action.includes('LEASE TERMINATION AUTHORITY')) {
-      return {
-        ...event,
-        category: 'authority',
-        categoryLabel: 'Manager permissions',
-        title: action.startsWith('GRANT') ? 'Lease ending permission granted' : 'Lease ending permission removed',
-      };
-    }
-    if (action.includes('RENT PRICING AUTHORITY')) {
-      return {
-        ...event,
-        category: 'authority',
-        categoryLabel: 'Manager permissions',
-        title: action.startsWith('GRANT') ? 'Rent-setting permission granted' : 'Rent-setting permission removed',
-      };
-    }
-    if (action === 'ACTIVATE') {
-      return { ...event, category: 'lease', categoryLabel: 'Lease activity', title: 'Lease activated' };
-    }
-    if (action === 'TERMINATE') {
-      return { ...event, category: 'lease', categoryLabel: 'Lease activity', title: 'Lease ended' };
-    }
-    return { ...event, category: 'lease', categoryLabel: 'Lease activity', title: event.action || 'Portfolio record updated' };
-  }).sort((first, second) => new Date(second.createdAt || 0) - new Date(first.createdAt || 0)), [portfolio.leaseSigningHistory]);
-
-  const visibleOwnerHistory = historyFilter === 'all'
-    ? ownerHistory
-    : ownerHistory.filter((event) => event.category === historyFilter);
+  const ownerHistory = useMemo(
+    () => mapOwnerHistory(portfolio.leaseSigningHistory),
+    [portfolio.leaseSigningHistory],
+  );
 
   return (
     <div className="pm-owner" data-active-section={activeSection}>
@@ -683,33 +542,7 @@ export default function OwnerDashboard() {
                 </Button>
               </div>
             )}
-            {/* Metrics Strip */}
-            <div className="pm-metrics" data-workspace-section="overview">
-              <div className="pm-metric">
-                <span className="pm-metric-label">Owned properties</span>
-                <span className="pm-metric-value">{metrics.totalOwned}</span>
-              </div>
-              <div className="pm-metric">
-                <span className="pm-metric-label">Occupancy rate</span>
-                <span className="pm-metric-value">{metrics.occupancyRate}%</span>
-                <span className="text-muted small mt-1">
-                  ({metrics.occupiedUnits}/{metrics.totalUnits} Units)
-                </span>
-              </div>
-              <div className="pm-metric">
-                <span className="pm-metric-label">Monthly lease rent</span>
-                <span className="pm-metric-value">
-                  {metrics.totalMonthlyIncome === null ? 'Unavailable' : `₱${metrics.totalMonthlyIncome.toLocaleString('en-PH', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}`}
-                </span>
-              </div>
-              <div className="pm-metric">
-                <span className="pm-metric-label">Active leases</span>
-                <span className="pm-metric-value">{metrics.activeLeasesCount}</span>
-              </div>
-            </div>
+            <OwnerMetricsSection metrics={metrics} />
 
             <div className="pm-panel mb-4" id="portfolio" data-workspace-section="portfolio approvals pricing contracts history maintenance billing">
               <div className="pm-panel-header">{{
@@ -721,14 +554,14 @@ export default function OwnerDashboard() {
                 maintenance: 'Maintenance',
                 payments: 'Payments',
               }[activePortfolioTab] || 'Properties'}</div>
-              <div style={{ padding: '20px' }}>
+              <div className="pm-owner-panel-content">
                   {sectionLoading[activePortfolioTab] && (
-                    <div className="pm-loading py-2" role="status">
+                    <div className="pm-loading pm-owner-section-loading py-2" role="status">
                       <Spinner animation="border" size="sm" className="me-2" />Loading this section…
                     </div>
                   )}
                   {sectionErrors[activePortfolioTab] && (
-                    <div className="pm-alert pm-alert-error mb-3" role="alert">
+                    <div className="pm-alert pm-alert-error pm-owner-section-error mb-3" role="alert">
                       <span>{sectionErrors[activePortfolioTab]}</span>
                       <Button
                         size="sm"
@@ -740,559 +573,67 @@ export default function OwnerDashboard() {
                       </Button>
                     </div>
                   )}
-                  {/* Tab 1: Owned Properties */}
                   {activePortfolioTab === 'properties' && (
-                  <div>
-                    <div className="pm-owner-assets-wrap">
-                    <Table responsive className="pm-table pm-owner-assets-table mb-0">
-                      <thead>
-                        <tr>
-                          <th>Property</th>
-                          <th>Occupancy &amp; yield</th>
-                          <th>Application approval</th>
-                          <th>Manager authority</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {portfolio.properties.length > 0 ? (
-                          portfolio.properties.map((prop) => {
-                            const propId = prop._id || prop.id;
-                            const totalUnits = prop.units?.length || 1;
-                            const occupiedCount = prop.units
-                              ? prop.units.filter((u) => u.status === 'Occupied').length
-                              : ['occupied', 'rented'].includes(prop.status?.toLowerCase()) ? 1 : 0;
-                            
-                            let yieldAmt = prop.units
-                              ? prop.units
-                                  .filter((u) => u.status === 'Occupied')
-                                  .reduce((sum, u) => sum + Number(u.monthlyRate || 0), 0)
-                              : ['occupied', 'rented'].includes(prop.status?.toLowerCase()) ? Number(prop.price || prop.monthlyRate || 0) : 0;
-
-                            if (yieldAmt === 0 && portfolio.contracts.length > 0) {
-                              const activePropContract = portfolio.contracts.find(
-                                (c) => (c.property?._id || c.property?.id || c.property) === propId && c.status?.toLowerCase() === 'active'
-                              );
-                              if (activePropContract) yieldAmt = Number(activePropContract.rentAmount || 0);
-                            }
-
-                            const savedApprovalMode = prop.applicationApprovalMode || 'Owner';
-                            const selectedApprovalMode = approvalModeDrafts[propId] || savedApprovalMode;
-                            const approvalRuleUnchanged = selectedApprovalMode === savedApprovalMode;
-
-                            return (
-                              <tr key={propId}>
-                                <td data-label="Property">
-                                  <div className="pm-owner-property-title">{prop.title}</div>
-                                  <div className="pm-owner-property-meta">
-                                    <span>{prop.address}</span>
-                                    <span className="pm-owner-property-type">{prop.propertyType}</span>
-                                  </div>
-                                </td>
-                                <td data-label="Occupancy &amp; yield">
-                                  <div className="pm-owner-property-metrics">
-                                    <div className="pm-owner-property-metric">
-                                      <span className="pm-owner-control-label">Occupied</span>
-                                      <StatusPill status={`${occupiedCount}/${totalUnits} occupied`} />
-                                    </div>
-                                    <div className="pm-owner-property-metric">
-                                      <span className="pm-owner-control-label">Monthly yield</span>
-                                      <strong className="pm-owner-yield">
-                                        ₱{Number(yieldAmt).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      </strong>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td data-label="Application approval">
-                                  <div className="pm-owner-policy-control">
-                                    <Form.Select
-                                      id={`approval-rule-${propId}`}
-                                      size="sm"
-                                      aria-label={`Application approval rule for ${prop.title}`}
-                                      value={selectedApprovalMode}
-                                      onChange={(event) => setApprovalModeDrafts((current) => ({ ...current, [propId]: event.target.value }))}
-                                    >
-                                      <option value="Owner">Owner reviews applications</option>
-                                      <option value="Manager" disabled={!prop.managerDetails}>Manager reviews applications</option>
-                                    </Form.Select>
-                                    {savingApprovalPropertyId === propId ? (
-                                      <Button size="sm" className="pm-owner-save-state" variant="outline-secondary" disabled aria-live="polite">
-                                        Saving…
-                                      </Button>
-                                    ) : approvalRuleUnchanged ? (
-                                      <span className="pm-owner-saved-note" aria-live="polite">Saved</span>
-                                    ) : (
-                                      <Button
-                                        size="sm"
-                                        className="pm-owner-save-state"
-                                        variant="outline-primary"
-                                        onClick={() => handleApprovalPolicySave(prop)}
-                                      >
-                                        Save changes
-                                      </Button>
-                                    )}
-                                  </div>
-                                </td>
-                                <td data-label="Manager authority">
-                                  {prop.managerDetails ? (
-                                    <div className="pm-owner-authority-control">
-                                      <div className="pm-owner-manager-name">{prop.managerDetails.name || prop.managerDetails.email}</div>
-                                      <div className="pm-owner-authority-row">
-                                        <span className="pm-owner-authority-label">Sign leases</span>
-                                        <span className={`pm-owner-authority-state ${prop.managerLeaseSigningAuthorized ? 'is-authorized' : ''}`}>
-                                          {prop.managerLeaseSigningAuthorized ? 'Authorized' : 'Not authorized'}
-                                        </span>
-                                        <Button
-                                          size="sm"
-                                          variant={prop.managerLeaseSigningAuthorized ? 'outline-danger' : 'outline-primary'}
-                                          aria-label={`${prop.managerLeaseSigningAuthorized ? 'Revoke' : 'Grant'} lease signing authority for ${prop.managerDetails.name || prop.managerDetails.email}`}
-                                          onClick={() => handleLeaseAuthorityClick(prop, 'signing')}
-                                        >
-                                          {prop.managerLeaseSigningAuthorized ? 'Revoke' : 'Grant'}
-                                        </Button>
-                                      </div>
-                                      <div className="pm-owner-authority-row">
-                                        <span className="pm-owner-authority-label">End leases</span>
-                                        <span className={`pm-owner-authority-state ${prop.managerLeaseTerminationAuthorized ? 'is-authorized' : ''}`}>
-                                          {prop.managerLeaseTerminationAuthorized ? 'Authorized' : 'Not authorized'}
-                                        </span>
-                                        <Button
-                                          size="sm"
-                                          variant={prop.managerLeaseTerminationAuthorized ? 'outline-danger' : 'outline-primary'}
-                                          aria-label={`${prop.managerLeaseTerminationAuthorized ? 'Revoke' : 'Grant'} lease termination authority for ${prop.managerDetails.name || prop.managerDetails.email}`}
-                                          onClick={() => handleLeaseAuthorityClick(prop, 'termination')}
-                                        >
-                                          {prop.managerLeaseTerminationAuthorized ? 'Revoke' : 'Grant'}
-                                        </Button>
-                                      </div>
-                                      <div className="pm-owner-authority-row">
-                                        <span className="pm-owner-authority-label">Set rent prices</span>
-                                        <span className={`pm-owner-authority-state ${prop.managerUnitPricingAuthorized ? 'is-authorized' : ''}`}>
-                                          {prop.managerUnitPricingAuthorized ? 'Authorized' : 'Owner approval'}
-                                        </span>
-                                        <Button
-                                          size="sm"
-                                          variant={prop.managerUnitPricingAuthorized ? 'outline-danger' : 'outline-primary'}
-                                          aria-label={`${prop.managerUnitPricingAuthorized ? 'Revoke' : 'Grant'} rent pricing authority for ${prop.managerDetails.name || prop.managerDetails.email}`}
-                                          onClick={() => handleLeaseAuthorityClick(prop, 'pricing')}
-                                        >
-                                          {prop.managerUnitPricingAuthorized ? 'Revoke' : 'Grant'}
-                                        </Button>
-                                      </div>
-                                      {(prop.leaseSigningAgreementReference || prop.leaseTerminationAgreementReference || prop.unitPricingAgreementReference) && (
-                                        <div className="pm-owner-authority-reference">
-                                          {prop.leaseSigningAgreementReference && <div>Lease signing: {prop.leaseSigningAgreementReference}</div>}
-                                          {prop.leaseTerminationAgreementReference && <div>Lease ending: {prop.leaseTerminationAgreementReference}</div>}
-                                          {prop.unitPricingAgreementReference && <div>Rent pricing: {prop.unitPricingAgreementReference}</div>}
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : (
-                                    <div className="pm-owner-manager-unassigned">Assign a Property Manager to manage lease permissions.</div>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })
-                        ) : (
-                          <tr>
-                            <td colSpan="4" className="pm-empty-row">
-                              No property assets linked to your owner account.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </Table>
-                    </div>
-                  </div>
+                    <OwnerPropertiesSection
+                      properties={portfolio.properties}
+                      contracts={portfolio.contracts}
+                      approvalModeDrafts={approvalModeDrafts}
+                      savingApprovalPropertyId={savingApprovalPropertyId}
+                      onApprovalModeChange={(propertyId, value) => setApprovalModeDrafts((current) => ({ ...current, [propertyId]: value }))}
+                      onApprovalPolicySave={handleApprovalPolicySave}
+                      onLeaseAuthorityClick={handleLeaseAuthorityClick}
+                    />
                   )}
-
                   {activePortfolioTab === 'pricing' && (
-                    <section data-workspace-section="pricing" aria-label="Rent change approvals">
-                      <p className="text-muted mb-3">Review each property or unit rent proposal. Approving a unit proposal updates that unit only; its effective date is the approval date. Existing leases keep the rent stated in their signed contract.</p>
-                      <Table responsive className="pm-table mb-0">
-                        <thead>
-                          <tr>
-                            <th>Property / unit</th>
-                            <th>Current rent</th>
-                            <th>Proposed rent</th>
-                            <th>Reason</th>
-                            <th>Status</th>
-                            <th>Effective date</th>
-                            <th>Decision</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {portfolio.rentChangeRequests.length > 0 ? portfolio.rentChangeRequests.map((changeRequest) => (
-                            <tr key={changeRequest.id}>
-                              <td className="pm-cell-title">
-                                {changeRequest.propertyTitle}
-                                <div className="small text-muted">{changeRequest.targetLabel}</div>
-                                <div className="small text-muted">Submitted by {changeRequest.proposedByName} · {new Date(changeRequest.createdAt).toLocaleDateString()}</div>
-                              </td>
-                              <td>₱{Number(changeRequest.currentRate).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / mo</td>
-                              <td className="pm-cell-strong">₱{Number(changeRequest.proposedRate).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / mo</td>
-                              <td>{changeRequest.reason}</td>
-                              <td><StatusPill status={changeRequest.status} /></td>
-                              <td>{getRentChangeEffectiveDate(changeRequest)}</td>
-                              <td>
-                                {changeRequest.status === 'Pending' ? (
-                                  <div className="d-flex flex-wrap gap-2">
-                                    <Button size="sm" variant="primary" onClick={() => handleRentChangeDecision(changeRequest, 'Approved')}>Approve</Button>
-                                    <Button size="sm" variant="outline-danger" onClick={() => handleRentChangeDecision(changeRequest, 'Rejected')}>Decline</Button>
-                                  </div>
-                                ) : (
-                                  <span className="small text-muted">{changeRequest.decidedByName ? `Decided by ${changeRequest.decidedByName}` : 'Decision recorded'}{changeRequest.decisionNote ? <div>{changeRequest.decisionNote}</div> : null}</span>
-                                )}
-                              </td>
-                            </tr>
-                          )) : (
-                            <tr><td colSpan="7" className="pm-empty-row">No rent-change proposals yet.</td></tr>
-                          )}
-                        </tbody>
-                      </Table>
-                    </section>
+                    <OwnerPricingSection
+                      requests={portfolio.rentChangeRequests}
+                      onDecision={handleRentChangeDecision}
+                    />
                   )}
-
                   {activePortfolioTab === 'approvals' && (
-                  <div>
-                    <Table responsive className="pm-table mb-0">
-                      <thead>
-                        <tr>
-                          <th>Applicant</th>
-                          <th>Property / unit</th>
-                          <th>Employment</th>
-                          <th>Monthly income</th>
-                          <th>Requested move-in</th>
-                          <th>Manager review</th>
-                          <th>Application &amp; lease progress</th>
-                          <th>Decision</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {ownerApprovals.map((application) => {
-                          const relatedContracts = portfolio.contracts.filter(
-                            (contract) => String(contract.sourceApplication || '') === String(application.id),
-                          );
-                          const relatedContract = relatedContracts.find((contract) => contract.status === 'Active')
-                            || relatedContracts.find((contract) => contract.status === 'Pending')
-                            || relatedContracts[0];
-                          const rentalProgress = getOwnerRentalProgress(application, relatedContract);
-
-                          return (
-                          <tr key={application.id}>
-                            <td>{application.applicantName || 'Applicant'}<div className="small text-muted">{application.applicantEmail}</div></td>
-                            <td>{application.propertyDetails?.title || 'Property'}{application.unitDetails?.unitNumber ? ` · Unit ${application.unitDetails.unitNumber}` : ''}</td>
-                            <td>{application.employment || '—'}</td>
-                            <td>{application.monthlyIncome != null ? `₱${Number(application.monthlyIncome).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
-                            <td>{application.moveInDate || '—'}</td>
-                            <td>{application.reviewNotes || 'No manager notes'}</td>
-                            <td>
-                              <StatusPill status={application.status} />
-                              <div className={`pm-owner-progress is-${rentalProgress.tone}`}>
-                                <strong>{rentalProgress.label}</strong>
-                                <span>{rentalProgress.detail}</span>
-                              </div>
-                              {application.decisionHistory?.length > 0 && (
-                                <details className="small mt-2">
-                                  <summary>Decision history</summary>
-                                  {application.decisionHistory.map((decision, index) => (
-                                    <div key={`${application.id}-decision-${index}`} className="border-top mt-1 pt-1">
-                                      {decision.fromStatus || 'New'} → {decision.toStatus} · {decision.actor} · {new Date(decision.createdAt).toLocaleDateString()}
-                                      {decision.note && <div>{decision.note}</div>}
-                                      {decision.instructionReference && <div>Instruction: {decision.instructionReference}</div>}
-                                    </div>
-                                  ))}
-                                </details>
-                              )}
-                            </td>
-                            <td style={{ minWidth: 240 }}>
-                              {application.status === 'Pending Owner Approval' ? (
-                                <>
-                                  <Form.Control
-                                    as="textarea"
-                                    rows={2}
-                                    className="mb-2"
-                                    aria-label={`Decision notes for ${application.applicantName || 'applicant'}`}
-                                    placeholder="Optional decision notes"
-                                    value={ownerReviewNotes[application.id] || ''}
-                                    onChange={(event) => setOwnerReviewNotes((current) => ({ ...current, [application.id]: event.target.value }))}
-                                  />
-                                  <div className="d-flex flex-wrap gap-2">
-                                    <Button size="sm" variant="success" disabled={savingOwnerDecisionId === application.id} onClick={() => handleOwnerDecision(application, 'Approved')}>Approve</Button>
-                                    <Button size="sm" variant="outline-danger" disabled={savingOwnerDecisionId === application.id} onClick={() => handleOwnerDecision(application, 'Rejected')}>{savingOwnerDecisionId === application.id ? 'Saving…' : 'Decline'}</Button>
-                                  </div>
-                                </>
-                              ) : <span className="small text-muted">Decision is read-only</span>}
-                            </td>
-                          </tr>
-                          );
-                        })}
-                        {ownerApprovals.length === 0 && (
-                          <tr><td colSpan="8" className="pm-empty-row">No applications are recorded for your properties.</td></tr>
-                        )}
-                      </tbody>
-                    </Table>
-                  </div>
+                    <OwnerApprovalsSection
+                      applications={ownerApprovals}
+                      contracts={portfolio.contracts}
+                      reviewNotes={ownerReviewNotes}
+                      savingApplicationId={savingOwnerDecisionId}
+                      onReviewNoteChange={(applicationId, value) => setOwnerReviewNotes((current) => ({ ...current, [applicationId]: value }))}
+                      onDecision={handleOwnerDecision}
+                    />
                   )}
-
-                  {/* Tab 2: Lease Contracts */}
                   {activePortfolioTab === 'contracts' && (
-                  <div>
-                    <Table responsive className="pm-table mb-0">
-                      <thead>
-                        <tr>
-                          <th>Property / Unit</th>
-                          <th>Tenant name</th>
-                          <th>Monthly rental</th>
-                          <th>Lease Term</th>
-                          <th>Status</th>
-                          <th>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {portfolio.contracts.length > 0 ? (
-                          portfolio.contracts.map((con) => {
-                            const contractId = con._id || con.id;
-                            const propTitle = con.propertyDetails?.title || con.property?.title || con.property;
-                            const tenantName = con.tenantDetails?.name || con.tenant?.name || con.tenant;
-
-                            return (
-                              <tr key={contractId}>
-                                <td className="pm-cell-title">
-                                  {propTitle}
-                                  {(con.unitDetails?.unitNumber || con.unitNumber) && (con.unitDetails?.unitNumber || con.unitNumber) !== 'Main Unit'
-                                    ? ` (${con.unitDetails?.unitNumber || con.unitNumber})`
-                                    : ''}
-                                </td>
-                                <td>{tenantName} {con.tenantDetails?.email || con.tenant?.email ? `(${con.tenantDetails?.email || con.tenant?.email})` : ''}</td>
-                                <td className="pm-cell-strong">
-                                  ₱{Number(con.rentAmount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                                <td className="pm-cell-muted small">
-                                  {con.startDate ? new Date(con.startDate).toLocaleDateString() : '—'} - {con.endDate ? new Date(con.endDate).toLocaleDateString() : '—'}
-                                </td>
-                                <td>
-                                  <StatusPill status={con.status} />
-                                  {con.status === 'Pending' && (
-                                    <div className="pm-contract-next-step">
-                                      Lease prepared. Waiting for all parties to sign outside the system.
-                                    </div>
-                                  )}
-                                  {con.activatedAt && <div className="small text-muted mt-1">{con.activationBasis ? `Authority: ${con.activationBasis} · ` : ''}{new Date(con.activatedAt).toLocaleDateString()}</div>}
-                                  {con.signedCopyReference && <div className="pm-contract-reference">Signed copy: {con.signedCopyReference}</div>}
-                                  {con.terminationEffectiveDate && <div className="small text-muted mt-1">Ended effective {new Date(con.terminationEffectiveDate).toLocaleDateString()}</div>}
-                                  {con.terminationReason && <div className="small text-muted mt-1">{con.terminationReason}</div>}
-                                </td>
-                                <td>
-                                  {con.status === 'Pending' ? (
-                                    <Button size="sm" variant="primary" disabled={activatingContractId === contractId} onClick={() => handleActivateLease(con)}>
-                                      Record signatures & activate
-                                    </Button>
-                                  ) : con.activatedAt ? (
-                                    <span className="small text-muted d-block mb-2">Activated by {con.activatedBy?.name || con.activatedBy?.email || 'Owner'}</span>
-                                  ) : null}
-                                  {['Pending', 'Active'].includes(con.status) && (
-                                    <Button size="sm" variant="outline-danger" onClick={() => openTerminationForm(con)}>
-                                      {con.status === 'Pending' ? 'Cancel pending lease' : 'End lease'}
-                                    </Button>
-                                  )}
-                                  {!['Pending', 'Active'].includes(con.status) && '—'}
-                                </td>
-                              </tr>
-                            );
-                          })
-                        ) : (
-                          <tr>
-                            <td colSpan="6" className="pm-empty-row">
-                              No lease contracts found.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </Table>
-                  </div>
+                    <OwnerContractsSection
+                      contracts={portfolio.contracts}
+                      activatingContractId={activatingContractId}
+                      onActivate={handleActivateLease}
+                      onTerminate={openTerminationForm}
+                    />
                   )}
-
                   {activePortfolioTab === 'history' && (
-                    <section className="pm-owner-history" aria-label="Portfolio history">
-                      <div className="pm-owner-history-header">
-                        <div>
-                          <h3>Portfolio history</h3>
-                          <p>Application review, manager permissions, and lease changes are recorded here.</p>
-                        </div>
-                        <div className="pm-owner-history-filter">
-                          <Form.Label htmlFor="owner-history-filter">Show</Form.Label>
-                          <Form.Select
-                            id="owner-history-filter"
-                            size="sm"
-                            value={historyFilter}
-                            onChange={(event) => setHistoryFilter(event.target.value)}
-                          >
-                            <option value="all">All activity</option>
-                            <option value="approval">Application approval</option>
-                            <option value="authority">Manager permissions</option>
-                            <option value="pricing">Rent changes</option>
-                            <option value="lease">Lease activity</option>
-                          </Form.Select>
-                        </div>
-                      </div>
-                      <div className="pm-owner-history-summary" aria-live="polite">
-                        Showing {visibleOwnerHistory.length} of {ownerHistory.length} {ownerHistory.length === 1 ? 'record' : 'records'}
-                      </div>
-                      {visibleOwnerHistory.length > 0 ? (
-                        <ol className="pm-owner-history-timeline">
-                          {visibleOwnerHistory.map((event) => {
-                            const createdAt = event.createdAt ? new Date(event.createdAt) : null;
-                            const dateLabel = createdAt && !Number.isNaN(createdAt.getTime())
-                              ? createdAt.toLocaleString()
-                              : 'Date unavailable';
-                            return (
-                              <li className="pm-owner-history-item" key={event.id}>
-                                <span className={`pm-owner-history-marker is-${event.category}`} aria-hidden="true" />
-                                <article className="pm-owner-history-card">
-                                  <div className="pm-owner-history-card-top">
-                                    <span className={`pm-owner-history-category is-${event.category}`}>{event.categoryLabel}</span>
-                                    <time dateTime={createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString() : undefined}>
-                                      {dateLabel}
-                                    </time>
-                                  </div>
-                                  <h4>{event.title}</h4>
-                                  {event.summary && <p className="pm-owner-history-description">{event.summary}</p>}
-                                  <div className="pm-owner-history-actor">Recorded by {event.actor || 'System'}</div>
-                                </article>
-                              </li>
-                            );
-                          })}
-                        </ol>
-                      ) : (
-                        <div className="pm-owner-history-empty">
-                          <strong>{ownerHistory.length === 0 ? 'No history yet' : 'No matching activity'}</strong>
-                          <span>{ownerHistory.length === 0 ? 'Updates to approval rules, manager permissions, and leases will appear here.' : 'Choose another filter to see more portfolio records.'}</span>
-                        </div>
-                      )}
-                    </section>
+                    <OwnerHistorySection
+                      events={ownerHistory}
+                      filter={historyFilter}
+                      onFilterChange={setHistoryFilter}
+                    />
                   )}
-
-                  {/* Tab 3: Maintenance Oversight */}
                   {activePortfolioTab === 'maintenance' && (
-                  <div>
-                    <Table responsive className="pm-table mb-0">
-                      <thead>
-                        <tr>
-                          <th>Property</th>
-                          <th>Issue Description</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {portfolio.maintenanceRequests.length > 0 ? (
-                          portfolio.maintenanceRequests.map((m) => {
-                            const reqId = m._id || m.id;
-                            const propTitle = m.propertyDetails?.title || m.property?.title || m.property || 'Property Asset';
-
-                            return (
-                              <tr key={reqId}>
-                                <td className="pm-cell-title">{propTitle}</td>
-                                <td>{m.title || m.issueDescription}</td>
-                                <td>
-                                  <StatusPill status={m.status} />
-                                </td>
-                              </tr>
-                            );
-                          })
-                        ) : (
-                          <tr>
-                            <td colSpan="3" className="pm-empty-row">
-                              No maintenance requests on record for your properties.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </Table>
-                  </div>
+                    <OwnerMaintenanceSection requests={portfolio.maintenanceRequests} />
                   )}
-
                   {activePortfolioTab === 'payments' && (
-                  <div>
-                    <h6 className="fw-bold mb-3">Portfolio rent summary</h6>
-                    <Row className="g-3 mb-4">
-                      <Col sm={6} xl={3}>
-                        <div className="pm-panel p-3 h-100">
-                          <div className="small text-muted">Rent invoiced</div>
-                          <div className="fs-5 fw-bold">₱{metrics.rentInvoiced.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                        </div>
-                      </Col>
-                      <Col sm={6} xl={3}>
-                        <div className="pm-panel p-3 h-100">
-                          <div className="small text-muted">Verified rent collected</div>
-                          <div className="fs-5 fw-bold text-success">₱{metrics.rentCollected.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                        </div>
-                      </Col>
-                      <Col sm={6} xl={3}>
-                        <div className="pm-panel p-3 h-100">
-                          <div className="small text-muted">Balance outstanding</div>
-                          <div className="fs-5 fw-bold text-danger">₱{metrics.outstandingBalance.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                        </div>
-                      </Col>
-                      <Col sm={6} xl={3}>
-                        <div className="pm-panel p-3 h-100">
-                          <div className="small text-muted">Payments awaiting review</div>
-                          <div className="fs-5 fw-bold">{metrics.paymentsAwaitingReview}</div>
-                        </div>
-                      </Col>
-                    </Row>
-                    <h6 className="fw-bold mb-3">Invoice balances</h6>
-                    <Table responsive className="pm-table mb-4">
-                      <thead><tr><th>Property</th><th>Tenant</th><th>Total due</th><th>Paid</th><th>Balance</th><th>Due date</th><th>Status</th><th>Awaiting review</th></tr></thead>
-                      <tbody>
-                        {portfolio.invoices.map((invoice) => (
-                          <tr key={invoice._id || invoice.id}>
-                            <td>{invoice.propertyDetails?.title || 'Property'}</td>
-                            <td>{invoice.tenantDetails?.name || invoice.tenantDetails?.email || 'Tenant'}</td>
-                            <td>₱{Number(invoice.totalDue || invoice.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                            <td>₱{Number(invoice.amountPaid || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                            <td className="fw-semibold">₱{Number(invoice.balanceDue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                            <td>{invoice.dueDate || '—'}</td>
-                            <td>
-                              <StatusPill status={invoice.status} />
-                              {invoice.isArchived && <div className="small text-muted mt-1">Archived history</div>}
-                            </td>
-                            <td>{Number(invoice.pendingPaymentCount || 0)}</td>
-                          </tr>
-                        ))}
-                        {portfolio.invoices.length === 0 && <tr><td colSpan="8" className="text-center text-muted py-4">No invoices found for your properties.</td></tr>}
-                      </tbody>
-                    </Table>
-
-                    <h6 className="fw-bold mb-3">Payment history</h6>
-                    <Table responsive className="pm-table pm-payment-history mb-0">
-                      <thead><tr><th>Property</th><th>Tenant</th><th>Payment date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th><th>Details</th></tr></thead>
-                      <tbody>
-                        {portfolio.payments.map((payment) => (
-                          <tr key={payment.id}>
-                            <td>{payment.invoiceDetails?.property || 'Property'}</td>
-                            <td>{payment.invoiceDetails?.tenant || 'Tenant'}</td>
-                            <td>{payment.paymentDate ? new Date(`${payment.paymentDate}T00:00:00`).toLocaleDateString('en-PH') : '—'}</td>
-                            <td className="fw-semibold">₱{Number(payment.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                            <td>{payment.paymentMethod || '—'}</td>
-                            <td>{payment.referenceNumber || '—'}</td>
-                            <td><StatusPill status={payment.status} /></td>
-                            <td>{payment.status === 'Verified' ? <PaymentAcknowledgmentButton payment={payment} /> : payment.rejectionReason || payment.reversalReason || '—'}</td>
-                          </tr>
-                        ))}
-                        {portfolio.payments.length === 0 && <tr><td colSpan="8" className="text-center text-muted py-4">No payment transactions recorded for your properties.</td></tr>}
-                      </tbody>
-                    </Table>
-                    <CollectionPagination
-                      count={sectionPages.paymentTransactions?.count || 0}
-                      page={sectionPages.paymentTransactions?.page || 1}
-                      pageCount={sectionPages.paymentTransactions?.pageCount || 1}
-                      onPageChange={(nextPage) => loadOwnerData({
-                        section: 'payments', force: true, includeSummary: false,
-                        page: sectionPages.payments?.page || 1, paymentPage: nextPage,
+                    <OwnerBillingSection
+                      metrics={metrics}
+                      invoices={portfolio.invoices}
+                      payments={portfolio.payments}
+                      paymentCount={sectionPages.paymentTransactions?.count || 0}
+                      paymentPage={sectionPages.paymentTransactions?.page || 1}
+                      paymentPageCount={sectionPages.paymentTransactions?.pageCount || 1}
+                      onPaymentPageChange={(nextPage) => loadOwnerData({
+                        section: 'payments',
+                        force: true,
+                        includeSummary: false,
+                        page: sectionPages.payments?.page || 1,
+                        paymentPage: nextPage,
                       })}
                     />
-                  </div>
                   )}
                   {sectionPages[activePortfolioTab] && (
                     <CollectionPagination
