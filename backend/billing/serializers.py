@@ -53,10 +53,10 @@ def invoice_payment_summary(invoice):
 
 class InvoiceSerializer(serializers.ModelSerializer):
     _id = serializers.IntegerField(source='id', read_only=True)
-    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
     rentAmount = serializers.DecimalField(source='amount', max_digits=12, decimal_places=2, read_only=True)
-    lateFee = serializers.DecimalField(source='late_fee', max_digits=12, decimal_places=2, required=False, default=0.00)
-    totalDue = serializers.DecimalField(source='total_due', max_digits=12, decimal_places=2, required=False)
+    lateFee = serializers.DecimalField(source='late_fee', max_digits=12, decimal_places=2, required=False, default=Decimal('0.00'), min_value=Decimal('0.00'))
+    totalDue = serializers.DecimalField(source='total_due', max_digits=12, decimal_places=2, required=False, min_value=Decimal('0.01'))
     dueDate = serializers.DateField(source='due_date')
     status = serializers.ChoiceField(choices=Invoice.STATUS_CHOICES, required=False)
     amountPaid = serializers.SerializerMethodField()
@@ -117,6 +117,18 @@ class InvoiceSerializer(serializers.ModelSerializer):
                 for field in attempted_evidence
             })
 
+        financial_fields = ('amount', 'late_fee', 'total_due')
+        if self.instance is None or any(field in attrs for field in financial_fields):
+            amount = attrs.get('amount', getattr(self.instance, 'amount', Decimal('0.00')))
+            late_fee = attrs.get('late_fee', getattr(self.instance, 'late_fee', Decimal('0.00')))
+            total = amount + late_fee
+            if 'total_due' in attrs and attrs['total_due'] != total:
+                raise serializers.ValidationError({'totalDue': 'Total due must equal rent amount plus late fee.'})
+            try:
+                attrs['total_due'] = self.fields['totalDue'].run_validation(total)
+            except serializers.ValidationError as error:
+                raise serializers.ValidationError({'totalDue': error.detail}) from error
+
         status_value = attrs.get('status')
         current_status = getattr(self.instance, 'status', None)
         allowed_initial_statuses = ('Pending', 'Overdue')
@@ -172,12 +184,11 @@ class InvoiceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'property': 'Invoice property must match its lease contract.'})
         return attrs
 
-    def create(self, validated_data):
-        if 'total_due' not in validated_data:
-            amount = validated_data.get('amount', 0)
-            late_fee = validated_data.get('late_fee', 0)
-            validated_data['total_due'] = amount + late_fee
-        return super().create(validated_data)
+    def update(self, instance, validated_data):
+        invoice = super().update(instance, validated_data)
+        # Status validation may have calculated the old balance before saving.
+        invoice.__dict__.pop('_payment_ledger_summary', None)
+        return invoice
 
 
 class PaymentSerializer(serializers.ModelSerializer):

@@ -13,6 +13,7 @@ import {
 import { activateContract, terminateContract } from '../services/contractService';
 import DashboardHeader from '../components/DashboardHeader';
 import PaymentAcknowledgmentButton from '../components/PaymentAcknowledgmentButton';
+import { resolveMonthlyIncome } from '../utils/leaseIncome';
 import './OwnerDashboard.css';
 
 const PILL_CLASS = {
@@ -527,13 +528,16 @@ export default function OwnerDashboard() {
 
   // Advanced Metrics Logic (Explicit Numeric Conversion)
   const metrics = useMemo(() => {
+    const totalMonthlyIncome = resolveMonthlyIncome(
+      portfolio.summary, portfolio.contracts, sectionPages.contracts?.count,
+    );
     if (portfolio.summary) {
       return {
         totalOwned: Number(portfolio.summary.totalOwned || 0),
         totalUnits: Number(portfolio.summary.totalUnits || 0),
         occupiedUnits: Number(portfolio.summary.occupiedUnits || 0),
         occupancyRate: Number(portfolio.summary.occupancyRate || 0),
-        totalMonthlyIncome: Number(portfolio.summary.totalMonthlyIncome || 0),
+        totalMonthlyIncome,
         activeLeasesCount: Number(portfolio.summary.activeLeasesCount || 0),
         rentInvoiced: Number(portfolio.summary.rentInvoiced || 0),
         rentCollected: Number(portfolio.summary.rentCollected || 0),
@@ -544,29 +548,22 @@ export default function OwnerDashboard() {
     const { properties, contracts } = portfolio;
     let totalUnits = 0;
     let occupiedUnits = 0;
-    let totalMonthlyIncome = 0;
 
     properties.forEach((p) => {
       if (Array.isArray(p.units) && p.units.length > 0) {
         totalUnits += p.units.length;
         const occupied = p.units.filter((u) => u.status === 'Occupied');
         occupiedUnits += occupied.length;
-        totalMonthlyIncome += occupied.reduce((sum, u) => sum + Number(u.monthlyRate || 0), 0);
       } else {
         totalUnits += 1;
         if (['occupied', 'rented'].includes(p.status?.toLowerCase())) {
           occupiedUnits += 1;
-          totalMonthlyIncome += Number(p.price || p.monthlyRate || 0);
         }
       }
     });
 
     const activeContracts = contracts.filter((c) => c.status?.toLowerCase() === 'active');
     
-    // Fallback: If no direct property income match but active contracts exist
-    if (totalMonthlyIncome === 0 && activeContracts.length > 0) {
-      totalMonthlyIncome = activeContracts.reduce((sum, c) => sum + Number(c.rentAmount || 0), 0);
-    }
 
     const occupancyRate = totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0;
     const activeInvoices = portfolio.invoices.filter((invoice) => invoice.status !== 'Cancelled');
@@ -591,7 +588,7 @@ export default function OwnerDashboard() {
       outstandingBalance,
       paymentsAwaitingReview,
     };
-  }, [portfolio]);
+  }, [portfolio, sectionPages.contracts?.count]);
 
   const ownerHistory = useMemo(() => portfolio.leaseSigningHistory.map((event) => {
     const action = String(event.action || '').toUpperCase();
@@ -674,6 +671,18 @@ export default function OwnerDashboard() {
           </div>
         ) : (
           <>
+            {sectionErrors.overview && (
+              <div className="pm-alert pm-alert-error mb-3" data-workspace-section="overview" role="alert">
+                <span>{sectionErrors.overview}</span>
+                <Button
+                  size="sm" variant="outline-danger" className="ms-2"
+                  disabled={sectionLoading.overview}
+                  onClick={() => loadOwnerData({ section: 'overview', force: true, includeSummary: true })}
+                >
+                  Retry overview
+                </Button>
+              </div>
+            )}
             {/* Metrics Strip */}
             <div className="pm-metrics" data-workspace-section="overview">
               <div className="pm-metric">
@@ -688,12 +697,12 @@ export default function OwnerDashboard() {
                 </span>
               </div>
               <div className="pm-metric">
-                <span className="pm-metric-label">Est. monthly revenue</span>
+                <span className="pm-metric-label">Monthly lease rent</span>
                 <span className="pm-metric-value">
-                  ₱{Number(metrics.totalMonthlyIncome || 0).toLocaleString('en-PH', {
+                  {metrics.totalMonthlyIncome === null ? 'Unavailable' : `₱${metrics.totalMonthlyIncome.toLocaleString('en-PH', {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
-                  })}
+                  })}`}
                 </span>
               </div>
               <div className="pm-metric">

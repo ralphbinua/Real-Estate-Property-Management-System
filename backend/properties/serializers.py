@@ -1,4 +1,7 @@
+from decimal import Decimal
+
 from rest_framework import serializers
+from django.db import transaction
 from django.utils import timezone
 from .models import Property, Unit, PropertyInquiry, RentalApplication, UnitPricingAuthorization, UnitPriceChangeRequest
 from users.serializers import UserSerializer
@@ -21,7 +24,7 @@ class UnitSerializer(serializers.ModelSerializer):
     _id = serializers.IntegerField(source='id', read_only=True)
     propertyId = serializers.IntegerField(source='property_id', read_only=True)
     unitNumber = serializers.CharField(source='unit_number')
-    monthlyRate = serializers.DecimalField(source='monthly_rate', max_digits=10, decimal_places=2, min_value=0.01)
+    monthlyRate = serializers.DecimalField(source='monthly_rate', max_digits=10, decimal_places=2, min_value=Decimal('0.01'))
     tenantId = serializers.IntegerField(source='tenant_id', read_only=True, allow_null=True)
     tenantDetails = UserSerializer(source='tenant', read_only=True)
 
@@ -365,6 +368,17 @@ class PropertyInquirySerializer(serializers.ModelSerializer):
         return property_obj
 
     def validate(self, attrs):
+        if self.instance:
+            changed_targets = [
+                field for field in ('property', 'unit')
+                if field in attrs
+                and getattr(attrs[field], 'pk', None) != getattr(self.instance, f'{field}_id')
+            ]
+            if changed_targets and RentalApplication.objects.filter(inquiry=self.instance).exists():
+                raise serializers.ValidationError({
+                    field: 'The target of an inquiry with a rental application cannot be changed.'
+                    for field in changed_targets
+                })
         property_obj = attrs.get('property', getattr(self.instance, 'property', None))
         unit = attrs.get('unit', getattr(self.instance, 'unit', None))
         if unit and property_obj and unit.property_id != property_obj.id:
@@ -373,7 +387,11 @@ class PropertyInquirySerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'unit': 'Viewings can only be scheduled for available units.'})
         if property_obj and property_obj.units.exists() and not unit:
             raise serializers.ValidationError({'unit': 'Choose an available unit for this property.'})
-        if property_obj and not property_obj.units.exists() and property_obj.status != 'Available':
+        is_existing_unitless_target = bool(
+            self.instance and property_obj and property_obj.pk == self.instance.property_id
+            and self.instance.unit_id is None and unit is None
+        )
+        if property_obj and not property_obj.units.exists() and property_obj.status != 'Available' and not is_existing_unitless_target:
             raise serializers.ValidationError({'property': 'Viewings can only be scheduled for available properties.'})
         requested_status = attrs.get('status')
         if requested_status == 'Application In Progress' and self.instance and not RentalApplication.objects.filter(inquiry=self.instance).exists():
@@ -388,6 +406,14 @@ class PropertyInquirySerializer(serializers.ModelSerializer):
         if viewing_at and ('viewing_at' in attrs or requested_status == 'Viewing Scheduled') and viewing_at <= timezone.now():
             raise serializers.ValidationError({'viewing_at': 'Choose a future date and time for the viewing.'})
         return attrs
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        # Application submission locks the same inquiry. Recheck after acquiring
+        # it so an application created after initial validation freezes its target.
+        self.instance = PropertyInquiry.objects.select_for_update().get(pk=instance.pk)
+        validated_data = self.validate(validated_data)
+        return super().update(self.instance, validated_data)
 
 
 class RentalApplicationSerializer(serializers.ModelSerializer):
@@ -534,9 +560,9 @@ class UnitPriceChangeRequestSerializer(serializers.ModelSerializer):
         source='unit', queryset=Unit.objects.filter(property__is_deleted=False),
         required=False, allow_null=True,
     )
-    targetLabel = serializers.CharField(read_only=True)
+    targetLabel = serializers.CharField(source='target_label', read_only=True)
     currentRate = serializers.DecimalField(source='current_rate', max_digits=12, decimal_places=2, read_only=True)
-    proposedRate = serializers.DecimalField(source='proposed_rate', max_digits=12, decimal_places=2, min_value=0.01)
+    proposedRate = serializers.DecimalField(source='proposed_rate', max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
     decisionNote = serializers.CharField(source='decision_note', read_only=True)
     proposedByName = serializers.SerializerMethodField()
     decidedByName = serializers.SerializerMethodField()

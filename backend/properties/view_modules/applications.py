@@ -6,7 +6,7 @@ from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.utils import timezone
 from django.contrib.auth import get_user_model
-from ..models import Property, Unit, RentalApplication, RentalApplicationDecision
+from ..models import Property, PropertyInquiry, Unit, RentalApplication, RentalApplicationDecision
 from ..serializers import RentalApplicationSerializer
 from ..querysets import property_serializer_queryset
 from contracts.models import Contract
@@ -75,7 +75,11 @@ class RentalApplicationViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_create(self, serializer):
-        inquiry = serializer.validated_data['inquiry']
+        inquiry = PropertyInquiry.objects.select_for_update().get(
+            pk=serializer.validated_data['inquiry'].pk,
+        )
+        serializer.validate_inquiry(inquiry)
+        serializer.validated_data['inquiry'] = inquiry
         application = serializer.save(
             created_by=self.request.user,
             status='Submitted',
@@ -290,16 +294,17 @@ class RentalApplicationViewSet(viewsets.ModelViewSet):
             selected_tenant_id = None
         if selected_tenant_id != matching_tenant.pk:
             raise ValidationError({'tenant': 'Select the existing tenant account whose email matches the applicant.'})
+        # Keep property-before-unit ordering consistent with manual lease saves.
+        property_obj = Property.objects.select_for_update().get(pk=inquiry.property_id)
         unit = inquiry.unit
         if unit:
             unit = Unit.objects.select_for_update().get(pk=unit.pk)
             if unit.status != 'Reserved':
                 raise ValidationError({'unit': 'The approved application no longer holds this unit. Review its availability before creating a lease.'})
         else:
-            property_obj = Property.objects.select_for_update().get(pk=inquiry.property_id)
             if property_obj.status != 'Pending':
                 raise ValidationError({'property': 'The approved application no longer holds this property.'})
-        rent_amount = unit.monthly_rate if unit else inquiry.property.price
+        rent_amount = unit.monthly_rate if unit else property_obj.price
         lease_payload = {
             'property': inquiry.property_id,
             'unit': unit.pk if unit else None,

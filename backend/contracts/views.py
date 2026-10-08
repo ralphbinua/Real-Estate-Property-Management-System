@@ -9,7 +9,7 @@ from .models import Contract
 from .serializers import ContractSerializer, LeaseTerminationSerializer
 from properties.models import (
     LeaseSigningAuthorization, LeaseTerminationAuthorization, Property, Unit,
-    RentalApplicationDecision,
+    RentalApplication, RentalApplicationDecision,
 )
 from properties.querysets import property_serializer_queryset
 from users.audit import record_activity
@@ -270,6 +270,10 @@ class ContractViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def activate(self, request, pk=None):
         existing = self.get_object()
+        # Conversion and application review lock the application before its
+        # property. Use the same order when activation changes that application.
+        if existing.source_application_id:
+            RentalApplication.objects.select_for_update().get(pk=existing.source_application_id)
         contract = Contract.objects.select_for_update().select_related('property').get(pk=existing.pk)
         if contract.status != 'Pending':
             raise ValidationError({'status': 'Only a pending lease can be activated.'})

@@ -27,6 +27,7 @@ Access and decision authority should follow the written management agreement and
 ## Rental application and lease workflow
 
 - Each new property starts with **Owner approval** for rental applications. The Owner may delegate application decisions to the assigned Property Manager. The rule in effect when an application is submitted is saved with that application, so changing the rule later does not rewrite older applications.
+- Once an inquiry has a rental application, its property and unit cannot be changed. Start a new inquiry for a different property or unit; viewing notes and other valid inquiry updates remain available.
 - A Manager may review applications and send them to the Owner when the Owner's approval is required. If the Owner delegated decisions to the Manager, the Manager may approve or decline them.
 - A lease prepared from an application must use an approved application and a Tenant account whose email matches the applicant. An Admin must create the Tenant account first; the system does not create accounts or send invitations automatically.
 - A Manager may prepare an application-based lease. To activate it, the Manager must have the Owner's separate signing authorization for that property. The Owner may activate a lease directly. An Admin may record activation only with the Owner's written instruction and its reference.
@@ -159,6 +160,14 @@ The payment ledger does not process money online and does not upload receipt fil
 Admin and Manager financial reports can be filtered by invoice due month and show rent invoiced, verified rent collected, and the remaining balance separately.
 
 Verified payment rows offer **Download PDF** in the Tenant, Admin, Manager, and Owner payment views. The acknowledgment identifies the Tenant, property/unit, rental invoice, payment amount/date/method/reference, and verification. Its remaining balance is labeled with the download time, so later partial payments are reflected correctly. Downloads use the existing payment access scope through `GET /api/payments/{id}/acknowledgment/`; pending, rejected, and reversed payments cannot be downloaded. Install ReportLab using the backend setup command above when updating an existing environment.
+
+## Financial validation and summaries
+
+Invoice rent amounts and lease rents must be positive; late fees and security deposits may be zero but cannot be negative. An invoice's total is its rent amount plus late fee. Creating or editing financial amounts recalculates that total, and a supplied total must match it. Verified or reversed payment history continues to protect invoice amounts from editing; ordinary notes updates do not recalculate historical totals.
+
+Invoice status filters use the same verified-payment balance and due-date rules as the displayed invoice status. Cancelled invoices stay cancelled, including when payment history exists. Owner monthly income is the sum of active lease rents for their visible properties; changing listing rates does not change this contractual income. If the overview cannot load and lease records are incomplete, monthly lease rent is shown as Unavailable with an overview retry; a single lease page is not treated as the full portfolio.
+
+A pending lease on a property without units keeps that property reserved as Pending. Editing the draft preserves that reservation; moving the draft releases the old property when no other lease or approved application holds it.
 
 ## Project layout
 

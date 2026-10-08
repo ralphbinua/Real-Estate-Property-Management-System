@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 from .models import Contract
 from properties.models import Property, Unit
@@ -12,9 +14,9 @@ class ContractSerializer(serializers.ModelSerializer):
     _id = serializers.IntegerField(source='id', read_only=True)
     startDate = serializers.DateField(source='start_date')
     endDate = serializers.DateField(source='end_date')
-    rentAmount = serializers.DecimalField(source='rent_amount', max_digits=10, decimal_places=2)
+    rentAmount = serializers.DecimalField(source='rent_amount', max_digits=10, decimal_places=2, min_value=Decimal('0.01'))
     rentDueDay = serializers.IntegerField(source='rent_due_day', min_value=1, max_value=28, required=False, default=1)
-    depositAmount = serializers.DecimalField(source='deposit_amount', max_digits=10, decimal_places=2, required=False, default=0.00)
+    depositAmount = serializers.DecimalField(source='deposit_amount', max_digits=10, decimal_places=2, required=False, default=Decimal('0.00'), min_value=Decimal('0.00'))
     status = serializers.CharField(read_only=True)
     sourceApplication = serializers.IntegerField(source='source_application_id', read_only=True, allow_null=True)
     manualLeaseReason = serializers.CharField(source='manual_lease_reason', required=False, allow_blank=True, trim_whitespace=True)
@@ -59,7 +61,7 @@ class ContractSerializer(serializers.ModelSerializer):
         if not instance.unit_id:
             return None
         from properties.serializers import UnitSerializer
-        return UnitSerializer(instance.unit).data
+        return UnitSerializer(instance.unit, context=self.context).data
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -137,7 +139,11 @@ class ContractSerializer(serializers.ModelSerializer):
                 and approved_application.inquiry.unit_id is None
                 and property_obj.status == 'Pending'
             )
-            if property_obj.status != 'Available' and not application_holds_property:
+            is_current_property_reservation = bool(
+                self.instance and not self.instance.is_deleted
+                and self.instance.property_id == property_obj.pk and self.instance.unit_id is None
+            )
+            if property_obj.status != 'Available' and not application_holds_property and not is_current_property_reservation:
                 raise serializers.ValidationError({'property': 'The selected property is not available.'})
 
         if user and getattr(user, 'role', None) == User.Role.PROPERTY_MANAGER:
@@ -180,6 +186,24 @@ class ContractSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
+        # Validation happens before the save transaction. Serialize competing
+        # reservations on their property, then recheck the freshly locked target.
+        property_obj = Property.objects.select_for_update().filter(
+            pk=validated_data['property'].pk, is_deleted=False,
+        ).first()
+        if not property_obj:
+            raise serializers.ValidationError({'property': 'The selected property is no longer available.'})
+        unit = validated_data.get('unit')
+        if unit:
+            unit = Unit.objects.select_for_update().filter(pk=unit.pk, property=property_obj).first()
+            if not unit:
+                raise serializers.ValidationError({'unit': 'The selected unit no longer belongs to this property.'})
+        elif property_obj.units.count() == 1:
+            unit = property_obj.units.select_for_update().first()
+        validated_data['property'] = property_obj
+        validated_data['unit'] = unit
+        validated_data = self.validate(validated_data)
+
         contract = Contract.objects.create(**validated_data)
         if contract.status in ('Active', 'Pending') and contract.unit_id:
             contract.unit.status = 'Occupied' if contract.status == 'Active' else 'Reserved'
@@ -196,8 +220,37 @@ class ContractSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
-        old_property = instance.property
-        old_unit = instance.unit
+        instance = Contract.objects.select_for_update().get(pk=instance.pk)
+        if instance.status != 'Pending' and validated_data:
+            raise serializers.ValidationError({'detail': 'Only pending lease terms can be edited.'})
+        property_id = getattr(validated_data.get('property'), 'pk', instance.property_id)
+        # A retarget can affect two properties/units. Lock each set in ID order,
+        # always properties before units, to serialize edits with new leases.
+        properties = {
+            prop.pk: prop for prop in Property.objects.select_for_update().filter(
+                pk__in={instance.property_id, property_id},
+            ).order_by('pk')
+        }
+        property_obj = properties.get(property_id)
+        if not property_obj or property_obj.is_deleted:
+            raise serializers.ValidationError({'property': 'The selected property is no longer available.'})
+        unit_id = getattr(validated_data.get('unit', instance.unit), 'pk', None)
+        if unit_id is None and property_obj.units.count() == 1:
+            unit_id = property_obj.units.values_list('pk', flat=True).first()
+        unit_ids = {pk for pk in (instance.unit_id, unit_id) if pk is not None}
+        units = {
+            unit.pk: unit for unit in Unit.objects.select_for_update().filter(pk__in=unit_ids).order_by('pk')
+        }
+        if unit_id is not None and unit_id not in units:
+            raise serializers.ValidationError({'unit': 'The selected unit is no longer available.'})
+        old_property = properties[instance.property_id]
+        old_unit = units.get(instance.unit_id)
+        instance.property = old_property
+        instance.unit = old_unit
+        self.instance = instance
+        validated_data['property'] = property_obj
+        validated_data['unit'] = units.get(unit_id)
+        validated_data = self.validate(validated_data)
         contract = super().update(instance, validated_data)
         if old_unit and old_unit.pk != contract.unit_id and not old_unit.contracts.filter(status__in=['Active', 'Pending'], is_deleted=False).exclude(pk=contract.pk).exists():
             old_unit.status = 'Available'
@@ -214,8 +267,16 @@ class ContractSerializer(serializers.ModelSerializer):
         for prop in {old_property, contract.property}:
             if prop.units.exists():
                 prop.status = 'Available' if prop.units.exclude(status='Occupied').exists() else 'Occupied'
-            elif not prop.contracts.filter(status='Active', is_deleted=False).exists():
-                prop.status = 'Available'
+            else:
+                leases = prop.contracts.filter(is_deleted=False)
+                if leases.filter(status='Active').exists():
+                    prop.status = 'Occupied'
+                elif leases.filter(status='Pending').exists() or prop.inquiries.filter(
+                    unit__isnull=True, rental_application__status='Approved',
+                ).exists():
+                    prop.status = 'Pending'
+                else:
+                    prop.status = 'Available'
             prop.save(update_fields=['status'])
         return contract
 

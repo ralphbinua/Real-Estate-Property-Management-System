@@ -14,7 +14,7 @@ from core.pagination import OptInPageNumberPagination
 from users.audit import record_activity
 from notifications.models import Notification
 from notifications.services import create_for_recipients
-from .querysets import invoice_serializer_queryset
+from .querysets import invoice_serializer_queryset, with_effective_invoice_status
 
 from .models import Invoice, Payment
 from .serializers import InvoiceSerializer, PaymentSerializer
@@ -77,7 +77,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         invoice_status = self.request.query_params.get('status')
         search = self.request.query_params.get('search', '').strip()
         if invoice_status:
-            invoices = invoices.filter(status__iexact=invoice_status)
+            invoices = with_effective_invoice_status(invoices).filter(_effective_invoice_status__iexact=invoice_status)
         if search:
             invoices = invoices.filter(
                 Q(property__title__icontains=search)
@@ -108,13 +108,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         else:
             return Response({'detail': 'You may not view tenant invoices.'}, status=status.HTTP_403_FORBIDDEN)
 
-        invoices = Invoice.objects.filter(
-            tenant_id=tenant_id,
-        ).order_by('-id')
-        invoices = invoices.filter(Q(is_deleted=False) | Q(payments__isnull=False)).distinct()
-        if request.user.role == 'Property Manager':
-            invoices = invoices.filter(property__manager=request.user)
-        invoices = invoice_serializer_queryset(invoices)
+        invoices = self.get_queryset().filter(tenant_id=tenant_id)
         page = self.paginate_queryset(invoices)
         if page is not None:
             serializer = self.get_serializer(page, many=True)

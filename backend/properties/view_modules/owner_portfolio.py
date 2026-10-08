@@ -58,22 +58,12 @@ class OwnerPortfolioView(APIView):
         unit_totals = Unit.objects.filter(property_id__in=property_ids).aggregate(
             total=Count('id'),
             occupied=Count('id', filter=Q(status='Occupied')),
-            income=Coalesce(
-                Sum('monthly_rate', filter=Q(status='Occupied')),
-                Value(Decimal('0.00')),
-                output_field=money_field,
-            ),
         )
         occupied_property_status = Q(status__iexact='occupied') | Q(status__iexact='rented')
         no_unit_properties = properties.annotate(unit_count=Count('units')).filter(unit_count=0)
         legacy_totals = no_unit_properties.aggregate(
             count=Count('id'),
             occupied=Count('id', filter=occupied_property_status),
-            income=Coalesce(
-                Sum('price', filter=occupied_property_status),
-                Value(Decimal('0.00')),
-                output_field=money_field,
-            ),
         )
 
         active_contracts = Contract.objects.filter(
@@ -91,9 +81,7 @@ class OwnerPortfolioView(APIView):
         )
         total_units = unit_totals['total'] + legacy_totals['count']
         occupied_units = unit_totals['occupied'] + legacy_totals['occupied']
-        monthly_income = unit_totals['income'] + legacy_totals['income']
-        if monthly_income == 0 and active_contract_totals['count']:
-            monthly_income = active_contract_totals['rent']
+        monthly_income = active_contract_totals['rent']
 
         verified_totals = Payment.objects.filter(
             invoice_id=OuterRef('pk'), status=Payment.Status.VERIFIED,
@@ -118,9 +106,11 @@ class OwnerPortfolioView(APIView):
                 output_field=IntegerField(),
             ),
         )
+        from billing.querysets import with_effective_invoice_status
+        invoices = with_effective_invoice_status(invoices)
         zero = Value(Decimal('0.00'), output_field=money_field)
         invoice_totals = invoices.aggregate(
-            pendingInvoices=Count('id', filter=Q(status__in=['Pending', 'Partially Paid', 'Overdue'])),
+            pendingInvoices=Count('id', filter=Q(_effective_invoice_status__in=['Pending', 'Partially Paid', 'Overdue'])),
             invoiced=Coalesce(
                 Sum(Case(
                     When(status='Cancelled', then=zero),
