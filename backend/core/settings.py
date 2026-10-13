@@ -21,6 +21,8 @@ if not SECRET_KEY:
     raise ImproperlyConfigured('Set DJANGO_SECRET_KEY when DJANGO_DEBUG is disabled.')
 
 ALLOWED_HOSTS = [host.strip() for host in os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if host.strip()]
+if os.getenv('VERCEL_URL'):
+    ALLOWED_HOSTS.append(os.environ['VERCEL_URL'])
 
 # Application definition
 INSTALLED_APPS = [
@@ -140,7 +142,19 @@ USE_I18N = True
 USE_TZ = True
 
 # Static files
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Login throttles must share state across Vercel function instances.
+if os.getenv('REDIS_URL'):
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': os.environ['REDIS_URL'],
+        }
+    }
+elif os.getenv('VERCEL') and not DEBUG:
+    raise ImproperlyConfigured('Set REDIS_URL for shared login throttling on Vercel.')
 
 if not DEBUG:
     SESSION_COOKIE_SECURE = True

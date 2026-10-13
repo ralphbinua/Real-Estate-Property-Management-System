@@ -116,6 +116,39 @@ npm run test:browser
 
 The test starts its own servers on ports `18000` and `15173`, creates a temporary SQLite database and Tenant account, then checks sign-in, session restore after refresh, profile editing, and logout. It cleans up its test data and servers afterward. It leaves `DJANGO_DEBUG` disabled and does not use your PostgreSQL database. On Windows it uses installed Brave or Edge; if neither is installed, run `npx playwright install chromium` once. Set `PYTHON_EXECUTABLE` to your virtual environment's Python path if `python` does not point to it.
 
+## Prepare a Vercel deployment
+
+The root `vercel.json` deploys the Vite frontend and Django backend as one
+[Vercel Services](https://vercel.com/docs/services) project. Services is in beta.
+It sends `/api`, `/admin`, and `/static` to Django and other paths to the
+frontend. Keep `VITE_API_URL` unset so the browser uses the same-origin `/api`
+path for session and CSRF cookies.
+
+1. Import this repository into Vercel with the repository root as the project
+   root. Use Vercel CLI 50.38.0 or newer if deploying from the command line.
+2. Provision a managed PostgreSQL database and a Redis-compatible cache.
+   Choose a database and cache region close to the Vercel function region.
+3. Set these Vercel environment variables for each deployed environment:
+   `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=false`, `DB_NAME`, `DB_USER`,
+   `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, and `REDIS_URL`. Set
+   `DJANGO_ALLOWED_HOSTS` to your custom production domain, if any. Vercel's
+   generated deployment hostname is added automatically from `VERCEL_URL`.
+   Use a Redis protocol URL (`redis://` or `rediss://`), not an HTTP REST URL.
+   The production database connection uses TLS by default. Keep secrets only
+   in Vercel environment settings; do not commit `.env` files.
+4. Run `python manage.py migrate --settings=core.settings` against the target
+   database as a separate release step using the same environment variables.
+   Do not run migrations from a request handler or during every build.
+5. Deploy a preview first. Check `/api/auth/csrf/`, `/admin/`, a deep frontend
+   link, and sign-in, refresh, profile edit, and logout. Then deploy to
+   production. Django's collected admin static files are served by Vercel's
+   CDN because `STATIC_ROOT` is configured.
+
+The monthly invoice management command is not scheduled by this configuration.
+Run `python manage.py generate_monthly_invoices` from a trusted scheduled job
+until a dedicated, authenticated scheduling path is added. The backend has no
+file upload fields today; if uploads are added, use durable object storage.
+
 ## API areas
 
 The backend API is served under `/api`:
