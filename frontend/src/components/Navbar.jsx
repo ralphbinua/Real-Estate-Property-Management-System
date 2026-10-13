@@ -27,10 +27,9 @@ export default function AppNavbar() {
     return () => window.removeEventListener('system-settings-updated', loadSettings);
   }, [user]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setExpanded(false);
-    logout();
-    navigate('/login');
+    if (await logout()) navigate('/login');
   };
 
   return (

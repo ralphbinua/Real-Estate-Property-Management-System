@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.contrib.auth.password_validation import validate_password
 from .models import User, SystemSettings
 
 class UserSerializer(serializers.ModelSerializer):
@@ -7,10 +8,15 @@ class UserSerializer(serializers.ModelSerializer):
     isActive = serializers.BooleanField(source='is_active', read_only=True)
     createdAt = serializers.DateTimeField(source='date_joined', read_only=True) 
     name = serializers.CharField(required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True, required=False)
 
     class Meta:
         model = User
-        fields = ['_id', 'username', 'email', 'first_name', 'last_name', 'name', 'role', 'isActive', 'isDeleted', 'createdAt']
+        fields = ['_id', 'username', 'email', 'first_name', 'last_name', 'name', 'role', 'isActive', 'isDeleted', 'createdAt', 'password']
+
+    def validate_password(self, value):
+        validate_password(value, self.instance)
+        return value
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -33,6 +39,7 @@ class UserSerializer(serializers.ModelSerializer):
         return attrs
 
     def update(self, instance, validated_data):
+        password = validated_data.pop('password', None)
         name = validated_data.pop('name', None)
         if name is not None:
             parts = name.strip().split(' ', 1)
@@ -54,9 +61,8 @@ class UserSerializer(serializers.ModelSerializer):
             if attr not in ['email', 'role']:
                 setattr(instance, attr, value)
 
-        request = self.context.get('request')
-        if request and 'password' in request.data and request.data['password']:
-            instance.set_password(request.data['password'])
+        if password:
+            instance.set_password(password)
 
         instance.save()
         return instance
@@ -71,6 +77,10 @@ class UserCreateSerializer(serializers.ModelSerializer):
             'password': {'write_only': True, 'required': True},
             'role': {'required': False}
         }
+
+    def validate_password(self, value):
+        validate_password(value)
+        return value
 
     def create(self, validated_data):
         name = validated_data.pop('name', '')

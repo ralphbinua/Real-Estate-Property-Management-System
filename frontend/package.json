@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:browser": "node scripts/browser-smoke.cjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -26,6 +27,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.4",
     "globals": "^17.11.0",
+    "playwright": "^1.62.1",
     "vite": "^8.2.2"
   }
 }

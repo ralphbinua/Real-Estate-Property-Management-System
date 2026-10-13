@@ -1,9 +1,15 @@
+import hashlib
+
 from rest_framework import viewsets, permissions
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
+from rest_framework import status
+from django.contrib.auth import authenticate, login, logout
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Q
@@ -33,27 +39,55 @@ class IsSystemAdmin(permissions.BasePermission):
             and user.role == User.Role.ADMIN
         )
 
-class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    def validate(self, attrs):
-        email_or_username = attrs.get("username") or attrs.get("email")
-        if email_or_username:
-            try:
-                user_obj = User.objects.get(email__iexact=email_or_username)
-                attrs["username"] = user_obj.username
-            except User.DoesNotExist:
-                pass
+class LoginThrottle(AnonRateThrottle):
+    rate = '5/min'
 
-        data = super().validate(attrs)
-        data['token'] = data.pop('access')
-        data['_id'] = self.user.id
-        name_str = f"{self.user.first_name} {self.user.last_name}".strip()
-        data['name'] = name_str if name_str else self.user.email
-        data['email'] = self.user.email
-        data['role'] = getattr(self.user, 'role', 'Admin')
-        return data
 
-class CustomTokenObtainPairView(TokenObtainPairView):
-    serializer_class = CustomTokenObtainPairSerializer
+class AccountLoginThrottle(SimpleRateThrottle):
+    scope = 'login_account'
+    rate = '10/min'
+
+    def get_cache_key(self, request, view):
+        email = str(request.data.get('email', '')).strip().casefold()
+        if not email:
+            return None
+        digest = hashlib.sha256(email.encode('utf-8')).hexdigest()
+        return self.cache_format % {'scope': self.scope, 'ident': digest}
+
+
+class CsrfView(APIView):
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
+
+    @method_decorator(ensure_csrf_cookie)
+    def get(self, request):
+        return Response({'detail': 'CSRF cookie set.'})
+
+
+@method_decorator(csrf_protect, name='dispatch')
+class SessionLoginView(APIView):
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
+    throttle_classes = [LoginThrottle, AccountLoginThrottle]
+
+    def post(self, request):
+        email = str(request.data.get('email', '')).strip()
+        password = request.data.get('password', '')
+        user = User.objects.filter(email__iexact=email).first()
+        authenticated = authenticate(request, email=user.email if user else email, password=password)
+        if not authenticated or authenticated.is_deleted or not authenticated.is_active:
+            return Response({'detail': 'Invalid credentials.'}, status=status.HTTP_401_UNAUTHORIZED)
+        login(request, authenticated)
+        return Response(CurrentUserProfileSerializer(authenticated).data)
+
+
+class SessionLogoutView(APIView):
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        logout(request)
+        return Response({'detail': 'Signed out.'})
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()

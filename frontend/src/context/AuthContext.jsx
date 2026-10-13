@@ -4,15 +4,21 @@ import api, { resetSessionExpiry } from '../services/api';
 
 export const AuthProvider = ({ children }) => {
   const [sessionExpired, setSessionExpired] = useState(false);
-  const [user, setUser] = useState(() => {
-    const savedUser = localStorage.getItem('user');
-    return savedUser ? JSON.parse(savedUser) : null;
-  });
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    api.get('/users/me/')
+      .then(({ data }) => { if (active) setUser(data); })
+      .catch(() => { if (active) setUser(null); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     const handleSessionExpired = () => {
       setUser(null);
-      localStorage.removeItem('user');
       setSessionExpired(true);
     };
 
@@ -23,6 +29,7 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     setSessionExpired(false);
     try {
+      await api.get('/auth/csrf/');
       const response = await api.post('/auth/login/', {
         email,
         password,
@@ -32,7 +39,6 @@ export const AuthProvider = ({ children }) => {
       resetSessionExpiry();
       setSessionExpired(false);
       setUser(userData);
-      localStorage.setItem('user', JSON.stringify(userData));
       return { success: true, user: userData };
     } catch (error) {
       return { 
@@ -46,23 +52,37 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await api.get('/auth/csrf/');
+      await api.post('/auth/logout/');
+    } catch (error) {
+      if (error.response?.status === 403) {
+        try {
+          await api.get('/users/me/');
+          return false;
+        } catch (probeError) {
+          if (![401, 403].includes(probeError.response?.status)) return false;
+        }
+      } else if (error.response?.status !== 401) {
+        return false;
+      }
+    }
     resetSessionExpiry();
     setSessionExpired(false);
     setUser(null);
-    localStorage.removeItem('user');
+    return true;
   };
 
   const updateUser = (updates) => {
     setUser((current) => {
       const updated = { ...current, ...updates };
-      localStorage.setItem('user', JSON.stringify(updated));
       return updated;
     });
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, updateUser, sessionExpired }}>
+    <AuthContext.Provider value={{ user, login, logout, updateUser, sessionExpired, loading }}>
       {children}
     </AuthContext.Provider>
   );
