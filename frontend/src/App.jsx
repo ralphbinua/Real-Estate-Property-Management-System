@@ -35,9 +35,11 @@ export default function App() {
 }
 
 function AppLayout() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const location = useLocation();
   const showWorkspace = Boolean(user && location.pathname !== '/login');
+
+  if (loading) return <div className="pm-loading" role="status">Loading your workspace…</div>;
 
   return (
     <>

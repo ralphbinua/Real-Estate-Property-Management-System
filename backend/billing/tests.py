@@ -300,4 +300,4 @@ class PaymentAcknowledgmentApiTests(APITestCase):
 
     def test_anonymous_download_requires_authentication(self):
         response = self.client.get(self.acknowledgment_url())
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 403)

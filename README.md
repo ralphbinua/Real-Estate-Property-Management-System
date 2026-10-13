@@ -39,7 +39,7 @@ Access and decision authority should follow the written management agreement and
 
 - **Frontend:** React, Vite, React Bootstrap, React Router, and Axios
 - **Backend:** Django and Django REST Framework
-- **Authentication:** JSON Web Tokens (JWT)
+- **Authentication:** Django sessions with CSRF protection
 - **Database:** PostgreSQL
 
 ## Run locally
@@ -58,13 +58,12 @@ From the project folder, open PowerShell and run:
 cd backend
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install Django djangorestframework djangorestframework-simplejwt django-cors-headers "psycopg[binary]" python-dotenv "reportlab>=5.0.1,<6"
+python -m pip install -r requirements.txt
 ```
 
 The backend reads its environment settings from `backend/.env`. Create that file with your database connection details:
 
 ```dotenv
-DJANGO_DEBUG=true
 DJANGO_SECRET_KEY=replace-with-a-long-random-local-key
 DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
 DJANGO_CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
@@ -89,10 +88,11 @@ The Django superuser is separate from the app's Admin role. To use the Admin das
 
 ```powershell
 python manage.py shell -c "from users.models import User; u = User.objects.get(email='admin@example.com'); u.role = User.Role.ADMIN; u.save(update_fields=['role'])"
-python manage.py runserver 127.0.0.1:8000
+python manage.py runserver 127.0.0.1:8000 --settings=core.local_settings
 ```
 
 Keep the backend terminal running. The Vite development server forwards `/api` requests to this Django server.
+The local settings file permits HTTP and non-secure cookies only for loopback hosts. It leaves `DJANGO_DEBUG` disabled; never use `core.local_settings` in production.
 
 ### 2. Start the frontend
 
@@ -105,6 +105,16 @@ npm run dev
 ```
 
 Open the local address printed by Vite. By default, it is `http://localhost:5173`.
+
+### Browser security smoke test
+
+With the backend virtual environment activated and frontend packages installed, run this from `frontend`:
+
+```powershell
+npm run test:browser
+```
+
+The test starts its own servers on ports `18000` and `15173`, creates a temporary SQLite database and Tenant account, then checks sign-in, session restore after refresh, profile editing, and logout. It cleans up its test data and servers afterward. It leaves `DJANGO_DEBUG` disabled and does not use your PostgreSQL database. On Windows it uses installed Brave or Edge; if neither is installed, run `npx playwright install chromium` once. Set `PYTHON_EXECUTABLE` to your virtual environment's Python path if `python` does not point to it.
 
 ## API areas
 
@@ -123,7 +133,9 @@ The backend API is served under `/api`:
 | Maintenance requests | `/api/maintenance/` |
 | Notifications | `/api/notifications/` |
 
-Most API requests require a valid sign-in token. The frontend adds it automatically after login.
+Most API requests require a signed-in session. The browser sends the secure session cookie automatically, and the frontend sends a CSRF token with changes. Deploy the frontend and API on the same origin so this cookie flow works as configured.
+
+Older JWT sign-ins are no longer accepted after this update. Users must sign in again. Login attempts are limited by client IP and account email using Django's cache; use a shared cache in a multi-server deployment and add rate limiting at the reverse proxy as well.
 
 ## Monthly rent invoices
 
@@ -195,4 +207,6 @@ frontend/                React and Vite user interface
 
 ## Before deployment
 
-The commands above are for local development. Before deploying, set `DJANGO_DEBUG=false`, use a secure `DJANGO_SECRET_KEY`, configure the real host names and database, and review the deployment's security and access settings. Do not commit `.env` files or real passwords to Git.
+The commands above are for local development. Before deploying, set `DJANGO_DEBUG=false`, use a secure `DJANGO_SECRET_KEY`, configure the real host names and database, and serve the app over HTTPS. The backend redirects HTTP to HTTPS in production and enables a one-hour HSTS policy by default. If TLS terminates at a trusted reverse proxy, set `DJANGO_TRUST_X_FORWARDED_PROTO=true` only after the proxy strips untrusted forwarding headers. Run `python manage.py check --deploy` with the production environment. Do not commit `.env` files or real passwords to Git.
+
+Keep production secrets in the hosting provider's secret store and rotate them after suspected exposure. Back up PostgreSQL regularly and test restoring a backup before relying on it. Review account and payment audit events after suspicious activity. The GitHub security workflow checks pinned Python dependencies and production npm dependencies on pull requests and pushes to `main`. For multiple backend workers, use a shared Django cache so login throttling applies across workers. HSTS subdomain and preload options require a domain-wide HTTPS decision; leave them disabled until every subdomain is verified.

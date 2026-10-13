@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -16,6 +17,9 @@ User = get_user_model()
 
 class PaymentWorkflowApiTests(APITestCase):
     """Exercise the payment lifecycle through real login and payment endpoints."""
+
+    def setUp(self):
+        cache.clear()
 
     @classmethod
     def setUpTestData(cls):
@@ -51,7 +55,7 @@ class PaymentWorkflowApiTests(APITestCase):
         }, format='json')
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data['role'], actor.role)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['token']}")
+        self.assertNotIn('token', response.data)
 
     def submit_payment(self, amount='12000.00', reference='WORKFLOW-001'):
         response = self.client.post('/api/payments/', {

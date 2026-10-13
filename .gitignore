@@ -8,6 +8,7 @@ __pycache__/
 node_modules/
 dist/
 .pnpm-store/
+.security-test-deps/
 # Local agent planning notes; keep them in the checkout, out of commits.
 .codex/
 .superpowers/

@@ -16,12 +16,14 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from users.views import CustomTokenObtainPairView, SystemSettingsView
+from users.views import CsrfView, SessionLoginView, SessionLogoutView, SystemSettingsView
 from properties.views import OwnerPortfolioView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/auth/login/', CustomTokenObtainPairView.as_view(), name='token_login'),
+    path('api/auth/csrf/', CsrfView.as_view(), name='csrf_cookie'),
+    path('api/auth/login/', SessionLoginView.as_view(), name='session_login'),
+    path('api/auth/logout/', SessionLogoutView.as_view(), name='session_logout'),
     path('api/settings/', SystemSettingsView.as_view(), name='system_settings'),
     path('api/users/', include('users.urls')),
     path('api/properties/', include('properties.urls')),

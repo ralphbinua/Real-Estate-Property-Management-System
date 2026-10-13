@@ -3,7 +3,6 @@ Django settings for core project.
 """
 
 from pathlib import Path
-from datetime import timedelta
 import os
 from django.core.exceptions import ImproperlyConfigured
 
@@ -16,7 +15,7 @@ try:
 except ImportError:
     pass
 
-DEBUG = os.getenv('DJANGO_DEBUG', 'true').strip().lower() in ('1', 'true', 'yes', 'on')
+DEBUG = os.getenv('DJANGO_DEBUG', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY') or ('development-only-insecure-key' if DEBUG else '')
 if not SECRET_KEY:
     raise ImproperlyConfigured('Set DJANGO_SECRET_KEY when DJANGO_DEBUG is disabled.')
@@ -34,7 +33,6 @@ INSTALLED_APPS = [
 
     # Third-party apps
     'rest_framework',
-    'rest_framework_simplejwt',
     'corsheaders',
 
     # Local apps
@@ -70,16 +68,17 @@ CORS_ALLOWED_ORIGINS = [
 # REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
     ),
 }
 
-# SimpleJWT Configuration
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'AUTH_HEADER_TYPES': ('Bearer',),
-}
+SESSION_COOKIE_AGE = 8 * 60 * 60
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
 
 ROOT_URLCONF = 'core.urls'
 
@@ -110,7 +109,7 @@ DATABASES = {
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
         'OPTIONS': {
-            'sslmode': os.getenv('DB_SSLMODE', 'require') if os.getenv('DB_HOST') and 'supabase' in os.getenv('DB_HOST') else 'prefer',
+            'sslmode': os.getenv('DB_SSLMODE', 'prefer' if DEBUG else 'require'),
         }
     }
 }
@@ -148,10 +147,16 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = int(os.getenv('DJANGO_HSTS_SECONDS', '3600'))
+    SECURE_REFERRER_POLICY = 'same-origin'
+    if os.getenv('DJANGO_TRUST_X_FORWARDED_PROTO', 'false').lower() == 'true':
+        SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Email
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-    },
-}
+if DEBUG:
+    MAILERS = {
+        'default': {
+            'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+        },
+    }
