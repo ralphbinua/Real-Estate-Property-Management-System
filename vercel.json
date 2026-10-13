@@ -8,7 +8,8 @@
       ]
     },
     "backend": {
-      "root": "backend"
+      "root": "backend",
+      "entrypoint": "core.wsgi:application"
     }
   },
   "rewrites": [
