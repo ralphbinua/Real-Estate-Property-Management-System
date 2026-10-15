@@ -95,7 +95,7 @@ export default function PropertyForm({ onPropertyCreated }) {
 
       <Row className="mb-3">
         <Col md={6}>
-          <Form.Group>
+          <Form.Group controlId="property-title">
             <Form.Label className="fw-bold text-secondary">Title</Form.Label>
             <Form.Control 
               placeholder="e.g. Modern Sunset Condo"
@@ -106,7 +106,7 @@ export default function PropertyForm({ onPropertyCreated }) {
           </Form.Group>
         </Col>
         <Col md={6}>
-          <Form.Group>
+          <Form.Group controlId="property-type">
             <Form.Label className="fw-bold text-secondary">Property Type</Form.Label>
             <Form.Select 
               value={formData.propertyType} 
@@ -128,8 +128,8 @@ export default function PropertyForm({ onPropertyCreated }) {
           </div>
           {formData.units.map((unit, index) => (
             <Row className="g-2 mb-2" key={`unit-${index}`}>
-              <Col><Form.Control placeholder="Unit number (e.g. 101)" value={unit.unitNumber} onChange={(e) => setFormData((current) => ({ ...current, units: current.units.map((item, i) => i === index ? { ...item, unitNumber: e.target.value } : item) }))} required /></Col>
-              <Col><Form.Control type="number" min="0" step="0.01" placeholder="Monthly rent (₱)" value={unit.monthlyRate} onChange={(e) => setFormData((current) => ({ ...current, units: current.units.map((item, i) => i === index ? { ...item, monthlyRate: e.target.value } : item) }))} required /></Col>
+              <Col><Form.Control aria-label={`Unit ${index + 1} number`} placeholder="Unit number (e.g. 101)" value={unit.unitNumber} onChange={(e) => setFormData((current) => ({ ...current, units: current.units.map((item, i) => i === index ? { ...item, unitNumber: e.target.value } : item) }))} required /></Col>
+              <Col><Form.Control aria-label={`Unit ${index + 1} monthly rent`} type="number" min="0" step="0.01" placeholder="Monthly rent (₱)" value={unit.monthlyRate} onChange={(e) => setFormData((current) => ({ ...current, units: current.units.map((item, i) => i === index ? { ...item, monthlyRate: e.target.value } : item) }))} required /></Col>
               <Col xs="auto"><Button type="button" variant="outline-danger" disabled={formData.units.length === 1} aria-label={`Remove unit ${index + 1}`} onClick={() => setFormData((current) => ({ ...current, units: current.units.filter((_, i) => i !== index) }))}>Remove</Button></Col>
             </Row>
           ))}
@@ -137,7 +137,7 @@ export default function PropertyForm({ onPropertyCreated }) {
         </Form.Group>
       )}
 
-      <Form.Group className="mb-3">
+      <Form.Group className="mb-3" controlId="property-description">
         <Form.Label className="fw-bold text-secondary">Description</Form.Label>
         <Form.Control 
           as="textarea" 
@@ -150,7 +150,7 @@ export default function PropertyForm({ onPropertyCreated }) {
 
       <Row className="mb-3">
         <Col md={6}>
-          <Form.Group>
+          <Form.Group controlId="property-address">
             <Form.Label className="fw-bold text-secondary">Address</Form.Label>
             <Form.Control 
               placeholder="Full property address"
@@ -161,7 +161,7 @@ export default function PropertyForm({ onPropertyCreated }) {
           </Form.Group>
         </Col>
         {!['Apartment', 'Condo'].includes(formData.propertyType) && <Col md={6}>
-          <Form.Group>
+          <Form.Group controlId="property-price">
             <Form.Label className="fw-bold text-secondary">Price (₱)</Form.Label>
             <Form.Control 
               type="number" 
@@ -176,7 +176,7 @@ export default function PropertyForm({ onPropertyCreated }) {
 
       <Row className="mb-3">
         <Col md={4}>
-          <Form.Group>
+          <Form.Group controlId="property-status">
             <Form.Label className="fw-bold text-secondary">Status</Form.Label>
             <Form.Select 
               value={formData.status} 
@@ -189,7 +189,7 @@ export default function PropertyForm({ onPropertyCreated }) {
           </Form.Group>
         </Col>
         <Col md={4}>
-          <Form.Group>
+          <Form.Group controlId="property-owner">
             <Form.Label className="fw-bold text-secondary">Assign Property Owner</Form.Label>
             <Form.Select 
               value={formData.owner} 
@@ -206,7 +206,7 @@ export default function PropertyForm({ onPropertyCreated }) {
           </Form.Group>
         </Col>
         <Col md={4}>
-          <Form.Group>
+          <Form.Group controlId="property-manager">
             <Form.Label className="fw-bold text-secondary">Assign Property Manager</Form.Label>
             <Form.Select 
               value={formData.manager} 
@@ -223,7 +223,7 @@ export default function PropertyForm({ onPropertyCreated }) {
           </Form.Group>
         </Col>
         <Col md={12} className="mt-3">
-          <Form.Group>
+          <Form.Group controlId="property-agents">
             <Form.Label className="fw-bold text-secondary">Assign Agents</Form.Label>
             <Form.Select
               multiple
@@ -244,7 +244,7 @@ export default function PropertyForm({ onPropertyCreated }) {
         </Col>
       </Row>
 
-      <Form.Group className="mb-3">
+      <Form.Group className="mb-3" controlId="property-approval-mode">
         <Form.Label className="fw-bold text-secondary">Rental application approval</Form.Label>
         <Form.Select
           value={formData.applicationApprovalMode}

@@ -507,7 +507,7 @@ export default function OwnerDashboard() {
     <div className="pm-owner" data-active-section={activeSection}>
       <Container>
         <DashboardHeader role="owner" section={activeSection} overviewTitle="Owner Portfolio Overview" overviewDescription="Register properties you own and monitor occupancy, leases, maintenance, and rental income.">
-          {(activeSection === 'overview' || activeSection === 'portfolio') && <Button variant="dark" onClick={() => setShowPropertyModal(true)}>Add property</Button>}
+          {(activeSection === 'overview' || activeSection === 'portfolio') && <Button variant="primary" className="pm-btn-primary" onClick={() => setShowPropertyModal(true)}>Add property</Button>}
         </DashboardHeader>
 
         {error && (
@@ -709,7 +709,7 @@ export default function OwnerDashboard() {
           </Modal.Body>
           <Modal.Footer>
             <Button variant="outline-secondary" onClick={() => setShowPropertyModal(false)}>Cancel</Button>
-            <Button variant="dark" type="submit" disabled={savingProperty}>{savingProperty ? 'Saving…' : 'Add property'}</Button>
+            <Button variant="primary" className="pm-btn-primary" type="submit" disabled={savingProperty}>{savingProperty ? 'Saving…' : 'Add property'}</Button>
           </Modal.Footer>
         </Form>
       </Modal>

@@ -139,6 +139,7 @@ function SignedInNotificationCenter() {
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
           <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
+        <span className="notification-trigger-label" aria-hidden="true">Notifications</span>
         {unreadCount > 0 && <span className="notification-count">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 

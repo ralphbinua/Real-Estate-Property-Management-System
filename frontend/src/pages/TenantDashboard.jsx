@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { Container, Form, Spinner, Button, Modal } from 'react-bootstrap';
+import { Link } from 'react-router-dom';
 import Table from '../components/ResponsiveTable.jsx';
 import { useAuth } from '../context/useAuth';
 import useNotificationDeepLink from '../hooks/useNotificationDeepLink';
 import { fetchMaintenanceRequests, createMaintenanceRequest } from '../services/maintenanceService';
 import { fetchProperties } from '../services/propertyService';
 import { fetchContracts } from '../services/contractService';
-import { fetchMyProfile, updateMyProfile } from '../services/profileService';
 import { fetchSystemSettings } from '../services/systemSettingsService';
 import TenantInvoiceViewer from '../components/TenantInvoiceViewer';
 import DashboardHeader from '../components/DashboardHeader';
@@ -32,7 +32,7 @@ function TicketStatusPill({ status }) {
 
 export default function TenantDashboard() {
   const [activeSection, setActiveSection] = useState('overview');
-  const { user, updateUser } = useAuth();
+  const { user } = useAuth();
   const [requests, setRequests] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [availableProperties, setAvailableProperties] = useState([]);
@@ -41,8 +41,6 @@ export default function TenantDashboard() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [profileData, setProfileData] = useState({ first_name: '', last_name: '', email: '' });
   const [supportEmail, setSupportEmail] = useState('');
 
   useEffect(() => {
@@ -100,14 +98,6 @@ export default function TenantDashboard() {
   }, []);
 
   useEffect(() => {
-    fetchMyProfile().then((profile) => setProfileData({
-      first_name: profile.first_name || '',
-      last_name: profile.last_name || '',
-      email: profile.email || '',
-    })).catch(() => {});
-  }, [user]);
-
-  useEffect(() => {
     fetchSystemSettings().then((settings) => setSupportEmail(settings.support_email || '')).catch(() => {});
   }, []);
 
@@ -135,24 +125,6 @@ export default function TenantDashboard() {
     }
   };
 
-  const handleProfileSave = async (e) => {
-    e.preventDefault();
-    try {
-      const profile = await updateMyProfile(profileData);
-      updateUser({
-        _id: profile._id,
-        name: profile.name,
-        first_name: profile.first_name,
-        last_name: profile.last_name,
-        email: profile.email,
-      });
-      setShowProfileModal(false);
-      setSuccess('Your profile was updated.');
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to update your profile.');
-    }
-  };
-
   // Metrics
   const totalTickets = requests.length;
   const openTickets = requests.filter((r) => r.status?.toLowerCase() === 'open').length;
@@ -168,7 +140,7 @@ export default function TenantDashboard() {
           overviewTitle={`Welcome back, ${user?.name || 'Tenant'}`}
           overviewDescription={<>Track your repair requests and rent records.{supportEmail && <> Support: <a href={`mailto:${supportEmail}`}>{supportEmail}</a></>}</>}
         >
-          {activeSection === 'overview' && <Button variant="outline-secondary" onClick={() => setShowProfileModal(true)}>Edit profile</Button>}
+          {activeSection === 'overview' && <Button as={Link} to="/profile" variant="outline-secondary">Edit profile</Button>}
           {(activeSection === 'overview' || activeSection === 'maintenance') && <Button variant="light" className="pm-btn-primary" onClick={() => { void openMaintenanceForm(); }}>Report new issue</Button>}
         </DashboardHeader>
 
@@ -339,17 +311,6 @@ export default function TenantDashboard() {
                 Submit ticket
               </Button>
             </Modal.Footer>
-          </Form>
-        </Modal>
-        <Modal show={showProfileModal} onHide={() => setShowProfileModal(false)} centered>
-          <Modal.Header closeButton><Modal.Title>Edit personal information</Modal.Title></Modal.Header>
-          <Form onSubmit={handleProfileSave}>
-            <Modal.Body>
-              <Form.Group className="mb-3"><Form.Label>First name</Form.Label><Form.Control value={profileData.first_name} onChange={(e) => setProfileData({ ...profileData, first_name: e.target.value })} required /></Form.Group>
-              <Form.Group className="mb-3"><Form.Label>Last name</Form.Label><Form.Control value={profileData.last_name} onChange={(e) => setProfileData({ ...profileData, last_name: e.target.value })} /></Form.Group>
-              <Form.Group><Form.Label>Email</Form.Label><Form.Control type="email" value={profileData.email} onChange={(e) => setProfileData({ ...profileData, email: e.target.value })} required /></Form.Group>
-            </Modal.Body>
-            <Modal.Footer><Button variant="secondary" onClick={() => setShowProfileModal(false)}>Cancel</Button><Button type="submit">Save profile</Button></Modal.Footer>
           </Form>
         </Modal>
       </Container>

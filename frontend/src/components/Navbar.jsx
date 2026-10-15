@@ -4,6 +4,7 @@ import { Button, Container, Navbar } from 'react-bootstrap';
 import { useAuth } from '../context/useAuth';
 import { fetchSystemSettings } from '../services/systemSettingsService';
 import NotificationCenter from './NotificationCenter';
+import WorkspaceSidebar from './WorkspaceSidebar';
 import { ROLE_WORKSPACES } from '../config/workspaceNavigation';
 
 function initials(name = '') {
@@ -27,13 +28,22 @@ export default function AppNavbar() {
     return () => window.removeEventListener('system-settings-updated', loadSettings);
   }, [user]);
 
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setExpanded(false);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [expanded]);
+
   const handleLogout = async () => {
     setExpanded(false);
     if (await logout()) navigate('/login');
   };
 
   return (
-    <Navbar expand="lg" expanded={expanded} onToggle={setExpanded} className="app-navbar sticky-top">
+    <Navbar expand="lg" expanded={expanded} onToggle={setExpanded} className={`app-navbar sticky-top${expanded ? ' is-menu-open' : ''}`}>
       <Container>
         <Navbar.Brand as={Link} to={user ? role.path : '/login'} className="app-brand">
           <span className="app-brand-mark" aria-hidden="true">
@@ -47,16 +57,26 @@ export default function AppNavbar() {
         {user && <Navbar.Toggle aria-controls="app-primary-navigation" aria-expanded={expanded} aria-label="Toggle navigation" />}
         {user && (
           <Navbar.Collapse id="app-primary-navigation">
+            <div className="app-mobile-workspace-nav">
+              <WorkspaceSidebar mobileMenu onNavigate={() => setExpanded(false)} />
+            </div>
             <div className="app-account">
+              <div className="app-mobile-account-heading">ACCOUNT</div>
               <NotificationCenter />
               <span className="app-role-pill">{role.label}</span>
-              <span className="app-avatar" aria-hidden="true">{initials(user.name || user.email)}</span>
-              <span className="app-account-name">{user.name || user.email}</span>
+              <Link to="/profile" className="app-profile-link" aria-label="Your profile" onClick={() => setExpanded(false)}>
+                <span className="app-avatar" aria-hidden="true">{initials(user.name || user.email)}</span>
+                <span className="app-profile-copy">
+                  <span className="app-account-name">{user.name || user.email}</span>
+                  <span className="app-mobile-profile-role">{role.label}</span>
+                </span>
+              </Link>
               <Button variant="outline-secondary" size="sm" className="app-logout" onClick={handleLogout}>Sign out</Button>
             </div>
           </Navbar.Collapse>
         )}
       </Container>
+      {user && expanded && <div className="app-menu-scrim" aria-hidden="true" onClick={() => setExpanded(false)} />}
     </Navbar>
   );
 }

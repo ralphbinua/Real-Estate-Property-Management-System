@@ -1,17 +1,20 @@
 import hashlib
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 
 from rest_framework import viewsets, permissions
 from rest_framework.authentication import SessionAuthentication
-from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
+from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle, UserRateThrottle
 from rest_framework import status
-from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
+from django.contrib.auth.forms import PasswordChangeForm
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
 from .serializers import UserSerializer, UserCreateSerializer, CurrentUserProfileSerializer, SystemSettingsSerializer
@@ -55,6 +58,16 @@ class AccountLoginThrottle(SimpleRateThrottle):
         return self.cache_format % {'scope': self.scope, 'ident': digest}
 
 
+class PasswordChangeThrottle(UserRateThrottle):
+    rate = '5/min'
+    scope = 'password_change'
+
+
+class EmailChangeThrottle(UserRateThrottle):
+    rate = '3/hour'
+    scope = 'email_change'
+
+
 class CsrfView(APIView):
     authentication_classes = []
     permission_classes = [permissions.AllowAny]
@@ -89,6 +102,64 @@ class SessionLogoutView(APIView):
         logout(request)
         return Response({'detail': 'Signed out.'})
 
+
+class PasswordChangeView(APIView):
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [PasswordChangeThrottle]
+
+    def post(self, request):
+        form = PasswordChangeForm(request.user, {
+            'old_password': request.data.get('current_password', ''),
+            'new_password1': request.data.get('new_password', ''),
+            'new_password2': request.data.get('confirm_password', ''),
+        })
+        if not form.is_valid():
+            field_names = {
+                'old_password': 'current_password',
+                'new_password1': 'new_password',
+                'new_password2': 'confirm_password',
+            }
+            errors = {field_names.get(key, key): list(values) for key, values in form.errors.items()}
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+        user = form.save()
+        update_session_auth_hash(request._request, user)
+        record_activity(user, 'UPDATE', 'Account password', user.pk, 'Changed account password.')
+        return Response({'detail': 'Your password was changed.'})
+
+
+def email_in_use(email, excluding_user):
+    return User.objects.exclude(pk=excluding_user.pk).filter(
+        Q(email__iexact=email) | Q(username__iexact=email)
+    ).exists()
+
+
+class EmailChangeView(APIView):
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [EmailChangeThrottle]
+
+    def post(self, request):
+        user = request.user
+        new_email = str(request.data.get('new_email', '')).strip()
+        if not user.check_password(str(request.data.get('current_password', ''))):
+            return Response({'current_password': ['Incorrect password.']}, status=400)
+        try:
+            validate_email(new_email)
+        except ValidationError:
+            return Response({'new_email': ['Enter a valid email address.']}, status=400)
+        if new_email.casefold() == user.email.casefold() or email_in_use(new_email, user):
+            return Response({'new_email': ['This email address cannot be used.']}, status=400)
+        try:
+            with transaction.atomic():
+                user.email = new_email
+                user.username = new_email
+                user.save(update_fields=['email', 'username'])
+        except IntegrityError:
+            return Response({'new_email': ['This email address cannot be used.']}, status=400)
+        record_activity(user, 'UPDATE', 'Account email', user.pk, 'Changed account email.')
+        return Response({'detail': 'Your email address was updated.', 'profile': CurrentUserProfileSerializer(user).data})
+
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
@@ -117,7 +188,9 @@ class UserViewSet(viewsets.ModelViewSet):
             users = users.filter(
                 Q(email__icontains=search)
                 | Q(first_name__icontains=search)
+                | Q(middle_name__icontains=search)
                 | Q(last_name__icontains=search)
+                | Q(phone_number__icontains=search)
             )
         return users.order_by('-id')
 

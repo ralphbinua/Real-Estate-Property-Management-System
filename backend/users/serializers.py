@@ -12,7 +12,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['_id', 'username', 'email', 'first_name', 'last_name', 'name', 'role', 'isActive', 'isDeleted', 'createdAt', 'password']
+        fields = ['_id', 'username', 'email', 'first_name', 'middle_name', 'last_name', 'phone_number', 'name', 'role', 'isActive', 'isDeleted', 'createdAt', 'password']
 
     def validate_password(self, value):
         validate_password(value, self.instance)
@@ -20,7 +20,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
-        full_name = f"{instance.first_name} {instance.last_name}".strip()
+        full_name = instance.get_full_name()
         ret['name'] = full_name if full_name else instance.email
         return ret
 
@@ -72,7 +72,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['email', 'password', 'first_name', 'last_name', 'name', 'role']
+        fields = ['email', 'password', 'first_name', 'middle_name', 'last_name', 'phone_number', 'name', 'role']
         extra_kwargs = {
             'password': {'write_only': True, 'required': True},
             'role': {'required': False}
@@ -99,7 +99,9 @@ class UserCreateSerializer(serializers.ModelSerializer):
             email=email,
             password=validated_data['password'],
             first_name=first_name,
+            middle_name=validated_data.get('middle_name', ''),
             last_name=last_name,
+            phone_number=validated_data.get('phone_number', ''),
             role=validated_data.get('role', 'Tenant')
         )
         return user
@@ -111,22 +113,18 @@ class CurrentUserProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['_id', 'name', 'first_name', 'last_name', 'email', 'role']
-        read_only_fields = ['_id', 'role']
+        fields = ['_id', 'name', 'first_name', 'middle_name', 'last_name', 'phone_number', 'email', 'role']
+        read_only_fields = ['_id', 'email', 'role']
 
     def get_name(self, instance):
-        return f'{instance.first_name} {instance.last_name}'.strip() or instance.email
+        return instance.get_full_name() or instance.email
 
-    def validate_email(self, value):
-        if User.objects.exclude(pk=self.instance.pk).filter(username=value).exists():
-            raise serializers.ValidationError('This email conflicts with another account username.')
-        return value
-
-    def update(self, instance, validated_data):
-        email = validated_data.get('email')
-        if email:
-            instance.username = email
-        return super().update(instance, validated_data)
+    def validate(self, attrs):
+        if 'email' in self.initial_data:
+            raise serializers.ValidationError({'email': 'Use the separate email change form.'})
+        if 'role' in self.initial_data:
+            raise serializers.ValidationError({'role': 'Only an administrator can change roles.'})
+        return attrs
 
 
 class SystemSettingsSerializer(serializers.ModelSerializer):

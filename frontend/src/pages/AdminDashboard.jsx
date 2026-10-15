@@ -831,9 +831,9 @@ export default function AdminDashboard() {
         )}
 
         {/* Modal: Add Property */}
-        <Modal show={showPropertyModal} onHide={() => setShowPropertyModal(false)} size="lg" centered dialogClassName="pm-modal">
+        <Modal show={showPropertyModal} onHide={() => setShowPropertyModal(false)} size="lg" centered dialogClassName="pm-modal" aria-labelledby="add-property-dialog-title">
           <Modal.Header closeButton>
-            <Modal.Title>Add new property</Modal.Title>
+            <Modal.Title id="add-property-dialog-title">Add new property</Modal.Title>
           </Modal.Header>
           <Modal.Body>
             <PropertyForm onPropertyCreated={() => { loadData(); setShowPropertyModal(false); }} />

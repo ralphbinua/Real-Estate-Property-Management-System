@@ -41,8 +41,15 @@ export default function ManagerProspectsSection({
 }) {
   return (
     <>
-      <div className="pm-panel mb-4" id="inquiries" data-workspace-section="inquiries">
-        <div className="pm-panel-header">Agent inquiries and applications ({inquiryPageInfo.count ?? inquiries.length})</div>
+      <div className="pm-panel pm-manager-inquiries mb-4" id="inquiries" data-workspace-section="inquiries">
+        <div className="pm-panel-header">
+          <div className="pm-manager-inquiries-intro">
+            <span className="pm-manager-inquiries-eyebrow">LEAD MANAGEMENT</span>
+            <h2>Inquiry pipeline</h2>
+            <p>Review agent leads, viewings, and next steps in one place.</p>
+          </div>
+          <span className="pm-manager-inquiries-count">{inquiryPageInfo.count ?? inquiries.length} inquiries</span>
+        </div>
         <Table responsive className="pm-table mb-0">
           <thead><tr><th>Prospect</th><th>Property</th><th>Viewing</th><th>Agent</th><th>Progress</th></tr></thead>
           <tbody>
@@ -52,7 +59,7 @@ export default function ManagerProspectsSection({
                 <td>{properties.find((property) => Number(property._id || property.id) === Number(inquiry.property))?.title || inquiry.property}</td>
                 <td>{inquiry.viewing_at ? new Date(inquiry.viewing_at).toLocaleString() : '—'}</td>
                 <td>{inquiry.agentDetails?.name || '—'}</td>
-                <td><Form.Select size="sm" value={inquiry.status} onChange={(event) => onInquiryStatusChange(inquiry, event.target.value)}>{['New', 'Viewing Scheduled', 'Application In Progress', 'Converted', 'Closed'].map((status) => <option key={status}>{status}</option>)}</Form.Select></td>
+                <td><Form.Select size="sm" value={inquiry.status} aria-label={`Progress for ${inquiry.prospect_name}`} onChange={(event) => onInquiryStatusChange(inquiry, event.target.value)}>{['New', 'Viewing Scheduled', 'Application In Progress', 'Converted', 'Closed'].map((status) => <option key={status}>{status}</option>)}</Form.Select></td>
               </tr>
             ))}
             {inquiries.length === 0 && <tr><td colSpan="5" className="pm-empty-row">No agent inquiries for your managed properties.</td></tr>}

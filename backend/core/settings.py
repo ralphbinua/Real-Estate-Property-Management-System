@@ -166,11 +166,3 @@ if not DEBUG:
     SECURE_REFERRER_POLICY = 'same-origin'
     if os.getenv('DJANGO_TRUST_X_FORWARDED_PROTO', 'false').lower() == 'true':
         SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-
-# Email
-if DEBUG:
-    MAILERS = {
-        'default': {
-            'BACKEND': 'django.core.mail.backends.console.EmailBackend',
-        },
-    }

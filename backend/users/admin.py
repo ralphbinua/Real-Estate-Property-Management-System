@@ -7,6 +7,7 @@ class CustomUserAdmin(UserAdmin):
     model = User
     list_display = ['email', 'username', 'role', 'is_staff', 'is_deleted']
     fieldsets = UserAdmin.fieldsets + (
+        ('Additional basic information', {'fields': ('middle_name', 'phone_number')}),
         ('Custom Fields', {'fields': ('role', 'is_deleted', 'deleted_at')}),
     )
 

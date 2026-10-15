@@ -8,6 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "test:browser": "node scripts/browser-smoke.cjs",
+    "test:ui": "node scripts/browser-smoke.cjs --ui-review",
+    "test:profile": "node scripts/profile-browser.cjs",
     "preview": "vite preview"
   },
   "dependencies": {

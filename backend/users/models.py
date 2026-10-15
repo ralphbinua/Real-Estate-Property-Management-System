@@ -11,12 +11,17 @@ class User(AbstractUser):
         TENANT = 'Tenant', 'Tenant'
 
     email = models.EmailField(unique=True)
+    middle_name = models.CharField(max_length=150, blank=True, default='')
+    phone_number = models.CharField(max_length=30, blank=True, default='')
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.TENANT)
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username', 'first_name', 'last_name']
+
+    def get_full_name(self):
+        return ' '.join(part for part in (self.first_name, self.middle_name, self.last_name) if part).strip()
 
     def __str__(self):
         return f"{self.email} ({self.role})"

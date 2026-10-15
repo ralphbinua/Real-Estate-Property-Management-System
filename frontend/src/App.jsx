@@ -11,6 +11,7 @@ const ManagerDashboard = lazy(() => import('./pages/ManagerDashboard'));
 const AgentDashboard = lazy(() => import('./pages/AgentDashboard'));
 const OwnerDashboard = lazy(() => import('./pages/OwnerDashboard'));
 const NotificationInbox = lazy(() => import('./components/NotificationInbox'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 
 // ProtectedRoute component handling authentication and case-insensitive role checks
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -37,7 +38,7 @@ export default function App() {
 function AppLayout() {
   const { user, loading } = useAuth();
   const location = useLocation();
-  const showWorkspace = Boolean(user && location.pathname !== '/login');
+  const showWorkspace = Boolean(user && location.pathname !== '/login' && location.pathname !== '/profile');
 
   if (loading) return <div className="pm-loading" role="status">Loading your workspace…</div>;
 
@@ -52,6 +53,8 @@ function AppLayout() {
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<Navigate to="/login" replace />} />
+
+          <Route path="/profile" element={user ? <ProfilePage /> : <Navigate to="/login" replace />} />
 
           {/* Protected Dashboard Routes */}
           <Route 

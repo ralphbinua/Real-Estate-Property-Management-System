@@ -37,7 +37,10 @@ export default function UserManagement() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newUser, setNewUser] = useState({
-    name: '',
+    first_name: '',
+    middle_name: '',
+    last_name: '',
+    phone_number: '',
     email: '',
     password: '',
     role: 'Tenant',
@@ -48,7 +51,10 @@ export default function UserManagement() {
   const [updating, setUpdating] = useState(false);
   const [editUser, setEditUser] = useState({
     id: '',
-    name: '',
+    first_name: '',
+    middle_name: '',
+    last_name: '',
+    phone_number: '',
     email: '',
     role: 'Tenant',
     password: '',
@@ -80,9 +86,9 @@ export default function UserManagement() {
 
     try {
       await createUserByAdmin(newUser);
-      setSuccess(`User ${newUser.name || newUser.email} created successfully!`);
+      setSuccess(`User ${[newUser.first_name, newUser.middle_name, newUser.last_name].filter(Boolean).join(' ') || newUser.email} created successfully!`);
       setShowAddModal(false);
-      setNewUser({ name: '', email: '', password: '', role: 'Tenant' });
+      setNewUser({ first_name: '', middle_name: '', last_name: '', phone_number: '', email: '', password: '', role: 'Tenant' });
       refresh();
     } catch (err) {
       setCreateError(formatUserManagementError(err, 'Failed to create user account.'));
@@ -96,7 +102,10 @@ export default function UserManagement() {
     setSuccess('');
     setEditUser({
       id: user._id || user.id,
-      name: user.name || '',
+      first_name: user.first_name || '',
+      middle_name: user.middle_name || '',
+      last_name: user.last_name || '',
+      phone_number: user.phone_number || '',
       email: user.email || '',
       role: user.role || 'Tenant',
       password: '',
@@ -118,7 +127,10 @@ export default function UserManagement() {
 
     try {
       const payload = {
-        name: editUser.name,
+        first_name: editUser.first_name,
+        middle_name: editUser.middle_name,
+        last_name: editUser.last_name,
+        phone_number: editUser.phone_number,
         email: editUser.email,
         role: editUser.role,
       };
@@ -127,7 +139,7 @@ export default function UserManagement() {
       }
 
       await updateUser(editUser.id, payload);
-      setSuccess(`User ${editUser.name || editUser.email} updated successfully!`);
+      setSuccess(`User ${[editUser.first_name, editUser.middle_name, editUser.last_name].filter(Boolean).join(' ') || editUser.email} updated successfully!`);
       setShowEditModal(false);
       refresh();
     } catch (err) {
@@ -292,24 +304,36 @@ export default function UserManagement() {
       </Card>
 
       {/* Modal: Create User Account */}
-      <Modal show={showAddModal} onHide={handleCloseAddModal} centered>
+      <Modal show={showAddModal} onHide={handleCloseAddModal} centered aria-labelledby="create-user-dialog-title">
         <Modal.Header closeButton>
-          <Modal.Title className="fs-5">Create New User Account</Modal.Title>
+          <Modal.Title id="create-user-dialog-title" className="fs-5">Create New User Account</Modal.Title>
         </Modal.Header>
         <Form onSubmit={handleCreateUser}>
           <Modal.Body>
             {createError && <Alert variant="danger" role="alert" aria-live="assertive">{createError}</Alert>}
-            <Form.Group className="mb-3">
-              <Form.Label className="fw-semibold small">Full Name</Form.Label>
+            <Form.Group className="mb-3" controlId="create-user-first-name">
+              <Form.Label className="fw-semibold small">First name</Form.Label>
               <Form.Control
                 type="text"
-                placeholder="e.g. John Doe"
-                value={newUser.name}
-                onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                value={newUser.first_name}
+                onChange={(e) => setNewUser({ ...newUser, first_name: e.target.value })}
                 required
+                maxLength={150}
               />
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="create-user-middle-name">
+              <Form.Label className="fw-semibold small">Middle name (optional)</Form.Label>
+              <Form.Control value={newUser.middle_name} onChange={(e) => setNewUser({ ...newUser, middle_name: e.target.value })} maxLength={150} />
+            </Form.Group>
+            <Form.Group className="mb-3" controlId="create-user-last-name">
+              <Form.Label className="fw-semibold small">Last name</Form.Label>
+              <Form.Control value={newUser.last_name} onChange={(e) => setNewUser({ ...newUser, last_name: e.target.value })} maxLength={150} />
+            </Form.Group>
+            <Form.Group className="mb-3" controlId="create-user-phone">
+              <Form.Label className="fw-semibold small">Phone number (optional)</Form.Label>
+              <Form.Control type="tel" value={newUser.phone_number} onChange={(e) => setNewUser({ ...newUser, phone_number: e.target.value })} maxLength={30} />
+            </Form.Group>
+            <Form.Group className="mb-3" controlId="create-user-email">
               <Form.Label className="fw-semibold small">Email Address</Form.Label>
               <Form.Control
                 type="email"
@@ -319,7 +343,7 @@ export default function UserManagement() {
                 required
               />
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="create-user-password">
               <Form.Label className="fw-semibold small">Password</Form.Label>
               <Form.Control
                 type="password"
@@ -329,7 +353,7 @@ export default function UserManagement() {
                 required
               />
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="create-user-role">
               <Form.Label className="fw-semibold small">Account Role</Form.Label>
               <Form.Select
                 value={newUser.role}
@@ -355,24 +379,36 @@ export default function UserManagement() {
       </Modal>
 
       {/* Modal: Edit User Account */}
-      <Modal show={showEditModal} onHide={handleCloseEditModal} centered>
+      <Modal show={showEditModal} onHide={handleCloseEditModal} centered aria-labelledby="edit-user-dialog-title">
         <Modal.Header closeButton>
-          <Modal.Title className="fs-5">Edit User Account</Modal.Title>
+          <Modal.Title id="edit-user-dialog-title" className="fs-5">Edit User Account</Modal.Title>
         </Modal.Header>
         <Form onSubmit={handleUpdateUser}>
           <Modal.Body>
             {editError && <Alert variant="danger" role="alert" aria-live="assertive">{editError}</Alert>}
-            <Form.Group className="mb-3">
-              <Form.Label className="fw-semibold small">Full Name</Form.Label>
+            <Form.Group className="mb-3" controlId="edit-user-first-name">
+              <Form.Label className="fw-semibold small">First name</Form.Label>
               <Form.Control
                 type="text"
-                placeholder="e.g. John Doe"
-                value={editUser.name}
-                onChange={(e) => setEditUser({ ...editUser, name: e.target.value })}
+                value={editUser.first_name}
+                onChange={(e) => setEditUser({ ...editUser, first_name: e.target.value })}
                 required
+                maxLength={150}
               />
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="edit-user-middle-name">
+              <Form.Label className="fw-semibold small">Middle name (optional)</Form.Label>
+              <Form.Control value={editUser.middle_name} onChange={(e) => setEditUser({ ...editUser, middle_name: e.target.value })} maxLength={150} />
+            </Form.Group>
+            <Form.Group className="mb-3" controlId="edit-user-last-name">
+              <Form.Label className="fw-semibold small">Last name</Form.Label>
+              <Form.Control value={editUser.last_name} onChange={(e) => setEditUser({ ...editUser, last_name: e.target.value })} maxLength={150} />
+            </Form.Group>
+            <Form.Group className="mb-3" controlId="edit-user-phone">
+              <Form.Label className="fw-semibold small">Phone number (optional)</Form.Label>
+              <Form.Control type="tel" value={editUser.phone_number} onChange={(e) => setEditUser({ ...editUser, phone_number: e.target.value })} maxLength={30} />
+            </Form.Group>
+            <Form.Group className="mb-3" controlId="edit-user-email">
               <Form.Label className="fw-semibold small">Email Address</Form.Label>
               <Form.Control
                 type="email"
@@ -382,7 +418,7 @@ export default function UserManagement() {
                 required
               />
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="edit-user-password">
               <Form.Label className="fw-semibold small">New Password (optional)</Form.Label>
               <Form.Control
                 type="password"
@@ -391,7 +427,7 @@ export default function UserManagement() {
                 onChange={(e) => setEditUser({ ...editUser, password: e.target.value })}
               />
             </Form.Group>
-            <Form.Group className="mb-3">
+            <Form.Group className="mb-3" controlId="edit-user-role">
               <Form.Label className="fw-semibold small">Account Role</Form.Label>
               <Form.Select
                 value={editUser.role}
@@ -417,9 +453,9 @@ export default function UserManagement() {
       </Modal>
 
       {/* Modal: Deactivate User Account */}
-      <Modal show={!!pendingDelete} onHide={handleCloseDeactivateModal} centered>
+      <Modal show={!!pendingDelete} onHide={handleCloseDeactivateModal} centered aria-labelledby="deactivate-user-dialog-title">
         <Modal.Header closeButton>
-          <Modal.Title className="fs-5">Deactivate user account</Modal.Title>
+          <Modal.Title id="deactivate-user-dialog-title" className="fs-5">Deactivate user account</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           {deactivateError && <Alert variant="danger" role="alert" aria-live="assertive">{deactivateError}</Alert>}

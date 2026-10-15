@@ -7,6 +7,7 @@ __pycache__/
 # Node / React
 node_modules/
 dist/
+.ui-review/
 staticfiles/
 .pnpm-store/
 .security-test-deps/

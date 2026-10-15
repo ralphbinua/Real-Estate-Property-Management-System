@@ -40,7 +40,17 @@ export default function Login() {
 
   return (
     <div className="pm-login-page">
-      <section className="pm-login-card">
+      <div className="pm-login-layout">
+        <aside className="pm-login-intro" aria-label="Workspace introduction">
+          <div className="pm-login-intro-content">
+            <span className="pm-login-intro-kicker">PROPERTY OPERATIONS</span>
+            <h2>Everything in your portfolio, in one place.</h2>
+            <p>Stay on top of properties, leases, payments, and the people who depend on them.</p>
+            <div className="pm-login-intro-line" aria-hidden="true" />
+            <span className="pm-login-intro-footnote">A clearer view for every role in your workspace.</span>
+          </div>
+        </aside>
+        <section className="pm-login-card">
         <div className="pm-login-overline">WORKSPACE ACCESS</div>
         <h1 className="pm-login-title">Sign in</h1>
         <p className="pm-login-subtitle">Enter your account details to continue.</p>
@@ -91,7 +101,8 @@ export default function Login() {
             {loading ? 'Signing in…' : 'Sign in'}
           </Button>
         </Form>
-      </section>
+        </section>
+      </div>
     </div>
   );
 }

@@ -16,7 +16,7 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from users.views import CsrfView, SessionLoginView, SessionLogoutView, SystemSettingsView
+from users.views import CsrfView, SessionLoginView, SessionLogoutView, PasswordChangeView, EmailChangeView, SystemSettingsView
 from properties.views import OwnerPortfolioView
 
 urlpatterns = [
@@ -24,6 +24,8 @@ urlpatterns = [
     path('api/auth/csrf/', CsrfView.as_view(), name='csrf_cookie'),
     path('api/auth/login/', SessionLoginView.as_view(), name='session_login'),
     path('api/auth/logout/', SessionLogoutView.as_view(), name='session_logout'),
+    path('api/auth/password/change/', PasswordChangeView.as_view(), name='password_change'),
+    path('api/auth/email/change/', EmailChangeView.as_view(), name='email_change'),
     path('api/settings/', SystemSettingsView.as_view(), name='system_settings'),
     path('api/users/', include('users.urls')),
     path('api/properties/', include('properties.urls')),
