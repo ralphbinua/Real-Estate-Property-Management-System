@@ -113,3 +113,38 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"Payment #{self.pk} - Invoice #{self.invoice_id} ({self.status})"
+
+
+class PropertyExpense(models.Model):
+    CATEGORY_CHOICES = [
+        ('Repairs', 'Repairs'), ('Utilities', 'Utilities'), ('Insurance', 'Insurance'),
+        ('Taxes', 'Taxes'), ('Fees', 'Fees'), ('Other', 'Other'),
+    ]
+    property = models.ForeignKey(Property, on_delete=models.PROTECT, related_name='expenses')
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    incurred_on = models.DateField()
+    payee = models.CharField(max_length=160)
+    reference = models.CharField(max_length=500, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=12, choices=[('Pending', 'Pending'), ('Approved', 'Approved'), ('Rejected', 'Rejected'), ('Reversed', 'Reversed')], default='Pending')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='created_property_expenses')
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='decided_property_expenses')
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decision_note = models.TextField(blank=True, default='')
+
+    class Meta:
+        ordering = ['-incurred_on', '-id']
+        constraints = [models.CheckConstraint(condition=Q(amount__gt=0), name='property_expense_amount_gt_zero')]
+
+
+class PropertyExpenseEvent(models.Model):
+    expense = models.ForeignKey(PropertyExpense, on_delete=models.CASCADE, related_name='events')
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    action = models.CharField(max_length=30)
+    summary = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']

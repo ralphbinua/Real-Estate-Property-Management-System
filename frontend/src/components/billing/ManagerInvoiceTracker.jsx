@@ -15,6 +15,8 @@ import {
 import usePaginatedCollection from '../../hooks/usePaginatedCollection';
 import CollectionPagination from '../ui/CollectionPagination';
 import PaymentAcknowledgmentButton from './PaymentAcknowledgmentButton';
+import ExportCsvButton from '../ui/ExportCsvButton';
+import PropertyFinancePanel from './PropertyFinancePanel';
 
 const localDateValue = () => {
   const now = new Date();
@@ -243,11 +245,13 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated, showScheduleH
         ) : !runsError && <p className="text-muted small">No billing runs recorded yet.</p>}
       </section>
 
+      <PropertyFinancePanel />
       {loading ? (
         <div className="pm-loading py-4"><Spinner animation="border" size="sm" className="me-2" />Loading billing records…</div>
       ) : (
         <>
           <h5 className="fw-bold mb-3">Invoice balances</h5>
+          <div className="d-flex justify-content-end mb-2"><ExportCsvButton resource="invoices" /></div>
           <Table responsive className="pm-table mb-4">
             <thead>
               <tr>
@@ -295,6 +299,7 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated, showScheduleH
           <CollectionPagination count={invoiceCollection.count} page={invoiceCollection.page} pageCount={invoiceCollection.pageCount} onPageChange={invoiceCollection.setPage} />
 
           <h5 className="fw-bold mb-1">Payment records</h5>
+          <div className="d-flex justify-content-end mb-2"><ExportCsvButton resource="payments" /></div>
           <p className="text-muted small mb-3">Tenant submissions remain pending until verified. Rejected and reversed entries stay in the audit history.</p>
           <Table responsive className="pm-table pm-payment-history mb-0">
             <thead>

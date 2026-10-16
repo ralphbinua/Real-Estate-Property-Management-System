@@ -17,6 +17,8 @@ import { fetchSystemSettings } from '../../services/users/systemSettingsService'
 import { addMonthsToDate } from '../../utils/dateUtils';
 import { createUnit, deleteUnit, updateUnit } from '../../services/properties/unitService';
 import CollectionPagination from '../../components/ui/CollectionPagination';
+import ExportCsvButton from '../../components/ui/ExportCsvButton';
+import LeaseTurnoverControls from '../../components/leases/LeaseTurnoverControls';
 import useNotificationDeepLink from '../../hooks/useNotificationDeepLink';
 import DashboardHeader from '../../components/navigation/DashboardHeader';
 import MobileFilterBar from '../../components/navigation/MobileFilterBar';
@@ -763,6 +765,7 @@ export default function AdminDashboard() {
             {/* Active Contracts */}
             <div className="pm-panel mb-4" id="contracts" data-workspace-section="contracts">
               <div className="pm-panel-header">Lease contracts ({contractPageInfo.count})</div>
+              <div className="d-flex justify-content-end p-2"><ExportCsvButton resource="contracts" /></div>
               <Table responsive className="pm-table mb-0">
                 <thead>
                   <tr>
@@ -790,6 +793,7 @@ export default function AdminDashboard() {
                           <td className="pm-cell-strong">₱{Number(con.rentAmount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                           <td>
                             <StatusPill status={con.status} />
+                            <LeaseTurnoverControls contract={con} role="admin" onUpdated={() => loadData()} />
                             {con.activatedAt && (
                               <div className="small text-muted mt-1" title={con.activationNote || undefined}>
                                 {con.activationBasis} · {con.activatedBy?.name || con.activatedBy?.email || 'recorded user'}

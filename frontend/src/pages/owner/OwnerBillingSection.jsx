@@ -3,6 +3,8 @@ import Table from '../../components/ui/ResponsiveTable.jsx';
 import CollectionPagination from '../../components/ui/CollectionPagination';
 import PaymentAcknowledgmentButton from '../../components/billing/PaymentAcknowledgmentButton';
 import OwnerStatusPill from './OwnerStatusPill.jsx';
+import ExportCsvButton from '../../components/ui/ExportCsvButton.jsx';
+import PropertyFinancePanel from '../../components/billing/PropertyFinancePanel.jsx';
 
 export default function OwnerBillingSection({
   metrics,
@@ -15,6 +17,7 @@ export default function OwnerBillingSection({
 }) {
   return (
     <div>
+      <PropertyFinancePanel />
       <h6 className="fw-bold mb-3">Portfolio rent summary</h6>
       <Row className="g-3 mb-4">
         <Col sm={6} xl={3}>
@@ -43,6 +46,7 @@ export default function OwnerBillingSection({
         </Col>
       </Row>
       <h6 className="fw-bold mb-3">Invoice balances</h6>
+      <div className="d-flex justify-content-end mb-2"><ExportCsvButton resource="invoices" /></div>
       <Table responsive className="pm-table mb-4">
         <thead><tr><th>Property</th><th>Tenant</th><th>Total due</th><th>Paid</th><th>Balance</th><th>Due date</th><th>Status</th><th>Awaiting review</th></tr></thead>
         <tbody>
@@ -66,6 +70,7 @@ export default function OwnerBillingSection({
       </Table>
 
       <h6 className="fw-bold mb-3">Payment history</h6>
+      <div className="d-flex justify-content-end mb-2"><ExportCsvButton resource="payments" /></div>
       <Table responsive className="pm-table pm-payment-history mb-0">
         <thead><tr><th>Property</th><th>Tenant</th><th>Payment date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th><th>Details</th></tr></thead>
         <tbody>

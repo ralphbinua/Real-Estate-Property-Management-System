@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from decimal import Decimal
 from .models import MaintenanceRequest
 from properties.models import Property, Unit
 from properties.serializers import PropertySerializer
@@ -10,6 +11,15 @@ User = get_user_model()
 class MaintenanceRequestSerializer(serializers.ModelSerializer):
     _id = serializers.IntegerField(source='id', read_only=True)
     issueDescription = serializers.CharField(source='issue_description')
+    vendorName = serializers.CharField(source='vendor_name', required=False, allow_blank=True, max_length=160)
+    vendorContact = serializers.CharField(source='vendor_contact', required=False, allow_blank=True, max_length=160)
+    estimateAmount = serializers.DecimalField(source='estimate_amount', max_digits=12, decimal_places=2, min_value=Decimal('0.00'), required=False, allow_null=True)
+    actualCost = serializers.DecimalField(source='actual_cost', max_digits=12, decimal_places=2, min_value=Decimal('0.00'), required=False, allow_null=True)
+    approvalStatus = serializers.CharField(source='approval_status', read_only=True)
+    approvalRequestedAt = serializers.DateTimeField(source='approval_requested_at', read_only=True)
+    approvalDecidedAt = serializers.DateTimeField(source='approval_decided_at', read_only=True)
+    approvalNote = serializers.CharField(source='approval_note', read_only=True)
+    activity = serializers.SerializerMethodField()
     assignedTo = serializers.PrimaryKeyRelatedField(
         source='assigned_to', queryset=User.objects.filter(is_active=True, is_deleted=False),
         required=False, allow_null=True,
@@ -30,7 +40,9 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
         model = MaintenanceRequest
         fields = [
             '_id', 'property', 'unit', 'tenant', 'issueDescription', 
-            'status', 'assignedTo', 'assignedToDetails', 'propertyDetails',
+            'status', 'priority', 'vendorName', 'vendorContact', 'estimateAmount', 'actualCost',
+            'approvalStatus', 'approvalRequestedAt', 'approvalDecidedAt', 'approvalNote', 'activity',
+            'assignedTo', 'assignedToDetails', 'propertyDetails',
             'tenantDetails', 'created_at', 'updated_at'
         ]
 
@@ -41,6 +53,24 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
             self.fields['tenant'].read_only = True
         elif request and self.instance is None:
             self.fields['tenant'].required = True
+        if request and request.user.role == User.Role.TENANT:
+            self.fields['status'].read_only = True
+            self.fields['assignedTo'].read_only = True
+            for field_name in ('vendorName', 'vendorContact', 'estimateAmount', 'actualCost',
+                               'approvalStatus', 'approvalRequestedAt', 'approvalDecidedAt', 'approvalNote'):
+                self.fields.pop(field_name)
+
+    def get_activity(self, instance):
+        request = self.context.get('request')
+        tenant = request and request.user.role == User.Role.TENANT
+        events = instance.events.all()
+        if tenant:
+            events = [event for event in events if event.tenant_visible]
+        return [{
+            'type': event.event_type,
+            'summary': event.summary,
+            'at': event.created_at.isoformat(),
+        } for event in events]
 
     def get_assignedToDetails(self, instance):
         assignee = instance.assigned_to
@@ -57,6 +87,16 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
         user = getattr(request, 'user', None)
         property_obj = attrs.get('property', getattr(self.instance, 'property', None))
         unit = attrs.get('unit', getattr(self.instance, 'unit', None))
+
+        if self.instance:
+            approval = self.instance.approval_status
+            proposed_status = attrs.get('status', self.instance.status)
+            if proposed_status in ('In Progress', 'Resolved') and approval in ('Pending', 'Rejected'):
+                raise serializers.ValidationError({'status': 'The Owner must approve the requested work before it proceeds.'})
+            if 'estimate_amount' in attrs and attrs['estimate_amount'] != self.instance.estimate_amount and approval in ('Pending', 'Approved'):
+                raise serializers.ValidationError({'estimateAmount': 'A pending or approved estimate cannot be edited. Record a new request instead.'})
+            if 'actual_cost' in attrs and attrs['actual_cost'] is not None and approval in ('Pending', 'Rejected'):
+                raise serializers.ValidationError({'actualCost': 'Record the final cost after Owner approval.'})
 
         if unit and property_obj and unit.property_id != property_obj.id:
             raise serializers.ValidationError({'unit': 'The selected unit must belong to the selected property.'})

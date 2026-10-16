@@ -144,10 +144,10 @@ path for session and CSRF cookies.
    production. Django's collected admin static files are served by Vercel's
    CDN because `STATIC_ROOT` is configured.
 
-The monthly invoice management command is not scheduled by this configuration.
-Run `python manage.py generate_monthly_invoices` from a trusted scheduled job
-until a dedicated, authenticated scheduling path is added. The backend has no
-file upload fields today; if uploads are added, use durable object storage.
+The root `vercel.json` schedules monthly billing and daily lease reminders on
+Vercel. Both endpoints require the production `CRON_SECRET`; see the scheduler
+details below. The backend has no file upload fields today; if uploads are
+added, use durable object storage.
 
 ## API areas
 
@@ -169,6 +169,56 @@ The backend API is served under `/api`:
 Most API requests require a signed-in session. The browser sends the secure session cookie automatically, and the frontend sends a CSRF token with changes. Deploy the frontend and API on the same origin so this cookie flow works as configured.
 
 Older JWT sign-ins are no longer accepted after this update. Users must sign in again. Login attempts are limited by client IP and account email using Django's cache; use a shared cache in a multi-server deployment and add rate limiting at the reverse proxy as well.
+
+## Maintenance work orders
+
+Tenants submit requests with a Normal or Urgent priority and can track status,
+assignment, and public activity. Admins and the assigned Property Manager can
+record vendor contact, an estimate, and final cost. Staff may request Owner
+approval for each job. Once requested, the estimate cannot change while the
+decision is pending, and work cannot move to In Progress or Resolved until the
+Owner approves. If the Owner rejects it, staff must revise the estimate before
+requesting approval again. Owner and staff views show the estimate, decision,
+cost, and dated history; Tenants do not receive those private fields. Apply
+`maintenance` migration `0003` before using this workflow.
+
+## CSV exports
+
+Invoices, payments, leases, and maintenance lists provide a CSV download. Each
+export uses the same role and query filters as its list API. Exports contain up
+to 10,000 rows, include headers even when empty, and omit private maintenance
+financial columns for Tenants. Spreadsheet formula-like values are escaped.
+
+## Inspections and move-out
+
+An Owner, or a Manager with the property's lease-ending authority, can start
+move-out from an active lease. Admins must record the Owner instruction and a
+reference. The unit enters Maintenance while turnover is pending. Staff can
+record dated Move In and Move Out inspection versions with a condition checklist
+and evidence reference; Tenants can acknowledge receipt of an inspection.
+Staff request a deposit settlement after a Move Out inspection, with deductions
+no greater than the lease deposit and a reason for any deduction. The Owner
+approves or rejects each settlement. Staff can complete turnover only after
+Owner approval and resolution of open unit maintenance requests. The unit then
+becomes available if no active or pending lease holds it. The existing End
+lease action remains available for leases that do not use the move-out flow.
+Apply the `contracts` migration `0007` before using move-out.
+
+## Property expenses and Owner statements
+
+Admins and assigned Managers enter property expenses with category, date,
+amount, payee, and receipt or document reference. Each expense remains Pending
+until that property's Owner approves it. Rejected entries can be revised and
+resubmitted; approved entries are immutable and require a separate correcting
+entry. The expense history records submissions, revisions, and decisions.
+An Owner can reverse an approved expense with a recorded reason, then staff can
+enter a corrected replacement. Owner statements use calendar months by default. They total rent payments
+whose status is Verified and payment date falls in the month, then subtract
+Owner-approved expenses incurred in that month. Pending, rejected, or reversed
+payments and expenses do not affect the statement. The displayed net cash
+figure does not include taxes, opening balances, or payouts. Maintenance costs
+must be entered separately as expenses after verification. Apply the `billing`
+migrations `0005` and `0006` before using this area.
 
 ## Monthly rent invoices
 

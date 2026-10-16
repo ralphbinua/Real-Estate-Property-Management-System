@@ -35,6 +35,8 @@ class ContractSerializer(serializers.ModelSerializer):
     terminationBasis = serializers.CharField(source='termination_basis', read_only=True)
     terminationNote = serializers.CharField(source='termination_note', read_only=True)
     terminationInstructionReference = serializers.CharField(source='termination_instruction_reference', read_only=True)
+    turnoverPending = serializers.BooleanField(source='turnover_pending', read_only=True)
+    turnoverCompletedAt = serializers.DateTimeField(source='turnover_completed_at', read_only=True)
     
     # FK IDs for writing payloads
     property = serializers.PrimaryKeyRelatedField(queryset=Property.objects.filter(is_deleted=False))
@@ -55,6 +57,7 @@ class ContractSerializer(serializers.ModelSerializer):
             'activationInstructionReference',
             'signedCopyReference', 'terminatedBy', 'terminatedAt', 'terminationEffectiveDate',
             'terminationReason', 'terminationBasis', 'terminationNote', 'terminationInstructionReference',
+            'turnoverPending', 'turnoverCompletedAt',
             'propertyDetails', 'tenantDetails', 'unitDetails'
         ]
 

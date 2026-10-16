@@ -1,12 +1,17 @@
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Prefetch, Q
-from .models import MaintenanceRequest
+from django.utils import timezone
+from .models import MaintenanceRequest, MaintenanceEvent
 from .serializers import MaintenanceRequestSerializer
 from properties.models import Property
 from properties.querysets import property_serializer_queryset
 from users.audit import record_activity
 from core.pagination import OptInPageNumberPagination
+from core.csv_exports import csv_response
 from notifications.models import Notification
 from notifications.services import create_for_recipients
 
@@ -28,12 +33,23 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
     pagination_class = OptInPageNumberPagination
     permission_classes = [permissions.IsAuthenticated]
 
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        visible = self.get_object()
+        locked = MaintenanceRequest.objects.select_for_update().get(pk=visible.pk)
+        serializer = self.get_serializer(locked, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+
     def get_queryset(self):
         user = self.request.user
         qs = MaintenanceRequest.objects.filter(is_deleted=False).select_related(
             'unit', 'tenant', 'assigned_to',
         ).prefetch_related(
             Prefetch('property', queryset=property_serializer_queryset(Property.objects.all())),
+            'events',
         ).order_by('-id')
         if user.role == 'Admin':
             scoped_requests = qs
@@ -58,17 +74,36 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
         return scoped_requests
 
     def get_permissions(self):
-        if self.action in ('update', 'partial_update', 'destroy'):
+        if self.action in ('update', 'partial_update', 'destroy', 'request_approval'):
             return [IsAdminOrManager()]
+        if self.action == 'decide_approval':
+            return [IsOwner()]
         if self.action == 'create':
             return [IsAdminOrTenant()]
-        if self.action in ('list', 'retrieve'):
+        if self.action in ('list', 'retrieve', 'export'):
             return [IsAuthorizedMaintenanceReader()]
         return [permissions.IsAuthenticated()]
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        columns = [
+            ('ID', lambda item: item.pk), ('Property', lambda item: item.property.title),
+            ('Unit', lambda item: item.unit.unit_number if item.unit else ''),
+            ('Issue', lambda item: item.issue_description), ('Priority', lambda item: item.priority),
+            ('Status', lambda item: item.status), ('Submitted', lambda item: item.created_at.isoformat()),
+        ]
+        if request.user.role != 'Tenant':
+            columns += [
+                ('Estimate', lambda item: item.estimate_amount),
+                ('Approval', lambda item: item.approval_status),
+                ('Actual cost', lambda item: item.actual_cost),
+            ]
+        return csv_response('maintenance', columns, self.get_queryset())
 
     @transaction.atomic
     def perform_create(self, serializer):
         request_obj = serializer.save(tenant=self.request.user) if self.request.user.role == 'Tenant' else serializer.save()
+        MaintenanceEvent.objects.create(request=request_obj, actor=self.request.user, event_type='Submitted', summary='Maintenance request submitted.', tenant_visible=True)
         record_activity(self.request.user, 'CREATE', 'Maintenance request', request_obj.pk, f'Submitted maintenance request {request_obj.pk}.')
         property_obj = request_obj.property
         create_for_recipients(
@@ -102,6 +137,17 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
         previous_status = serializer.instance.status
         previous_assignee_id = serializer.instance.assigned_to_id
         request_obj = serializer.save()
+        changed = set(serializer.validated_data)
+        visible = bool(changed & {'status', 'assigned_to', 'priority'})
+        if request_obj.status != previous_status:
+            summary = f'Status changed to {request_obj.status}.'
+        elif request_obj.assigned_to_id != previous_assignee_id:
+            summary = 'Maintenance assignment updated.'
+        elif 'priority' in changed:
+            summary = f'Priority changed to {request_obj.priority}.'
+        else:
+            summary = 'Work order details updated.'
+        MaintenanceEvent.objects.create(request=request_obj, actor=self.request.user, event_type='Updated', summary=summary, tenant_visible=visible)
         record_activity(self.request.user, 'UPDATE', 'Maintenance request', request_obj.pk, f'Updated maintenance request {request_obj.pk} to {request_obj.status}.')
         status_changed = request_obj.status != previous_status
         assignee_changed = request_obj.assigned_to_id != previous_assignee_id
@@ -151,6 +197,58 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
         instance.save(update_fields=['is_deleted'])
         record_activity(self.request.user, 'ARCHIVE', 'Maintenance request', instance.pk, f'Archived maintenance request {instance.pk}.')
 
+    @action(detail=True, methods=['post'], url_path='request-approval')
+    @transaction.atomic
+    def request_approval(self, request, pk=None):
+        work = self.get_object()
+        work = MaintenanceRequest.objects.select_for_update().get(pk=work.pk)
+        if work.status != 'Open':
+            raise ValidationError({'status': 'Request approval before work begins.'})
+        if work.estimate_amount is None:
+            raise ValidationError({'estimateAmount': 'Enter an estimate before requesting approval.'})
+        if not work.property.owner_id:
+            raise ValidationError({'property': 'This property has no Owner to approve the work.'})
+        if work.approval_status in ('Pending', 'Approved'):
+            raise ValidationError({'approvalStatus': 'This estimate is already pending or approved.'})
+        if work.approval_status == 'Rejected' and work.estimate_amount == work.approval_estimate_amount:
+            raise ValidationError({'estimateAmount': 'Revise the rejected estimate before requesting approval again.'})
+        work.approval_status = 'Pending'
+        work.approval_estimate_amount = work.estimate_amount
+        work.approval_requested_at = timezone.now()
+        work.approval_decided_at = None
+        work.approval_decided_by = None
+        work.approval_note = ''
+        work.save(update_fields=['approval_status', 'approval_estimate_amount', 'approval_requested_at', 'approval_decided_at', 'approval_decided_by', 'approval_note', 'updated_at'])
+        MaintenanceEvent.objects.create(request=work, actor=request.user, event_type='Approval requested', summary='Owner approval requested for the repair estimate.', tenant_visible=False)
+        record_activity(request.user, 'UPDATE', 'Maintenance request', work.pk, f'Requested Owner approval for maintenance request {work.pk}.')
+        create_for_recipients(recipients=[work.property.owner], actor=request.user, event_type=Notification.EventType.MAINTENANCE, title='Repair approval requested', message=f'Maintenance request #{work.pk} has an estimate awaiting your approval.', destination=Notification.Destination.OWNER_MAINTENANCE)
+        return Response(self.get_serializer(work).data)
+
+    @action(detail=True, methods=['post'], url_path='decide-approval')
+    @transaction.atomic
+    def decide_approval(self, request, pk=None):
+        work = self.get_object()
+        work = MaintenanceRequest.objects.select_for_update().get(pk=work.pk)
+        approved = request.data.get('approved')
+        if not isinstance(approved, bool):
+            raise ValidationError({'approved': 'Provide true to approve or false to reject.'})
+        if work.approval_status != 'Pending':
+            raise ValidationError({'approvalStatus': 'There is no pending approval request.'})
+        note = request.data.get('note', '')
+        if not isinstance(note, str) or len(note) > 1000:
+            raise ValidationError({'note': 'Provide a note of at most 1000 characters.'})
+        work.approval_status = 'Approved' if approved else 'Rejected'
+        work.approval_decided_by = request.user
+        work.approval_decided_at = timezone.now()
+        work.approval_note = note
+        work.save(update_fields=['approval_status', 'approval_decided_by', 'approval_decided_at', 'approval_note', 'updated_at'])
+        MaintenanceEvent.objects.create(request=work, actor=request.user, event_type=work.approval_status, summary=f'Owner {work.approval_status.lower()} the repair estimate.', tenant_visible=False)
+        record_activity(request.user, 'UPDATE', 'Maintenance request', work.pk, f'{work.approval_status} maintenance estimate for request {work.pk}.')
+        recipient = work.assigned_to or work.property.manager
+        if recipient:
+            create_for_recipients(recipients=[recipient], actor=request.user, event_type=Notification.EventType.MAINTENANCE, title=f'Repair estimate {work.approval_status.lower()}', message=f'Maintenance request #{work.pk} estimate was {work.approval_status.lower()}.', destination=(Notification.Destination.MANAGER_MAINTENANCE if recipient.role == 'Property Manager' else Notification.Destination.ADMIN_OVERVIEW))
+        return Response(self.get_serializer(work).data, status=status.HTTP_200_OK)
+
 
 class IsAdminOrManager(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -164,3 +262,9 @@ class IsAdminOrTenant(permissions.BasePermission):
         user = request.user
         return bool(user and user.is_authenticated and user.is_active and not user.is_deleted
                     and user.role in ('Admin', 'Tenant'))
+
+
+class IsOwner(permissions.BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and user.is_active and not user.is_deleted and user.role == 'Owner')

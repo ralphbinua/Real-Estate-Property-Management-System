@@ -10,6 +10,7 @@ import {
 import usePaginatedCollection from '../../hooks/usePaginatedCollection';
 import CollectionPagination from '../ui/CollectionPagination';
 import PaymentAcknowledgmentButton from './PaymentAcknowledgmentButton';
+import ExportCsvButton from '../ui/ExportCsvButton';
 
 const localDateValue = () => {
   const now = new Date();
@@ -129,6 +130,7 @@ export default function TenantInvoiceViewer({ tenantId }) {
 
       <div className="mb-4">
         <h5 className="fw-bold mb-1">Rent invoices</h5>
+        <ExportCsvButton resource="invoices" />
         <p className="text-muted small mb-3">Review your balance and submit a payment for verification.</p>
         <Table responsive className="pm-table mb-0">
           <thead>
@@ -182,6 +184,7 @@ export default function TenantInvoiceViewer({ tenantId }) {
 
       <div>
         <h5 className="fw-bold mb-1">Payment history</h5>
+        <ExportCsvButton resource="payments" />
         <p className="text-muted small mb-3">Only verified payments reduce your invoice balance.</p>
         <Table responsive className="pm-table pm-payment-history mb-0">
           <thead>

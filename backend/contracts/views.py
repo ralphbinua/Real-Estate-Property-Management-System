@@ -7,7 +7,8 @@ from django.db.models import Prefetch, Q
 from django.utils import timezone
 import os
 from secrets import compare_digest
-from .models import Contract, LeaseRenewal
+from .models import Contract, LeaseRenewal, LeaseInspection, DepositSettlement
+from decimal import Decimal, InvalidOperation
 from .serializers import ContractSerializer, LeaseTerminationSerializer
 from .renewals import RenewalProposalInput, renewal_data, propose_renewal, decide_renewal, prepare_renewal
 from .reminders import send_lease_expiry_reminders
@@ -18,6 +19,7 @@ from properties.models import (
 from properties.querysets import property_serializer_queryset
 from users.audit import record_activity
 from core.pagination import OptInPageNumberPagination
+from core.csv_exports import csv_response
 from notifications.models import Notification
 from notifications.services import create_for_recipients
 
@@ -29,6 +31,18 @@ class IsAdminOrPropertyManager(permissions.BasePermission):
             user and user.is_authenticated and user.is_active and not user.is_deleted
             and user.role in ('Admin', 'Property Manager')
         )
+
+
+class IsTenant(permissions.BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and user.is_active and not user.is_deleted and user.role == 'Tenant')
+
+
+class IsOwner(permissions.BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and user.is_active and not user.is_deleted and user.role == 'Owner')
 
 
 @api_view(['GET'])
@@ -119,15 +133,197 @@ class ContractViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == 'activate':
             return [IsAuthorizedContractActivator()]
-        if self.action in ('destroy', 'terminate'):
+        if self.action in ('destroy', 'terminate', 'move_out'):
             return [IsAuthorizedContractTerminator()]
         if self.action in ('create', 'update', 'partial_update'):
             return [IsAdminOrPropertyManager()]
         if self.action in ('renewal', 'renewal_decision', 'prepare_renewal_lease'):
             return [IsAuthorizedContractActivator()]
-        if self.action in ('list', 'retrieve'):
+        if self.action in ('inspection', 'deposit_settlement') and self.request.method == 'POST':
+            return [IsAdminOrPropertyManager()]
+        if self.action == 'complete_turnover':
+            return [IsAdminOrPropertyManager()]
+        if self.action == 'inspection_acknowledge':
+            return [IsTenant()]
+        if self.action == 'deposit_decision':
+            return [IsOwner()]
+        if self.action in ('list', 'retrieve', 'export'):
             return [IsAuthorizedContractReader()]
         return [permissions.IsAuthenticated()]
+
+    @action(detail=True, methods=['post'], url_path='move-out')
+    @transaction.atomic
+    def move_out(self, request, pk=None):
+        contract = self._end_contract(request, self.get_object())
+        contract.turnover_pending = True
+        contract.save(update_fields=['turnover_pending'])
+        if contract.unit_id and contract.unit.status == 'Available':
+            contract.unit.status = 'Maintenance'
+            contract.unit.save(update_fields=['status'])
+            if contract.property.units.count() == 1:
+                contract.property.status = 'Under Maintenance'
+                contract.property.save(update_fields=['status'])
+        elif not contract.unit_id and not contract.property.units.exists() and contract.property.status == 'Available':
+            contract.property.status = 'Under Maintenance'
+            contract.property.save(update_fields=['status'])
+        return Response(self.get_serializer(contract).data)
+
+    @action(detail=True, methods=['get', 'post'])
+    @transaction.atomic
+    def inspection(self, request, pk=None):
+        contract = self.get_object()
+        if request.method == 'GET':
+            return Response([self._inspection_data(item) for item in contract.inspections.all()])
+        contract = Contract.objects.select_for_update().get(pk=contract.pk)
+        if contract.status not in ('Active', 'Terminated'):
+            raise ValidationError({'status': 'Inspections require an active or ended lease.'})
+        kind = request.data.get('kind')
+        if kind not in ('Move In', 'Move Out'):
+            raise ValidationError({'kind': 'Choose Move In or Move Out.'})
+        if kind == 'Move Out' and not contract.turnover_pending:
+            raise ValidationError({'kind': 'Start move-out before recording a move-out inspection.'})
+        inspected_on = request.data.get('inspectedOn')
+        from django.utils.dateparse import parse_date
+        inspected_date = parse_date(inspected_on) if isinstance(inspected_on, str) else None
+        if not inspected_date:
+            raise ValidationError({'inspectedOn': 'Enter an inspection date in YYYY-MM-DD format.'})
+        checklist = request.data.get('checklist')
+        if not isinstance(checklist, dict) or not checklist:
+            raise ValidationError({'checklist': 'Record at least one condition item.'})
+        if len(str(checklist)) > 10000:
+            raise ValidationError({'checklist': 'The checklist is too long.'})
+        notes = request.data.get('notes', '')
+        evidence = request.data.get('evidenceReference', '')
+        if not isinstance(notes, str) or not isinstance(evidence, str) or len(evidence) > 500:
+            raise ValidationError({'detail': 'Invalid notes or evidence reference.'})
+        latest = contract.inspections.filter(kind=kind).order_by('-version').first()
+        item = LeaseInspection.objects.create(contract=contract, kind=kind, version=(latest.version + 1 if latest else 1), inspected_on=inspected_date, checklist=checklist, notes=notes, evidence_reference=evidence, recorded_by=request.user)
+        record_activity(request.user, 'CREATE', 'Lease inspection', item.pk, f'Recorded {kind.lower()} inspection for lease {contract.pk}.')
+        return Response(self._inspection_data(item), status=201)
+
+    def _inspection_data(self, item):
+        return {'id': item.pk, 'kind': item.kind, 'version': item.version, 'inspectedOn': item.inspected_on.isoformat(), 'checklist': item.checklist, 'notes': item.notes, 'evidenceReference': item.evidence_reference, 'recordedBy': item.recorded_by_id, 'createdAt': item.created_at.isoformat(), 'tenantAcknowledgedAt': item.tenant_acknowledged_at.isoformat() if item.tenant_acknowledged_at else None}
+
+    @action(detail=True, methods=['post'], url_path='inspection-acknowledge')
+    @transaction.atomic
+    def inspection_acknowledge(self, request, pk=None):
+        contract = self.get_object()
+        if contract.tenant_id != request.user.pk:
+            raise ValidationError({'detail': 'Only the lease Tenant may acknowledge this inspection.'})
+        item = contract.inspections.filter(pk=request.data.get('inspectionId')).first()
+        if not item:
+            raise ValidationError({'inspectionId': 'Inspection not found for this lease.'})
+        if not item.tenant_acknowledged_at:
+            item.tenant_acknowledged_at = timezone.now()
+            item.save(update_fields=['tenant_acknowledged_at'])
+        return Response(self._inspection_data(item))
+
+    def _settlement_data(self, item):
+        return {'id': item.pk, 'status': item.status, 'deductions': str(item.deductions), 'returnAmount': str(item.return_amount), 'reason': item.reason, 'evidenceReference': item.evidence_reference, 'requestedAt': item.requested_at.isoformat(), 'decidedAt': item.decided_at.isoformat() if item.decided_at else None, 'decisionNote': item.decision_note}
+
+    @action(detail=True, methods=['get', 'post'], url_path='deposit-settlement')
+    @transaction.atomic
+    def deposit_settlement(self, request, pk=None):
+        contract = self.get_object()
+        if request.method == 'GET':
+            item = DepositSettlement.objects.filter(contract=contract).first()
+            return Response(self._settlement_data(item) if item else None)
+        contract = Contract.objects.select_for_update().get(pk=contract.pk)
+        if not contract.turnover_pending or not contract.inspections.filter(kind='Move Out').exists():
+            raise ValidationError({'detail': 'Record a move-out inspection before requesting deposit settlement.'})
+        try:
+            deductions = Decimal(str(request.data.get('deductions')))
+        except (InvalidOperation, TypeError):
+            raise ValidationError({'deductions': 'Enter a valid amount.'})
+        if not deductions.is_finite() or deductions < 0 or deductions > contract.deposit_amount or deductions.as_tuple().exponent < -2:
+            raise ValidationError({'deductions': 'Deductions must be between zero and the deposit, with two decimal places.'})
+        reason = request.data.get('reason', '')
+        evidence = request.data.get('evidenceReference', '')
+        if deductions > 0 and not str(reason).strip():
+            raise ValidationError({'reason': 'Explain each deduction.'})
+        if not isinstance(reason, str) or not isinstance(evidence, str) or len(evidence) > 500:
+            raise ValidationError({'detail': 'Invalid settlement details.'})
+        item = DepositSettlement.objects.filter(contract=contract).first()
+        if item and item.status != 'Rejected':
+            raise ValidationError({'status': 'This settlement is already pending or approved.'})
+        if item:
+            item.deductions = deductions
+            item.reason = reason
+            item.evidence_reference = evidence
+            item.status = 'Pending'
+            item.requested_by = request.user
+            item.requested_at = timezone.now()
+            item.decided_by = None
+            item.decided_at = None
+            item.decision_note = ''
+            item.save()
+        else:
+            item = DepositSettlement.objects.create(contract=contract, deductions=deductions, reason=reason, evidence_reference=evidence, requested_by=request.user)
+        record_activity(request.user, 'CREATE', 'Deposit settlement', item.pk, f'Requested deposit settlement approval for lease {contract.pk}.')
+        create_for_recipients(recipients=[contract.property.owner] if contract.property.owner_id else [], actor=request.user, event_type=Notification.EventType.LEASE, title='Deposit settlement approval requested', message=f'Lease #{contract.pk} deposit settlement needs your decision.', destination=Notification.Destination.OWNER_CONTRACTS)
+        return Response(self._settlement_data(item))
+
+    @action(detail=True, methods=['post'], url_path='deposit-decision')
+    @transaction.atomic
+    def deposit_decision(self, request, pk=None):
+        contract = self.get_object()
+        if contract.property.owner_id != request.user.pk:
+            raise ValidationError({'detail': 'Only this property Owner may decide.'})
+        item = DepositSettlement.objects.select_for_update().filter(contract=contract).first()
+        if not item or item.status != 'Pending':
+            raise ValidationError({'status': 'No settlement is awaiting approval.'})
+        approved = request.data.get('approved')
+        if not isinstance(approved, bool):
+            raise ValidationError({'approved': 'Provide true or false.'})
+        item.status = 'Approved' if approved else 'Rejected'
+        item.decided_by = request.user
+        item.decided_at = timezone.now()
+        item.decision_note = str(request.data.get('note', ''))[:1000]
+        item.save(update_fields=['status', 'decided_by', 'decided_at', 'decision_note'])
+        record_activity(request.user, 'UPDATE', 'Deposit settlement', item.pk, f'{item.status} deposit settlement for lease {contract.pk}.')
+        for recipient, destination in ((contract.tenant, Notification.Destination.TENANT_LEASE), (contract.property.manager, Notification.Destination.MANAGER_CONTRACTS)):
+            if recipient:
+                create_for_recipients(recipients=[recipient], actor=request.user, event_type=Notification.EventType.LEASE, title=f'Deposit settlement {item.status.lower()}', message=f'The deposit settlement for lease #{contract.pk} was {item.status.lower()}.', destination=destination)
+        return Response(self._settlement_data(item))
+
+    @action(detail=True, methods=['post'], url_path='complete-turnover')
+    @transaction.atomic
+    def complete_turnover(self, request, pk=None):
+        contract = self.get_object()
+        contract = Contract.objects.select_for_update().get(pk=contract.pk)
+        if not contract.turnover_pending or not contract.inspections.filter(kind='Move Out').exists():
+            raise ValidationError({'detail': 'A move-out inspection is required.'})
+        settlement = DepositSettlement.objects.filter(contract=contract, status='Approved').first()
+        if not settlement:
+            raise ValidationError({'detail': 'Owner approval of the deposit settlement is required.'})
+        if contract.unit_id and contract.unit.maintenance_requests.filter(is_deleted=False).exclude(status='Resolved').exists():
+            raise ValidationError({'detail': 'Resolve open maintenance work before turnover.'})
+        contract.turnover_pending = False
+        contract.turnover_completed_at = timezone.now()
+        contract.save(update_fields=['turnover_pending', 'turnover_completed_at'])
+        record_activity(request.user, 'UPDATE', 'Contract', contract.pk, f'Completed turnover for lease {contract.pk}.')
+        if contract.unit_id and contract.unit.status == 'Maintenance':
+            if not contract.unit.contracts.filter(status__in=['Active', 'Pending'], is_deleted=False).exists():
+                contract.unit.status = 'Available'
+                contract.unit.save(update_fields=['status'])
+                if contract.property.status == 'Under Maintenance':
+                    contract.property.status = 'Available'
+                    contract.property.save(update_fields=['status'])
+        elif not contract.unit_id and not contract.property.units.exists() and contract.property.status == 'Under Maintenance':
+            if not contract.property.contracts.filter(status__in=['Active', 'Pending'], is_deleted=False).exists():
+                contract.property.status = 'Available'
+                contract.property.save(update_fields=['status'])
+        return Response(self.get_serializer(contract).data)
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        return csv_response('leases', [
+            ('ID', lambda item: item.pk), ('Property', lambda item: item.property.title),
+            ('Unit', lambda item: item.unit.unit_number if item.unit else ''),
+            ('Tenant', lambda item: item.tenant.email), ('Start date', lambda item: item.start_date),
+            ('End date', lambda item: item.end_date), ('Rent', lambda item: item.rent_amount),
+            ('Deposit', lambda item: item.deposit_amount), ('Status', lambda item: item.status),
+        ], self.get_queryset())
 
     @transaction.atomic
     def _end_contract(self, request, contract):

@@ -69,6 +69,8 @@ class Contract(models.Model):
     termination_basis = models.CharField(max_length=30, choices=TERMINATION_BASIS_CHOICES, blank=True, default='')
     termination_note = models.TextField(blank=True, default='')
     termination_instruction_reference = models.CharField(max_length=500, blank=True, default='')
+    turnover_pending = models.BooleanField(default=False)
+    turnover_completed_at = models.DateTimeField(null=True, blank=True)
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -106,3 +108,37 @@ class LeaseExpiryReminder(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['contract', 'days_before'], name='unique_lease_expiry_reminder')]
+
+
+class LeaseInspection(models.Model):
+    contract = models.ForeignKey(Contract, on_delete=models.PROTECT, related_name='inspections')
+    kind = models.CharField(max_length=12, choices=[('Move In', 'Move In'), ('Move Out', 'Move Out')])
+    version = models.PositiveIntegerField()
+    inspected_on = models.DateField()
+    checklist = models.JSONField(default=dict)
+    notes = models.TextField(blank=True, default='')
+    evidence_reference = models.CharField(max_length=500, blank=True, default='')
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='recorded_lease_inspections')
+    created_at = models.DateTimeField(auto_now_add=True)
+    tenant_acknowledged_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['contract', 'kind', 'version'], name='unique_lease_inspection_version')]
+        ordering = ['kind', '-version']
+
+
+class DepositSettlement(models.Model):
+    contract = models.OneToOneField(Contract, on_delete=models.PROTECT, related_name='deposit_settlement')
+    deductions = models.DecimalField(max_digits=10, decimal_places=2)
+    reason = models.TextField(blank=True, default='')
+    evidence_reference = models.CharField(max_length=500, blank=True, default='')
+    status = models.CharField(max_length=12, choices=[('Pending', 'Pending'), ('Approved', 'Approved'), ('Rejected', 'Rejected')], default='Pending')
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='requested_deposit_settlements')
+    requested_at = models.DateTimeField(auto_now_add=True)
+    decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='decided_deposit_settlements', null=True, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decision_note = models.TextField(blank=True, default='')
+
+    @property
+    def return_amount(self):
+        return self.contract.deposit_amount - self.deductions

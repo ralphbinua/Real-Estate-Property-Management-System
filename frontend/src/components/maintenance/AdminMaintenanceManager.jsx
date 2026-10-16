@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { Form, Alert, Spinner } from 'react-bootstrap';
+import { Fragment, useState } from 'react';
+import { Form, Alert, Spinner, Button } from 'react-bootstrap';
 import Table from '../ui/ResponsiveTable.jsx';
-import { assignMaintenanceRequest, fetchMaintenanceRequestsPage, updateMaintenanceStatus } from '../../services/maintenance/maintenanceService';
+import { assignMaintenanceRequest, fetchMaintenanceRequestsPage, updateMaintenanceStatus, updateMaintenanceWorkOrder, requestMaintenanceApproval } from '../../services/maintenance/maintenanceService';
 import usePaginatedCollection from '../../hooks/usePaginatedCollection';
 import CollectionPagination from '../ui/CollectionPagination';
+import ExportCsvButton from '../ui/ExportCsvButton';
 import { useAuth } from '../../context/useAuth';
 
 const STATUS_PILL_CLASS = {
@@ -29,6 +30,21 @@ export default function AdminMaintenanceManager() {
   const { items: requests, count, page, pageCount, loading, error: loadError, setPage, refresh } = usePaginatedCollection(fetchMaintenanceRequestsPage);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [expanded, setExpanded] = useState(null);
+  const [draft, setDraft] = useState({});
+
+  const workAction = async (id, approval = false) => {
+    setError(''); setSuccess('');
+    try {
+      if (approval) await requestMaintenanceApproval(id);
+      else await updateMaintenanceWorkOrder(id, draft[id] || {});
+      setSuccess(approval ? 'Owner approval requested.' : 'Work order saved.');
+      refresh();
+    } catch (err) {
+      const data = err.response?.data;
+      setError(data?.estimateAmount?.[0] || data?.approvalStatus?.[0] || data?.status?.[0] || 'Could not update the work order.');
+    }
+  };
 
   const handleStatusChange = async (id, newStatus) => {
     setError('');
@@ -37,8 +53,8 @@ export default function AdminMaintenanceManager() {
       await updateMaintenanceStatus(id, newStatus);
       setSuccess('Maintenance status updated.');
       refresh();
-    } catch {
-      setError('Failed to update ticket status.');
+    } catch (err) {
+      setError(err.response?.data?.status?.[0] || 'Failed to update ticket status.');
     }
   };
 
@@ -56,6 +72,7 @@ export default function AdminMaintenanceManager() {
 
   return (
     <>
+        <div className="d-flex justify-content-end p-2"><ExportCsvButton resource="maintenance" /></div>
         {(error || loadError) && <Alert variant="danger" className="m-3" dismissible onClose={() => setError('')}>{error || loadError}</Alert>}
         {success && <Alert variant="success" className="m-3" dismissible onClose={() => setSuccess('')}>{success}</Alert>}
 
@@ -71,6 +88,7 @@ export default function AdminMaintenanceManager() {
                 <th>Property</th>
                 <th>Tenant</th>
                 <th>Description</th>
+                <th>Priority</th>
                 <th>Status</th>
                 <th>Assigned to</th>
                 <th className="text-center">Action</th>
@@ -98,11 +116,14 @@ export default function AdminMaintenanceManager() {
                     .filter((person) => person?._id && person.isActive !== false && person.isDeleted !== true)
                     .filter((person, index, people) => people.findIndex((candidate) => candidate._id === person._id) === index);
 
+                  const values = draft[reqId] || {};
+                  const field = (name, label, type = 'text') => <Form.Group key={name}><Form.Label className="small">{label}</Form.Label><Form.Control size="sm" type={type} min={type === 'number' ? '0' : undefined} step={type === 'number' ? '0.01' : undefined} value={values[name] ?? req[name] ?? ''} onChange={(e) => setDraft((current) => ({ ...current, [reqId]: { ...current[reqId], [name]: e.target.value } }))} /></Form.Group>;
                   return (
-                    <tr key={reqId}>
+                    <Fragment key={reqId}><tr>
                       <td className="fw-bold pm-cell-title">{propertyTitle}</td>
                       <td>{tenantName}</td>
                       <td className="text-secondary">{req.issueDescription || req.title}</td>
+                      <td>{req.priority}</td>
                       <td>
                         <StatusPill status={req.status} />
                       </td>
@@ -132,13 +153,22 @@ export default function AdminMaintenanceManager() {
                           <option value="In Progress">In Progress</option>
                           <option value="Resolved">Resolved</option>
                         </Form.Select>
+                        <Button size="sm" variant="link" onClick={() => setExpanded(expanded === reqId ? null : reqId)} aria-expanded={expanded === reqId}>Work order</Button>
                       </td>
                     </tr>
+                    {expanded === reqId && <tr><td colSpan="7"><div className="d-flex flex-wrap gap-3 p-2 align-items-end">
+                      {field('vendorName', 'Vendor')}{field('vendorContact', 'Vendor contact')}{field('estimateAmount', 'Estimate', 'number')}{field('actualCost', 'Actual cost', 'number')}
+                      <Button size="sm" onClick={() => workAction(reqId)}>Save details</Button>
+                      <Button size="sm" variant="outline-primary" disabled={req.approvalStatus === 'Pending' || req.approvalStatus === 'Approved' || !req.estimateAmount} onClick={() => workAction(reqId, true)}>Request Owner approval</Button>
+                    </div><div className="px-2 pb-2">Approval: {req.approvalStatus}{req.approvalNote && ` · ${req.approvalNote}`}</div>
+                    {req.activity?.length > 0 && <details className="px-2 pb-2"><summary>History</summary><ul>{req.activity.map((event, index) => <li key={`${event.at}-${index}`}>{event.summary}</li>)}</ul></details>}
+                    </td></tr>}
+                    </Fragment>
                   );
                 })
               ) : (
                 <tr>
-                  <td colSpan="6" className="text-center text-muted py-4">No maintenance tickets submitted.</td>
+                  <td colSpan="7" className="text-center text-muted py-4">No maintenance tickets submitted.</td>
                 </tr>
               )}
             </tbody>

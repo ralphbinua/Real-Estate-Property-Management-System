@@ -37,3 +37,12 @@ export const prepareLeaseRenewal = async (id) => {
   const response = await api.post(`/contracts/${id}/prepare-renewal/`);
   return response.data;
 };
+
+export const moveOutLease = async (id, data) => (await api.post(`/contracts/${id}/move-out/`, data)).data;
+export const fetchLeaseInspections = async (id) => (await api.get(`/contracts/${id}/inspection/`)).data;
+export const recordLeaseInspection = async (id, data) => (await api.post(`/contracts/${id}/inspection/`, data)).data;
+export const acknowledgeLeaseInspection = async (id, inspectionId) => (await api.post(`/contracts/${id}/inspection-acknowledge/`, { inspectionId })).data;
+export const fetchDepositSettlement = async (id) => (await api.get(`/contracts/${id}/deposit-settlement/`)).data;
+export const requestDepositSettlement = async (id, data) => (await api.post(`/contracts/${id}/deposit-settlement/`, data)).data;
+export const decideDepositSettlement = async (id, approved, note = '') => (await api.post(`/contracts/${id}/deposit-decision/`, { approved, note })).data;
+export const completeLeaseTurnover = async (id) => (await api.post(`/contracts/${id}/complete-turnover/`)).data;

@@ -1,6 +1,8 @@
 import { Button } from 'react-bootstrap';
 import Table from '../../components/ui/ResponsiveTable.jsx';
 import RenewalControls from '../../components/leases/RenewalControls.jsx';
+import ExportCsvButton from '../../components/ui/ExportCsvButton.jsx';
+import LeaseTurnoverControls from '../../components/leases/LeaseTurnoverControls.jsx';
 
 const STATUS_CLASS = {
   pending: 'pm-pill-pending',
@@ -21,6 +23,7 @@ export default function ManagerContractSection({ contracts, onActivate, onTermin
   return (
     <>
       <div className="pm-panel-header">Lease contracts ({contracts.length})</div>
+      <div className="d-flex justify-content-end p-2"><ExportCsvButton resource="contracts" /></div>
       {expiringCount > 0 && <p className="small text-warning mb-3">{expiringCount} lease{expiringCount === 1 ? '' : 's'} approaching the end date. Review renewal or move-out plans.</p>}
       <Table responsive className="pm-table mb-0">
         <thead><tr><th>Property / Unit</th><th>Tenant</th><th>Rent amount</th><th>Status</th><th className="text-center">Action</th></tr></thead>
@@ -36,7 +39,7 @@ export default function ManagerContractSection({ contracts, onActivate, onTermin
                 <td className="pm-cell-title">{propertyTitle}{unitLabel}</td>
                 <td>{tenantName}</td>
                 <td className="pm-cell-strong">₱{Number(contract.rentAmount || 0).toLocaleString()}</td>
-                <td><StatusPill status={contract.status} />{contract.activatedAt && <div className="small text-muted mt-1">{contract.activationBasis} · {new Date(contract.activatedAt).toLocaleDateString()}</div>}<RenewalControls contract={contract} role="manager" onUpdated={onRenewalUpdated} /></td>
+                <td><StatusPill status={contract.status} />{contract.activatedAt && <div className="small text-muted mt-1">{contract.activationBasis} · {new Date(contract.activatedAt).toLocaleDateString()}</div>}<RenewalControls contract={contract} role="manager" onUpdated={onRenewalUpdated} /><LeaseTurnoverControls contract={contract} role="manager" canMoveOut={contract.propertyDetails?.managerLeaseTerminationAuthorized} onUpdated={onRenewalUpdated} /></td>
                 <td className="text-center">
                   {contract.status === 'Pending' && contract.sourceApplication && contract.propertyDetails?.managerLeaseSigningAuthorized && <Button variant="primary" size="sm" className="me-2" disabled={activatingContractId === id} onClick={() => onActivate(contract)}>{activatingContractId === id ? 'Recording…' : 'Record signed lease'}</Button>}
                   {contract.status === 'Pending' && !contract.sourceApplication && <span className="small text-muted me-2">Owner/Admin activates manual leases</span>}

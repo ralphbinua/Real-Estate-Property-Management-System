@@ -5,6 +5,8 @@ import Table from '../../components/ui/ResponsiveTable.jsx';
 import { useAuth } from '../../context/useAuth';
 import useNotificationDeepLink from '../../hooks/useNotificationDeepLink';
 import { fetchMaintenanceRequests, createMaintenanceRequest } from '../../services/maintenance/maintenanceService';
+import ExportCsvButton from '../../components/ui/ExportCsvButton.jsx';
+import LeaseTurnoverControls from '../../components/leases/LeaseTurnoverControls.jsx';
 import { fetchProperties } from '../../services/properties/propertyService';
 import { fetchContracts } from '../../services/contracts/contractService';
 import { fetchSystemSettings } from '../../services/users/systemSettingsService';
@@ -54,6 +56,7 @@ export default function TenantDashboard() {
     property: '',
     unit: '',
     issueDescription: '',
+    priority: 'Normal',
   });
 
   const loadData = async () => {
@@ -111,12 +114,14 @@ export default function TenantDashboard() {
         property: Number(formData.property),
         unit: formData.unit ? Number(formData.unit) : null,
         issueDescription: formData.issueDescription,
+        priority: formData.priority,
       });
       setSuccess('Maintenance issue reported successfully!');
       setFormData({
         property: availableProperties.length === 1 ? availableProperties[0]._id : '',
         unit: '',
         issueDescription: '',
+        priority: 'Normal',
       });
       setShowModal(false);
       loadData();
@@ -194,6 +199,7 @@ export default function TenantDashboard() {
 
             <div className="pm-panel mb-4" id="lease" data-workspace-section="lease">
               <div className="pm-panel-header">My property and lease</div>
+              <div className="d-flex justify-content-end p-2"><ExportCsvButton resource="contracts" /></div>
               <Table responsive className="pm-table mb-0">
                 <thead><tr><th>Property / unit</th><th>Rent</th><th>Lease period</th><th>Status</th><th>Expires</th></tr></thead>
                 <tbody>
@@ -202,7 +208,7 @@ export default function TenantDashboard() {
                       <td>{contract.propertyDetails?.title || 'Property'}{contract.unitDetails?.unitNumber ? ` — ${contract.unitDetails.unitNumber}` : ''}</td>
                       <td>₱{Number(contract.rentAmount || 0).toLocaleString()}</td>
                       <td>{contract.startDate} – {contract.endDate}</td>
-                      <td><TicketStatusPill status={contract.status} />{contract.renewal && <div className="small text-muted mt-1">Renewal {contract.renewal.status.toLowerCase()}: {contract.renewal.startDate}–{contract.renewal.endDate}</div>}</td>
+                      <td><TicketStatusPill status={contract.status} />{contract.renewal && <div className="small text-muted mt-1">Renewal {contract.renewal.status.toLowerCase()}: {contract.renewal.startDate}–{contract.renewal.endDate}</div>}<LeaseTurnoverControls contract={contract} role="tenant" onUpdated={loadData} /></td>
                       <td>{contract.endDate}</td>
                     </tr>
                   ))}
@@ -215,6 +221,7 @@ export default function TenantDashboard() {
             <div className="pm-panel" id="maintenance" data-workspace-section="maintenance">
               <div className="pm-panel-header">
                 My maintenance & repair log ({requests.length})
+                <span className="ms-auto"><ExportCsvButton resource="maintenance" /></span>
               </div>
               <Table responsive className="pm-table mb-0">
                 <thead>
@@ -233,7 +240,7 @@ export default function TenantDashboard() {
                         <td className="pm-cell-title">
                           {req.propertyDetails?.title || req.property?.title || req.property || '—'}
                         </td>
-                        <td className="pm-cell-muted">{req.issueDescription}</td>
+                        <td className="pm-cell-muted">{req.issueDescription}{req.priority === 'Urgent' && <span className="pm-pill pm-pill-pending ms-2">Urgent</span>}{req.activity?.length > 0 && <details className="mt-1"><summary>Updates</summary><ul className="mb-0 ps-3">{req.activity.map((event, index) => <li key={`${event.at}-${index}`}>{event.summary} <small>{new Date(event.at).toLocaleDateString()}</small></li>)}</ul></details>}</td>
                         <td>
                           <TicketStatusPill status={req.status} />
                         </td>
@@ -306,6 +313,13 @@ export default function TenantDashboard() {
                   onChange={(e) => setFormData({ ...formData, issueDescription: e.target.value })}
                   required
                 />
+              </Form.Group>
+              <Form.Group className="mb-3" controlId="maintenance-priority">
+                <Form.Label className="pm-form-label">Urgency</Form.Label>
+                <Form.Select className="pm-input" value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })}>
+                  <option value="Normal">Normal</option>
+                  <option value="Urgent">Urgent</option>
+                </Form.Select>
               </Form.Group>
             </Modal.Body>
             <Modal.Footer>

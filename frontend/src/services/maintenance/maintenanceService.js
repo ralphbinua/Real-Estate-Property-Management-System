@@ -22,3 +22,7 @@ export const assignMaintenanceRequest = async (id, assignedTo) => {
   const response = await api.patch(`/maintenance/${id}/`, { assignedTo });
   return response.data;
 };
+
+export const updateMaintenanceWorkOrder = async (id, data) => (await api.patch(`/maintenance/${id}/`, data)).data;
+export const requestMaintenanceApproval = async (id) => (await api.post(`/maintenance/${id}/request-approval/`)).data;
+export const decideMaintenanceApproval = async (id, approved, note = '') => (await api.post(`/maintenance/${id}/decide-approval/`, { approved, note })).data;

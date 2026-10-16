@@ -13,6 +13,7 @@ from rest_framework.response import Response
 
 from contracts.models import Contract
 from core.pagination import OptInPageNumberPagination
+from core.csv_exports import csv_response
 from users.audit import record_activity
 from notifications.models import Notification
 from notifications.services import create_for_recipients
@@ -111,6 +112,15 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         if self.action == 'tenant':
             return [permissions.IsAuthenticated()]
         return [permissions.IsAuthenticated()]
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        return csv_response('invoices', [
+            ('ID', lambda item: item.pk), ('Property', lambda item: item.property.title),
+            ('Tenant', lambda item: item.tenant.email), ('Due date', lambda item: item.due_date),
+            ('Amount', lambda item: item.amount), ('Late fee', lambda item: item.late_fee),
+            ('Total due', lambda item: item.total_due), ('Status', lambda item: item.status),
+        ], self.get_queryset())
 
     @action(detail=False, methods=['get'])
     def tenant(self, request):
@@ -248,6 +258,17 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
         if self.action in ('record', 'verify', 'reject', 'reverse'):
             return [IsAdminOrPropertyManager()]
         return [permissions.IsAuthenticated()]
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        return csv_response('payments', [
+            ('ID', lambda item: item.pk), ('Invoice ID', lambda item: item.invoice_id),
+            ('Property', lambda item: item.invoice.property.title),
+            ('Tenant', lambda item: item.invoice.tenant.email),
+            ('Payment date', lambda item: item.payment_date), ('Amount', lambda item: item.amount),
+            ('Method', lambda item: item.payment_method), ('Reference', lambda item: item.reference_number),
+            ('Status', lambda item: item.status),
+        ], self.get_queryset())
 
     def create(self, request, *args, **kwargs):
         return self._create_payment(request, direct_record=False)

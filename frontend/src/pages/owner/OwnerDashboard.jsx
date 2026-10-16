@@ -617,7 +617,7 @@ export default function OwnerDashboard() {
                     />
                   )}
                   {activePortfolioTab === 'maintenance' && (
-                    <OwnerMaintenanceSection requests={portfolio.maintenanceRequests} />
+                    <OwnerMaintenanceSection requests={portfolio.maintenanceRequests} onRefresh={() => loadOwnerData({ section: 'maintenance', force: true })} />
                   )}
                   {activePortfolioTab === 'payments' && (
                     <OwnerBillingSection
