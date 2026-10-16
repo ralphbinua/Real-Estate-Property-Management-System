@@ -180,7 +180,11 @@ After updating the code, apply all database migrations from the `backend` folder
 python manage.py migrate
 ```
 
-The Admin or Property Manager can still use **Run monthly billing batch** in the app. For a regular monthly run, configure the hosting environment's scheduler to run this command on the first day of each month from the `backend` folder. Django currently uses UTC to determine the billing month, so schedule it shortly after 00:00 UTC:
+The Admin or Property Manager can still use **Run monthly billing batch** in the app. Every manual or scheduled attempt is recorded in billing run history with its month, result, and invoice count. Admins see all runs; Managers see their own manual runs. Failed runs also create an in-app Admin notification.
+
+The root `vercel.json` configures a monthly cron call to `GET /api/invoices/scheduled-monthly-billing/` at 00:05 UTC on the first day of each month. Set a strong `CRON_SECRET` in the production deployment environment; Vercel sends it as a Bearer token. The endpoint rejects requests when the secret is absent or incorrect. Apply migrations before enabling the cron job. Confirm the job appears in the production deployment's Cron Jobs settings and verify its first run in the Admin billing history. Vercel does not retry failed cron calls, so monitor failed or missing runs and rerun the month manually if needed.
+
+For non-Vercel hosting, schedule this command on the first day of each month from the `backend` folder. Django currently uses UTC to determine the billing month, so schedule it shortly after 00:00 UTC:
 
 ```powershell
 python manage.py generate_monthly_invoices
@@ -192,7 +196,7 @@ To generate a particular month manually, for example when recovering a missed ru
 python manage.py generate_monthly_invoices --month 2026-10
 ```
 
-The command does not install or configure a scheduler. Set up a monthly job in the hosting provider or operating system scheduler, and use the deployment's Python environment and database configuration.
+The command does not install a scheduler. Set up a monthly job in the hosting provider or operating system scheduler, and use the deployment's Python environment and database configuration. Running the command twice is safe for invoice creation; both attempts appear in run history.
 
 ## Rent payment ledger
 

@@ -44,6 +44,21 @@ class Invoice(models.Model):
         return f"Invoice #{self.id} - {self.tenant.email} (₱{self.total_due})"
 
 
+class BillingRun(models.Model):
+    month = models.DateField()
+    trigger = models.CharField(max_length=20, choices=[('Manual', 'Manual'), ('Scheduled', 'Scheduled')])
+    status = models.CharField(max_length=20, choices=[('Running', 'Running'), ('Succeeded', 'Succeeded'), ('Failed', 'Failed')], default='Running')
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_count = models.PositiveIntegerField(default=0)
+    error_summary = models.CharField(max_length=500, blank=True, default='')
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+
+    class Meta:
+        ordering = ['-started_at', '-id']
+
+
+
 class Payment(models.Model):
     class Status(models.TextChoices):
         PENDING_VERIFICATION = 'Pending Verification', 'Pending Verification'

@@ -20,6 +20,11 @@ export const triggerMonthlyBilling = async () => {
   return response.data;
 };
 
+export const fetchBillingRuns = async () => {
+  const response = await api.get('/invoices/billing-runs/');
+  return response.data;
+};
+
 export const recordPayment = async (invoiceId, paymentData) => {
   const response = await api.post('/payments/record/', { ...paymentData, invoice: invoiceId });
   return response.data;

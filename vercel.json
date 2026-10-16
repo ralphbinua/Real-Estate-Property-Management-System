@@ -1,5 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    { "path": "/api/invoices/scheduled-monthly-billing/", "schedule": "5 0 1 * *" }
+  ],
   "services": {
     "frontend": {
       "root": "frontend",

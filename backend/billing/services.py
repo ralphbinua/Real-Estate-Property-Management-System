@@ -2,12 +2,13 @@ from calendar import monthrange
 from datetime import date
 
 from django.db import transaction
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from contracts.models import Contract
 from notifications.models import Notification
 from notifications.services import create_for_recipients
-from .models import Invoice
+from .models import BillingRun, Invoice
 
 
 def generate_monthly_invoices(period=None, contract_queryset=None):
@@ -80,3 +81,34 @@ def generate_monthly_invoices(period=None, contract_queryset=None):
             created_count += 1
 
     return created_count
+
+
+def run_monthly_billing(*, period=None, trigger, actor=None, contract_queryset=None):
+    """Persist the outcome of a manual or scheduled billing attempt."""
+    period = period or timezone.localdate()
+    month = date(period.year, period.month, 1)
+    run = BillingRun.objects.create(month=month, trigger=trigger, actor=actor)
+    try:
+        run.created_count = generate_monthly_invoices(period=month, contract_queryset=contract_queryset)
+    except Exception as error:
+        run.status = 'Failed'
+        run.error_summary = str(error)[:500]
+        run.finished_at = timezone.now()
+        run.save(update_fields=['status', 'error_summary', 'finished_at'])
+        try:
+            admins = get_user_model().objects.filter(role='Admin', is_active=True, is_deleted=False)
+            create_for_recipients(
+                recipients=admins,
+                actor=None,
+                event_type=Notification.EventType.INVOICE,
+                title='Monthly billing failed',
+                message=f'The {month:%Y-%m} billing run failed. Review billing run history.',
+                destination=Notification.Destination.ADMIN_OVERVIEW,
+            )
+        except Exception:
+            pass  # Preserve the billing failure even when notification delivery also fails.
+        raise
+    run.status = 'Succeeded'
+    run.finished_at = timezone.now()
+    run.save(update_fields=['status', 'created_count', 'finished_at'])
+    return run

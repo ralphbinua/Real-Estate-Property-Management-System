@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Col, Form, Modal, Row, Spinner } from 'react-bootstrap';
 import Table from '../ui/ResponsiveTable.jsx';
 import formatCurrency from '../../utils/formatCurrency';
 import {
   fetchInvoicesPage,
+  fetchBillingRuns,
   fetchPaymentsPage,
   recordPayment,
   rejectPayment,
@@ -50,13 +51,16 @@ const paymentStatusVariant = {
   Reversed: 'secondary',
 };
 
-export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
+export default function ManagerInvoiceTracker({ onPaymentsUpdated, showScheduleHealth = false }) {
   const invoiceCollection = usePaginatedCollection(fetchInvoicesPage);
   const paymentCollection = usePaginatedCollection(fetchPaymentsPage);
   const { items: invoices } = invoiceCollection;
   const { items: payments } = paymentCollection;
   const loading = invoiceCollection.loading || paymentCollection.loading;
   const [saving, setSaving] = useState(false);
+  const [billingRuns, setBillingRuns] = useState([]);
+  const [runsLoaded, setRunsLoaded] = useState(false);
+  const [runsError, setRunsError] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -71,6 +75,30 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
   });
   const [reasonModal, setReasonModal] = useState({ open: false, payment: null, action: '' });
   const [reason, setReason] = useState('');
+  const currentMonth = localDateValue().slice(0, 7);
+  const missingMonthlyRun = showScheduleHealth && runsLoaded && new Date().getDate() > 1
+    && !billingRuns.some((run) => run.month.startsWith(currentMonth) && run.status === 'Succeeded');
+
+  const loadBillingRuns = async () => {
+    try {
+      setBillingRuns(await fetchBillingRuns());
+      setRunsError('');
+    } catch {
+      setRunsError('Billing run history is unavailable.');
+    } finally {
+      setRunsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    fetchBillingRuns().then((runs) => {
+      if (active) { setBillingRuns(runs); setRunsLoaded(true); }
+    }).catch(() => {
+      if (active) { setRunsError('Billing run history is unavailable.'); setRunsLoaded(true); }
+    });
+    return () => { active = false; };
+  }, []);
 
   const refreshAfterPayment = async () => {
     paymentCollection.refresh();
@@ -84,9 +112,11 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
     try {
       const response = await triggerMonthlyBilling();
       setSuccess(response?.message || 'Monthly rent invoices generated.');
+      await loadBillingRuns();
       await refreshAfterPayment();
     } catch (billingError) {
       setError(errorMessage(billingError, 'Failed to run the monthly billing batch.'));
+      await loadBillingRuns();
     }
   };
 
@@ -194,6 +224,24 @@ export default function ManagerInvoiceTracker({ onPaymentsUpdated }) {
 
       {(error || invoiceCollection.error || paymentCollection.error) && <Alert variant="danger" dismissible onClose={() => setError('')}>{error || invoiceCollection.error || paymentCollection.error}</Alert>}
       {success && <Alert variant="success" dismissible onClose={() => setSuccess('')}>{success}</Alert>}
+      {missingMonthlyRun && !runsError && <Alert variant="warning">No successful billing run is recorded for {currentMonth}. Review the scheduler and run the batch if needed.</Alert>}
+
+      <section className="mb-4" aria-label="Monthly billing runs">
+        <h5 className="fw-bold mb-2">Monthly billing runs</h5>
+        {runsError && <Alert variant="warning">{runsError}</Alert>}
+        {billingRuns.length ? (
+          <Table responsive className="pm-table mb-0">
+            <thead><tr><th>Month</th><th>Started</th><th>Source</th><th>Result</th><th>Invoices</th></tr></thead>
+            <tbody>{billingRuns.map((run) => <tr key={run.id}>
+              <td>{run.month.slice(0, 7)}</td>
+              <td>{new Date(run.startedAt).toLocaleString('en-PH')}</td>
+              <td>{run.trigger}</td>
+              <td><Badge bg={run.status === 'Succeeded' ? 'success' : run.status === 'Failed' ? 'danger' : 'secondary'}>{run.status}</Badge>{run.errorSummary && <div className="small text-danger">{run.errorSummary}</div>}</td>
+              <td>{run.createdCount}</td>
+            </tr>)}</tbody>
+          </Table>
+        ) : !runsError && <p className="text-muted small">No billing runs recorded yet.</p>}
+      </section>
 
       {loading ? (
         <div className="pm-loading py-4"><Spinner animation="border" size="sm" className="me-2" />Loading billing records…</div>

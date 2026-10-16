@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 from users.audit import record_activity
-from billing.services import generate_monthly_invoices
+from billing.services import run_monthly_billing
 
 
 class Command(BaseCommand):
@@ -26,7 +26,8 @@ class Command(BaseCommand):
         else:
             period = timezone.localdate().replace(day=1)
 
-        generated_count = generate_monthly_invoices(period=period)
+        run = run_monthly_billing(period=period, trigger='Scheduled')
+        generated_count = run.created_count
         record_activity(
             None,
             'GENERATE',

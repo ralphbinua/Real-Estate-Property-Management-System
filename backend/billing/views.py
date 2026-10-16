@@ -1,11 +1,13 @@
 from decimal import Decimal
+import os
+from secrets import compare_digest
 
 from django.db import transaction
 from django.db.models import Q, Sum
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import mixins, permissions, serializers, status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
@@ -16,9 +18,9 @@ from notifications.models import Notification
 from notifications.services import create_for_recipients
 from .querysets import invoice_serializer_queryset, with_effective_invoice_status
 
-from .models import Invoice, Payment
+from .models import BillingRun, Invoice, Payment
 from .serializers import InvoiceSerializer, PaymentSerializer
-from .services import generate_monthly_invoices
+from .services import run_monthly_billing
 from .acknowledgments import build_payment_acknowledgment
 from users.models import SystemSettings
 
@@ -48,6 +50,19 @@ class IsTenant(permissions.BasePermission):
             user and user.is_authenticated and user.is_active and not user.is_deleted
             and user.role == 'Tenant'
         )
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def scheduled_monthly_billing(request):
+    secret = os.environ.get('CRON_SECRET', '')
+    supplied = request.headers.get('Authorization', '')
+    if not secret or not compare_digest(supplied, f'Bearer {secret}'):
+        return Response({'detail': 'Unauthorized.'}, status=status.HTTP_401_UNAUTHORIZED)
+    run = run_monthly_billing(trigger='Scheduled')
+    record_activity(None, 'GENERATE', 'Invoices', '',
+                    f'Generated {run.created_count} monthly rent invoices for {run.month:%Y-%m}.')
+    return Response({'month': run.month.isoformat(), 'generatedCount': run.created_count})
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
@@ -91,7 +106,7 @@ class InvoiceViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ('create', 'update', 'partial_update', 'destroy'):
             return [IsAdmin()]
-        if self.action == 'generate':
+        if self.action in ('generate', 'runs'):
             return [IsAdminOrPropertyManager()]
         if self.action == 'tenant':
             return [permissions.IsAuthenticated()]
@@ -121,13 +136,30 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         active_contracts = Contract.objects.filter(status='Active', is_deleted=False)
         if request.user.role == 'Property Manager':
             active_contracts = active_contracts.filter(property__manager=request.user)
-        created_count = generate_monthly_invoices(contract_queryset=active_contracts)
+        run = run_monthly_billing(trigger='Manual', actor=request.user, contract_queryset=active_contracts)
+        created_count = run.created_count
 
         record_activity(request.user, 'GENERATE', 'Invoices', '', f'Generated {created_count} monthly rent invoices.')
         return Response({
             'message': f'Generated {created_count} new monthly rent invoices.',
             'generatedCount': created_count,
         })
+
+    @action(detail=False, methods=['get'], url_path='billing-runs')
+    def runs(self, request):
+        runs = BillingRun.objects.select_related('actor')
+        if request.user.role == 'Property Manager':
+            runs = runs.filter(actor=request.user, trigger='Manual')
+        return Response([{
+            'id': run.pk,
+            'month': run.month.isoformat(),
+            'trigger': run.trigger,
+            'status': run.status,
+            'startedAt': run.started_at.isoformat(),
+            'finishedAt': run.finished_at.isoformat() if run.finished_at else None,
+            'createdCount': run.created_count,
+            'errorSummary': run.error_summary,
+        } for run in runs[:10]])
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)

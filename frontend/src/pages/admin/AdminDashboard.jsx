@@ -747,7 +747,7 @@ export default function AdminDashboard() {
 
             <div className="pm-panel mb-4" id="billing" data-workspace-section="billing">
               <div className="pm-panel-header">System-wide rent payments</div>
-              {activeSection === 'billing' && <div style={{ padding: '22px' }}><ManagerInvoiceTracker onPaymentsUpdated={refreshInvoiceSummaries} /></div>}
+              {activeSection === 'billing' && <div style={{ padding: '22px' }}><ManagerInvoiceTracker onPaymentsUpdated={refreshInvoiceSummaries} showScheduleHealth /></div>}
             </div>
 
             <div className="pm-panel mb-4" id="activity" data-workspace-section="activity">
