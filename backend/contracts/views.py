@@ -1,12 +1,16 @@
 from rest_framework import viewsets, permissions
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.utils import timezone
-from .models import Contract
+import os
+from secrets import compare_digest
+from .models import Contract, LeaseRenewal
 from .serializers import ContractSerializer, LeaseTerminationSerializer
+from .renewals import RenewalProposalInput, renewal_data, propose_renewal, decide_renewal, prepare_renewal
+from .reminders import send_lease_expiry_reminders
 from properties.models import (
     LeaseSigningAuthorization, LeaseTerminationAuthorization, Property, Unit,
     RentalApplication, RentalApplicationDecision,
@@ -25,6 +29,16 @@ class IsAdminOrPropertyManager(permissions.BasePermission):
             user and user.is_authenticated and user.is_active and not user.is_deleted
             and user.role in ('Admin', 'Property Manager')
         )
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def scheduled_lease_reminders(request):
+    secret = os.environ.get('CRON_SECRET', '')
+    if not secret or not compare_digest(request.headers.get('Authorization', ''), f'Bearer {secret}'):
+        return Response({'detail': 'Unauthorized.'}, status=401)
+    count = send_lease_expiry_reminders()
+    return Response({'sentCount': count})
 
 
 class IsAuthorizedContractReader(permissions.BasePermission):
@@ -109,6 +123,8 @@ class ContractViewSet(viewsets.ModelViewSet):
             return [IsAuthorizedContractTerminator()]
         if self.action in ('create', 'update', 'partial_update'):
             return [IsAdminOrPropertyManager()]
+        if self.action in ('renewal', 'renewal_decision', 'prepare_renewal_lease'):
+            return [IsAuthorizedContractActivator()]
         if self.action in ('list', 'retrieve'):
             return [IsAuthorizedContractReader()]
         return [permissions.IsAuthenticated()]
@@ -266,6 +282,34 @@ class ContractViewSet(viewsets.ModelViewSet):
         self._end_contract(request, contract)
         return Response({'message': 'Lease ended. The record and its history were preserved.'})
 
+    @action(detail=True, methods=['post'], url_path='renewal')
+    def renewal(self, request, pk=None):
+        contract = self.get_object()
+        details = RenewalProposalInput(data=request.data)
+        details.is_valid(raise_exception=True)
+        result = propose_renewal(
+            contract, request.user, end_date=details.validated_data['endDate'],
+            rent_amount=details.validated_data['rentAmount'],
+        )
+        return Response(renewal_data(result), status=201)
+
+    @action(detail=True, methods=['post'], url_path='renewal-decision')
+    def renewal_decision(self, request, pk=None):
+        contract = self.get_object()
+        if not isinstance(request.data.get('approve'), bool):
+            raise ValidationError({'approve': 'Provide true or false.'})
+        result = decide_renewal(
+            contract, request.user, approve=request.data['approve'],
+            note=str(request.data.get('note') or '').strip(),
+        )
+        return Response(renewal_data(result))
+
+    @action(detail=True, methods=['post'], url_path='prepare-renewal')
+    def prepare_renewal_lease(self, request, pk=None):
+        contract = self.get_object()
+        result = prepare_renewal(contract, request.user)
+        return Response(renewal_data(result))
+
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def activate(self, request, pk=None):
@@ -277,6 +321,8 @@ class ContractViewSet(viewsets.ModelViewSet):
         contract = Contract.objects.select_for_update().select_related('property').get(pk=existing.pk)
         if contract.status != 'Pending':
             raise ValidationError({'status': 'Only a pending lease can be activated.'})
+        if LeaseRenewal.objects.filter(successor=contract).exists() and timezone.localdate() < contract.start_date:
+            raise ValidationError({'startDate': 'A renewal cannot be activated before its new term begins.'})
         if request.data.get('signaturesComplete') is not True:
             raise ValidationError({'signaturesComplete': 'Confirm that all required parties have signed the lease.'})
         signed_copy_reference = str(request.data.get('signedCopyReference') or '').strip()

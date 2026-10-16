@@ -848,6 +848,7 @@ export default function ManagerDashboard() {
             {/* Active Lease Contracts */}
             <div className="pm-panel mb-4" id="contracts" data-workspace-section="contracts">
               <ManagerContractSection
+                onRenewalUpdated={() => refreshManagerSections('contracts', 'overview')}
                 contracts={contracts}
                 onActivate={handleActivateLease}
                 onTerminate={openTerminationForm}

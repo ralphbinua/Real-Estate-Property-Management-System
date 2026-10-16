@@ -74,3 +74,35 @@ class Contract(models.Model):
 
     def __str__(self):
         return f"Lease #{self.id} - {self.property.title}"
+
+
+class LeaseRenewal(models.Model):
+    class Status(models.TextChoices):
+        PROPOSED = 'Proposed', 'Proposed'
+        APPROVED = 'Approved', 'Approved'
+        DECLINED = 'Declined', 'Declined'
+        PREPARED = 'Prepared', 'Prepared'
+
+    contract = models.OneToOneField(Contract, on_delete=models.PROTECT, related_name='renewal')
+    proposed_start_date = models.DateField()
+    proposed_end_date = models.DateField()
+    proposed_rent = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PROPOSED)
+    initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='initiated_renewals')
+    initiated_at = models.DateTimeField(auto_now_add=True)
+    decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='decided_renewals')
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decision_note = models.TextField(blank=True, default='')
+    successor = models.OneToOneField(Contract, on_delete=models.PROTECT, null=True, blank=True, related_name='renewed_from')
+
+    def __str__(self):
+        return f'Renewal for lease #{self.contract_id} ({self.status})'
+
+
+class LeaseExpiryReminder(models.Model):
+    contract = models.ForeignKey(Contract, on_delete=models.CASCADE, related_name='expiry_reminders')
+    days_before = models.PositiveSmallIntegerField()
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['contract', 'days_before'], name='unique_lease_expiry_reminder')]

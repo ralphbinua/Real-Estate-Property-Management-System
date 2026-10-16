@@ -1,10 +1,15 @@
 import { Button } from 'react-bootstrap';
 import Table from '../../components/ui/ResponsiveTable.jsx';
 import OwnerStatusPill from './OwnerStatusPill.jsx';
+import RenewalControls from '../../components/leases/RenewalControls.jsx';
 
-export default function OwnerContractsSection({ contracts, activatingContractId, onActivate, onTerminate }) {
+export default function OwnerContractsSection({ contracts, activatingContractId, onActivate, onTerminate, onRenewalUpdated }) {
+  const expiringCount = contracts.filter((contract) => contract.status === 'Active'
+    && (new Date(`${contract.endDate}T00:00:00`) - new Date()) / 86400000 <= 60
+    && (new Date(`${contract.endDate}T00:00:00`) - new Date()) / 86400000 >= -1).length;
   return (
     <div>
+      {expiringCount > 0 && <p className="small text-warning mb-3">{expiringCount} lease{expiringCount === 1 ? '' : 's'} approaching the end date. Review renewal or move-out plans.</p>}
       <Table responsive className="pm-table mb-0">
         <thead>
           <tr>
@@ -49,6 +54,7 @@ export default function OwnerContractsSection({ contracts, activatingContractId,
                     {contract.signedCopyReference && <div className="pm-contract-reference">Signed copy: {contract.signedCopyReference}</div>}
                     {contract.terminationEffectiveDate && <div className="small text-muted mt-1">Ended effective {new Date(contract.terminationEffectiveDate).toLocaleDateString()}</div>}
                     {contract.terminationReason && <div className="small text-muted mt-1">{contract.terminationReason}</div>}
+                    <RenewalControls contract={contract} role="owner" onUpdated={onRenewalUpdated} />
                   </td>
                   <td>
                     {contract.status === 'Pending' ? (

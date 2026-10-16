@@ -198,6 +198,12 @@ python manage.py generate_monthly_invoices --month 2026-10
 
 The command does not install a scheduler. Set up a monthly job in the hosting provider or operating system scheduler, and use the deployment's Python environment and database configuration. Running the command twice is safe for invoice creation; both attempts appear in run history.
 
+## Lease expiry reminders and renewals
+
+The root `vercel.json` also schedules `GET /api/contracts/scheduled-reminders/` daily at 00:15 UTC. It uses the same production `CRON_SECRET` as monthly billing. The job sends in-app reminders to the Tenant, Owner, and assigned Manager when an active lease reaches 60, 30, and 7 days before its end date. Each milestone is recorded once, so retrying the job does not duplicate its notifications. On other hosts, run `python manage.py send_lease_expiry_reminders` daily.
+
+The Owner or assigned Manager may propose the next term's end date and rent from an active lease. A Manager's proposal needs an Owner decision; an Owner proposal is approved when saved. The Tenant can see the proposal and receives an in-app update, but signatures still happen outside the system. This workflow records a proposed term, not a signed agreement. Once the old lease has ended, the Owner or assigned Manager can prepare the linked pending successor; this expires the old record and reserves the same home. Activation then follows the existing rules for a manual lease: the Owner or an Admin with the Owner's written instruction and reference records the signed-copy reference. Manager signing delegation for application-based leases does not authorize activating a renewal. Notice periods and any legal requirements remain governed by the signed agreements and applicable law.
+
 ## Rent payment ledger
 
 An invoice can have more than one payment transaction, so a Tenant can pay the balance in parts. A Tenant submits the amount, payment date, method, transaction reference, and an optional receipt link through `POST /api/payments/`. The submission remains **Pending Verification** until the Property Manager assigned to the property or an Admin checks it.

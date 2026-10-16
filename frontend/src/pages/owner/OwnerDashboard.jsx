@@ -602,6 +602,7 @@ export default function OwnerDashboard() {
                   )}
                   {activePortfolioTab === 'contracts' && (
                     <OwnerContractsSection
+                      onRenewalUpdated={() => loadOwnerData({ section: 'contracts', force: true, includeSummary: true })}
                       contracts={portfolio.contracts}
                       activatingContractId={activatingContractId}
                       onActivate={handleActivateLease}

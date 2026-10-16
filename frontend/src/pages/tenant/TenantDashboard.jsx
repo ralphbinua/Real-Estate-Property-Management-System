@@ -202,7 +202,7 @@ export default function TenantDashboard() {
                       <td>{contract.propertyDetails?.title || 'Property'}{contract.unitDetails?.unitNumber ? ` — ${contract.unitDetails.unitNumber}` : ''}</td>
                       <td>₱{Number(contract.rentAmount || 0).toLocaleString()}</td>
                       <td>{contract.startDate} – {contract.endDate}</td>
-                      <td><TicketStatusPill status={contract.status} /></td>
+                      <td><TicketStatusPill status={contract.status} />{contract.renewal && <div className="small text-muted mt-1">Renewal {contract.renewal.status.toLowerCase()}: {contract.renewal.startDate}–{contract.renewal.endDate}</div>}</td>
                       <td>{contract.endDate}</td>
                     </tr>
                   ))}

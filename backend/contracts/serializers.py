@@ -19,6 +19,7 @@ class ContractSerializer(serializers.ModelSerializer):
     depositAmount = serializers.DecimalField(source='deposit_amount', max_digits=10, decimal_places=2, required=False, default=Decimal('0.00'), min_value=Decimal('0.00'))
     status = serializers.CharField(read_only=True)
     sourceApplication = serializers.IntegerField(source='source_application_id', read_only=True, allow_null=True)
+    renewal = serializers.SerializerMethodField()
     manualLeaseReason = serializers.CharField(source='manual_lease_reason', required=False, allow_blank=True, trim_whitespace=True)
     manualLeaseReference = serializers.CharField(source='manual_lease_reference', required=False, allow_blank=True, max_length=500, trim_whitespace=True)
     activatedBy = UserSerializer(source='activated_by', read_only=True)
@@ -49,7 +50,7 @@ class ContractSerializer(serializers.ModelSerializer):
         model = Contract
         fields = [
             '_id', 'property', 'unit', 'tenant', 'startDate', 'endDate', 
-            'rentAmount', 'rentDueDay', 'depositAmount', 'status', 'sourceApplication', 'manualLeaseReason',
+            'rentAmount', 'rentDueDay', 'depositAmount', 'status', 'sourceApplication', 'renewal', 'manualLeaseReason',
             'manualLeaseReference', 'activatedBy', 'activatedAt', 'activationBasis', 'activationNote',
             'activationInstructionReference',
             'signedCopyReference', 'terminatedBy', 'terminatedAt', 'terminationEffectiveDate',
@@ -62,6 +63,11 @@ class ContractSerializer(serializers.ModelSerializer):
             return None
         from properties.serializers import UnitSerializer
         return UnitSerializer(instance.unit, context=self.context).data
+
+    def get_renewal(self, instance):
+        from .models import LeaseRenewal
+        from .renewals import renewal_data
+        return renewal_data(LeaseRenewal.objects.filter(contract=instance).first())
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

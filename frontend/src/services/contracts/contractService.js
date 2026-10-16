@@ -22,3 +22,18 @@ export const activateContract = async (id, activationData) => {
   const response = await api.post(`/contracts/${id}/activate/`, activationData);
   return response.data;
 };
+
+export const proposeLeaseRenewal = async (id, data) => {
+  const response = await api.post(`/contracts/${id}/renewal/`, data);
+  return response.data;
+};
+
+export const decideLeaseRenewal = async (id, approve) => {
+  const response = await api.post(`/contracts/${id}/renewal-decision/`, { approve });
+  return response.data;
+};
+
+export const prepareLeaseRenewal = async (id) => {
+  const response = await api.post(`/contracts/${id}/prepare-renewal/`);
+  return response.data;
+};
