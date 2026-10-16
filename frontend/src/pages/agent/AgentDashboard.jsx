@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Container, Row, Col, Card, Form, Spinner, Button, Badge, Modal } from 'react-bootstrap';
 import Table from '../../components/ui/ResponsiveTable.jsx';
 import { fetchProperties } from '../../services/properties/propertyService';
-import { createInquiry, fetchInquiriesPage, updateInquiry } from '../../services/properties/inquiryService';
+import { createInquiry, createProspectActivity, fetchInquiriesPage, fetchProspectActivities, updateInquiry } from '../../services/properties/inquiryService';
 import { createApplication, fetchApplicationsPage } from '../../services/properties/applicationService';
 import CollectionPagination from '../../components/ui/CollectionPagination';
 import useNotificationDeepLink from '../../hooks/useNotificationDeepLink';
@@ -86,19 +86,27 @@ export default function AgentDashboard() {
   const [selectedInquiry, setSelectedInquiry] = useState(null);
   const [applicationForm, setApplicationForm] = useState({ applicantEmail: '', employment: '', monthlyIncome: '', moveInDate: '', notes: '' });
   const [savingApplication, setSavingApplication] = useState(false);
+  const [showActivityModal, setShowActivityModal] = useState(false);
+  const [selectedProspect, setSelectedProspect] = useState(null);
+  const [prospectActivities, setProspectActivities] = useState([]);
+  const [activityForm, setActivityForm] = useState({ activity_type: 'Call', summary: '', nextFollowUpAt: '', followUpChanged: false });
+  const [loadingActivities, setLoadingActivities] = useState(false);
+  const [savingActivity, setSavingActivity] = useState(false);
+  const [activityError, setActivityError] = useState('');
 
   // Filter State
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [followUpFilter, setFollowUpFilter] = useState('');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useMobileFilterSheet('agent', 'listings');
   const loadedAgentSections = useRef(new Set());
 
-  const loadAgentData = useCallback(async (section = activeSection, force = true, page = 1) => {
+  const loadAgentData = useCallback(async (section = activeSection, force = true, page = 1, filters = {}) => {
     const sectionKey = ['overview', 'listings'].includes(section) ? 'properties' : section;
     const fetcher = {
       properties: () => fetchProperties(),
-      inquiries: (page) => fetchInquiriesPage({ page }),
+      inquiries: (page) => fetchInquiriesPage({ page, ...filters }),
       applications: (page) => fetchApplicationsPage({ page }),
     }[sectionKey];
     if (!fetcher || (!force && loadedAgentSections.current.has(sectionKey))) return;
@@ -108,7 +116,8 @@ export default function AgentDashboard() {
       if (sectionKey === 'properties') setProperties(rows);
       if (sectionKey === 'inquiries') {
         setInquiries(rows);
-        setInquiryPageInfo({ count: data.count, page, pageCount: Math.max(1, Math.ceil(data.count / 50)) });
+        const count = Number.isFinite(Number(data?.count)) ? Math.max(0, Number(data.count)) : rows.length;
+        setInquiryPageInfo({ count, page, pageCount: Math.max(1, Math.ceil(count / 50)) });
       }
       if (sectionKey === 'applications') {
         setApplications(rows);
@@ -122,6 +131,70 @@ export default function AgentDashboard() {
       if (sectionKey === 'properties') setLoading(false);
     }
   }, [activeSection]);
+
+  const inquiryFilters = followUpFilter ? { follow_up: followUpFilter } : {};
+
+  const handleFollowUpFilter = (nextFilter) => {
+    setFollowUpFilter(nextFilter);
+    void loadAgentData('inquiries', true, 1, nextFilter ? { follow_up: nextFilter } : {});
+  };
+
+  const openProspectActivity = async (inquiry) => {
+    setSelectedProspect(inquiry);
+    setProspectActivities([]);
+    setActivityError('');
+    setActivityForm({
+      activity_type: 'Call',
+      summary: '',
+      nextFollowUpAt: toLocalDateTimeInput(inquiry.next_follow_up_at),
+      followUpChanged: false,
+    });
+    setShowActivityModal(true);
+    setLoadingActivities(true);
+    try {
+      const rows = await fetchProspectActivities(inquiry.id);
+      setProspectActivities(Array.isArray(rows) ? rows : []);
+    } catch (requestError) {
+      setActivityError(requestError.response?.data?.detail || 'Could not load this prospect’s activity history.');
+    } finally {
+      setLoadingActivities(false);
+    }
+  };
+
+  const handleActivitySubmit = async (event) => {
+    event.preventDefault();
+    if (!selectedProspect) return;
+    setSavingActivity(true);
+    setActivityError('');
+    try {
+      const payload = {
+        activity_type: activityForm.activity_type,
+        summary: activityForm.summary.trim(),
+        ...(activityForm.followUpChanged
+          ? { next_follow_up_at: activityForm.nextFollowUpAt ? new Date(activityForm.nextFollowUpAt).toISOString() : null }
+          : {}),
+      };
+      const savedActivity = await createProspectActivity(selectedProspect.id, payload);
+      setProspectActivities((current) => [savedActivity, ...current]);
+      if (savedActivity.follow_up_changed) {
+        const updatedProspect = { ...selectedProspect, next_follow_up_at: savedActivity.next_follow_up_at };
+        setSelectedProspect(updatedProspect);
+        setInquiries((current) => current.map((item) => item.id === updatedProspect.id ? updatedProspect : item));
+        setActivityForm((current) => ({ ...current, summary: '', nextFollowUpAt: toLocalDateTimeInput(savedActivity.next_follow_up_at), followUpChanged: false }));
+      } else {
+        setActivityForm((current) => ({ ...current, summary: '' }));
+      }
+      await loadAgentData('inquiries', true, inquiryPageInfo.page, inquiryFilters);
+    } catch (requestError) {
+      const data = requestError.response?.data;
+      const fieldError = data && typeof data === 'object'
+        ? Object.values(data).flat().find((message) => typeof message === 'string')
+        : '';
+      setActivityError(fieldError || data?.detail || 'Could not save this activity. Please try again.');
+    } finally {
+      setSavingActivity(false);
+    }
+  };
 
   useEffect(() => {
     const handleWorkspaceNavigation = (event) => setActiveSection(event.detail);
@@ -208,6 +281,7 @@ export default function AgentDashboard() {
       loadedAgentSections.current.add('inquiries');
       setSuccess(viewingData.inquiryId ? 'Viewing updated successfully.' : 'Viewing scheduled successfully.');
       setShowViewingModal(false);
+      setFollowUpFilter('');
       await loadAgentData('inquiries', true, viewingData.inquiryId ? inquiryPageInfo.page : 1);
       setActiveSection('inquiries');
       window.dispatchEvent(new CustomEvent('workspace:navigate', { detail: 'inquiries' }));
@@ -249,7 +323,7 @@ export default function AgentDashboard() {
       setSuccess(`Rental application submitted for ${selectedInquiry.prospect_name}.`);
       setShowApplicationModal(false);
       await Promise.all([
-        loadAgentData('inquiries', true, inquiryPageInfo.page),
+        loadAgentData('inquiries', true, inquiryPageInfo.page, inquiryFilters),
         loadAgentData('applications', true, 1),
       ]);
     } catch (err) {
@@ -480,10 +554,36 @@ export default function AgentDashboard() {
                   <h2>Prospect pipeline</h2>
                   <p>Manage inquiries, scheduled viewings, and rental applications.</p>
                 </div>
-                <Badge className="pm-prospects-count">{inquiryPageInfo.count} {inquiryPageInfo.count === 1 ? 'prospect' : 'prospects'}</Badge>
+                <div className="pm-prospects-count" aria-live="polite">
+                  <span>{inquiryPageInfo.count} {inquiryPageInfo.count === 1 ? 'prospect' : 'prospects'}</span>
+                  <span className="pm-prospects-range">
+                    {inquiryPageInfo.count === 0
+                      ? 'No results'
+                      : `Showing ${(inquiryPageInfo.page - 1) * 50 + 1}–${Math.min(inquiryPageInfo.page * 50, inquiryPageInfo.count)} of ${inquiryPageInfo.count}`}
+                  </span>
+                </div>
+              </div>
+              <div className="pm-follow-up-filters" role="group" aria-label="Filter prospects by follow-up">
+                <span className="pm-follow-up-filter-label">Follow-up queue</span>
+                {[
+                  ['', 'All prospects'],
+                  ['due', 'Due / overdue'],
+                  ['upcoming', 'Upcoming'],
+                  ['unscheduled', 'No follow-up'],
+                ].map(([value, label]) => (
+                  <Button
+                    key={value || 'all'}
+                    size="sm"
+                    variant={followUpFilter === value ? 'primary' : 'outline-secondary'}
+                    aria-pressed={followUpFilter === value}
+                    onClick={() => handleFollowUpFilter(value)}
+                  >
+                    {label}
+                  </Button>
+                ))}
               </div>
               <Table responsive className="pm-table mb-0">
-                <thead><tr><th>Prospect</th><th>Property / unit</th><th>Viewing appointment</th><th>Notes</th><th>Status</th><th>Application</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Prospect</th><th>Property / unit</th><th>Viewing appointment</th><th>Next follow-up</th><th>Notes</th><th>Status</th><th>Application</th><th>Actions</th></tr></thead>
                 <tbody>
                   {inquiries.map((inquiry) => (
                     <tr key={inquiry.id} className={`pm-prospect-row pm-prospect-${getInquiryStatus(inquiry).toLowerCase().replaceAll(' ', '-')}`}>
@@ -499,6 +599,16 @@ export default function AgentDashboard() {
                         {inquiry.viewing_at
                           ? <><span className="pm-prospect-name">{formatViewingDate(inquiry.viewing_at)}</span><span className="pm-prospect-email">{getInquiryStatus(inquiry) === 'Viewing Scheduled' ? 'Appointment scheduled' : 'Previous appointment'}</span></>
                           : <span className="pm-prospect-email">No appointment scheduled</span>}
+                      </td>
+                      <td className="pm-follow-up-cell">
+                        {inquiry.next_follow_up_at ? (
+                          <>
+                            <span className="pm-prospect-name">{formatViewingDate(inquiry.next_follow_up_at)}</span>
+                            <span className={`pm-follow-up-state ${new Date(inquiry.next_follow_up_at) <= new Date() ? 'is-due' : ''}`}>
+                              {new Date(inquiry.next_follow_up_at) <= new Date() ? 'Due / overdue' : 'Scheduled'}
+                            </span>
+                          </>
+                        ) : <span className="pm-prospect-email">Not scheduled</span>}
                       </td>
                       <td className="pm-prospect-notes" title={inquiry.notes || ''}>{inquiry.notes || '—'}</td>
                       <td>
@@ -525,24 +635,29 @@ export default function AgentDashboard() {
                         })()}
                       </td>
                       <td>
-                        {['Closed', 'Converted'].includes(getInquiryStatus(inquiry))
-                          ? <span className="pm-no-action">—</span>
-                          : <Button
-                              size="sm"
-                              variant="outline-primary"
-                              className="pm-prospect-action"
-                              disabled={getInquiryStatus(inquiry) === 'Application In Progress'}
-                              onClick={() => handleOpenViewingModal(inquiry.property, inquiry.unit || '', inquiry)}
-                            >
-                              {inquiry.viewing_at ? 'Reschedule' : 'Schedule'}
-                            </Button>}
+                        <div className="pm-prospect-actions">
+                          <Button size="sm" variant="outline-secondary" className="pm-prospect-action" onClick={() => openProspectActivity(inquiry)}>
+                            Activity
+                          </Button>
+                          {['Closed', 'Converted'].includes(getInquiryStatus(inquiry))
+                            ? <span className="pm-no-action">—</span>
+                            : <Button
+                                size="sm"
+                                variant="outline-primary"
+                                className="pm-prospect-action"
+                                disabled={getInquiryStatus(inquiry) === 'Application In Progress'}
+                                onClick={() => handleOpenViewingModal(inquiry.property, inquiry.unit || '', inquiry)}
+                              >
+                                {inquiry.viewing_at ? 'Reschedule' : 'Schedule'}
+                              </Button>}
+                        </div>
                       </td>
                     </tr>
                   ))}
-                  {inquiries.length === 0 && <tr><td colSpan="7" className="pm-empty-row"><strong>No prospects yet</strong><span>New inquiries and scheduled appointments will appear here.</span></td></tr>}
+                  {inquiries.length === 0 && <tr><td colSpan="8" className="pm-empty-row"><strong>{followUpFilter ? 'No prospects in this follow-up view' : 'No prospects yet'}</strong><span>{followUpFilter ? 'Choose another follow-up filter or schedule a follow-up from a prospect activity.' : 'New inquiries and scheduled appointments will appear here.'}</span></td></tr>}
                 </tbody>
               </Table>
-              <CollectionPagination count={inquiryPageInfo.count} page={inquiryPageInfo.page} pageCount={inquiryPageInfo.pageCount} onPageChange={(page) => loadAgentData('inquiries', true, page)} />
+              <CollectionPagination count={inquiryPageInfo.count} page={inquiryPageInfo.page} pageCount={inquiryPageInfo.pageCount} onPageChange={(page) => loadAgentData('inquiries', true, page, inquiryFilters)} />
             </div>
 
             <div className="pm-panel mt-2" data-workspace-section="applications">
@@ -605,6 +720,76 @@ export default function AgentDashboard() {
             <Modal.Footer>
               <Button variant="outline-secondary" onClick={() => setShowApplicationModal(false)} disabled={savingApplication}>Cancel</Button>
               <Button type="submit" variant="primary" disabled={savingApplication}>{savingApplication ? 'Submitting…' : 'Submit application'}</Button>
+            </Modal.Footer>
+          </Form>
+        </Modal>
+
+        <Modal show={showActivityModal} onHide={() => !savingActivity && setShowActivityModal(false)} centered dialogClassName="pm-modal pm-prospect-activity-modal">
+          <Modal.Header closeButton>
+            <div>
+              <Modal.Title>Prospect activity</Modal.Title>
+              <p className="pm-viewing-subtitle mb-0">
+                {selectedProspect?.prospect_name} · {properties.find((property) => Number(property._id) === Number(selectedProspect?.property))?.title || 'Selected property'}
+              </p>
+            </div>
+          </Modal.Header>
+          <Form onSubmit={handleActivitySubmit}>
+            <Modal.Body>
+              {activityError && <div className="pm-alert pm-alert-error pm-modal-error mb-3" role="alert">{activityError}</div>}
+              <Form.Group className="mb-3" controlId="prospect-activity-type">
+                <Form.Label className="pm-form-label">Activity type</Form.Label>
+                <Form.Select className="pm-input" value={activityForm.activity_type} onChange={(event) => setActivityForm({ ...activityForm, activity_type: event.target.value })}>
+                  {['Call', 'Email', 'Message', 'Viewing', 'Note', 'Follow-up'].map((type) => <option key={type} value={type}>{type}</option>)}
+                </Form.Select>
+              </Form.Group>
+              <Form.Group className="mb-3" controlId="prospect-activity-summary">
+                <Form.Label className="pm-form-label">What happened or what’s next?</Form.Label>
+                <Form.Control className="pm-input" as="textarea" rows={2} maxLength={1000} required value={activityForm.summary} onChange={(event) => setActivityForm({ ...activityForm, summary: event.target.value })} placeholder="Add a brief note about this interaction or follow-up." />
+              </Form.Group>
+              <Form.Group className="mb-2" controlId="prospect-next-follow-up">
+                <Form.Label className="pm-form-label">Next follow-up <span className="pm-optional-marker">Optional</span></Form.Label>
+                <Form.Control
+                  className="pm-input"
+                  type="datetime-local"
+                  value={activityForm.nextFollowUpAt}
+                  onChange={(event) => setActivityForm({ ...activityForm, nextFollowUpAt: event.target.value, followUpChanged: true })}
+                />
+                <Form.Text className="text-muted">Leave unchanged to keep the current reminder. Choose a future time to schedule or reschedule it.</Form.Text>
+              </Form.Group>
+              {selectedProspect?.next_follow_up_at && !activityForm.followUpChanged && (
+                <Button type="button" size="sm" variant="link" className="px-0 mb-3" onClick={() => setActivityForm({ ...activityForm, nextFollowUpAt: '', followUpChanged: true })}>
+                  Clear scheduled follow-up
+                </Button>
+              )}
+
+              <div className="pm-activity-history-heading">Activity history</div>
+              {loadingActivities ? (
+                <div className="text-center text-muted py-3"><Spinner animation="border" size="sm" className="me-2" />Loading history…</div>
+              ) : prospectActivities.length === 0 ? (
+                <p className="small text-muted mb-0 py-2">No activity has been logged for this prospect.</p>
+              ) : (
+                <ol className="pm-activity-history">
+                  {prospectActivities.map((activity) => (
+                    <li key={activity.id}>
+                      <div className="pm-activity-history-meta">
+                        <strong>{activity.activity_type}</strong>
+                        <span>{formatViewingDate(activity.created_at)}</span>
+                      </div>
+                      <p>{activity.summary}</p>
+                      <small>By {activity.actor_name}</small>
+                      {activity.follow_up_changed && (
+                        <small className="pm-activity-follow-up-event">
+                          {activity.next_follow_up_at ? `Follow-up scheduled for ${formatViewingDate(activity.next_follow_up_at)}` : 'Scheduled follow-up cleared'}
+                        </small>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </Modal.Body>
+            <Modal.Footer>
+              <Button type="button" variant="outline-secondary" onClick={() => setShowActivityModal(false)} disabled={savingActivity}>Close</Button>
+              <Button type="submit" variant="primary" disabled={savingActivity || loadingActivities}>{savingActivity ? 'Saving…' : 'Save activity'}</Button>
             </Modal.Footer>
           </Form>
         </Modal>

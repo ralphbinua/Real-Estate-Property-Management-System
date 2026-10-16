@@ -69,8 +69,9 @@
 }
 .pm-agent .pm-prospects-header h2 { margin: 0; color: var(--ink); font-size: 1.12rem; font-weight: 650; }
 .pm-agent .pm-prospects-header p { margin: 5px 0 0; color: var(--muted); font-size: 0.86rem; }
-.pm-agent .pm-prospects-count { padding: 7px 11px; border: 1px solid #cddffe; border-radius: 999px; background: var(--app-accent-soft); color: var(--app-accent-strong); font-size: 0.78rem; font-weight: 650; }
-.pm-agent #inquiries .pm-table { min-width: 980px; }
+.pm-agent .pm-prospects-count { display: grid; justify-items: end; gap: 2px; flex: 0 0 auto; padding: 7px 12px; border: 1px solid #cddffe; border-radius: 12px; background: var(--app-accent-soft); color: var(--app-accent-strong); font-size: 0.82rem; font-weight: 700; line-height: 1.25; }
+.pm-agent .pm-prospects-range { color: #526581; font-size: 0.68rem; font-weight: 500; }
+.pm-agent #inquiries .pm-table { min-width: 1120px; }
 .pm-agent #inquiries .pm-table thead th { padding: 13px 16px; background: var(--app-subtle); color: var(--app-muted); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.075em; text-transform: uppercase; white-space: nowrap; }
 .pm-agent #inquiries .pm-table tbody td { padding: 14px 16px; }
 .pm-agent .pm-prospect-name, .pm-agent .pm-prospect-email { display: block; }
@@ -78,6 +79,12 @@
 .pm-agent .pm-prospect-email { margin-top: 3px; color: var(--muted); font-size: 0.78rem; }
 .pm-agent .pm-prospect-notes { max-width: 160px; overflow: hidden; color: var(--ink-soft); font-size: 0.84rem; text-overflow: ellipsis; white-space: nowrap; }
 .pm-agent .pm-viewing-cell { min-width: 175px; }
+.pm-agent .pm-follow-up-cell { min-width: 190px; }
+.pm-agent .pm-follow-up-state { display: inline-block; margin-top: 4px; color: var(--app-success); font-size: 0.75rem; }
+.pm-agent .pm-follow-up-state.is-due { color: #a44a24; font-weight: 650; }
+.pm-agent .pm-follow-up-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 26px; border-bottom: 1px solid var(--line); background: #fff; }
+.pm-agent .pm-follow-up-filter-label { margin-right: 4px; color: var(--muted); font-size: 0.8rem; font-weight: 650; }
+.pm-agent .pm-prospect-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .pm-agent .pm-prospect-status { min-width: 185px; border-radius: 8px; font-size: 0.82rem; font-weight: 600; }
 .pm-agent .pm-prospect-status.status-new { border-color: #d9dee6; background-color: #f7f8fa; color: #525f70; }
 .pm-agent .pm-prospect-status.status-viewing-scheduled { border-color: #c7e2d8; background-color: #eef7f2; color: #28624f; }
@@ -87,6 +94,11 @@
 .pm-agent .pm-prospect-action { border-radius: 7px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; }
 .pm-agent .pm-application-badge { border-radius: 999px; font-size: 0.74rem; font-weight: 600; }
 .pm-agent .pm-no-action { color: #9aa1ad; }
+
+@media (max-width: 575.98px) {
+  .pm-agent .pm-prospects-header { align-items: flex-start; padding: 18px 16px; }
+  .pm-agent .pm-prospects-count { justify-items: start; padding: 6px 9px; }
+}
 .pm-modal .pm-required-marker { color: #a6414b; font-weight: 700; }
 .pm-modal .pm-optional-marker { margin-left: 5px; color: #7b8492; font-size: 0.76rem; font-weight: 500; }
 .pm-application-modal .modal-header { padding: 20px 26px 15px; }
@@ -100,6 +112,21 @@
 .pm-viewing-modal .pm-viewing-subtitle { margin-top: 4px; color: #6b7280; font-size: 0.86rem; }
 .pm-viewing-modal .modal-body { padding: 20px 26px 26px; }
 .pm-viewing-modal .modal-footer { padding: 12px 26px 20px; }
+.pm-prospect-activity-modal .modal-header { padding: 20px 26px 15px; }
+.pm-prospect-activity-modal .modal-title { font-size: 1.35rem; }
+.pm-prospect-activity-modal .modal-body { max-height: min(72vh, 720px); overflow-y: auto; padding: 20px 26px; }
+.pm-prospect-activity-modal .modal-footer { padding: 12px 26px 20px; }
+.pm-prospect-activity-modal .form-control.pm-input,
+.pm-prospect-activity-modal .form-select.pm-input { min-height: 42px; border-color: var(--app-line); border-radius: var(--app-radius-sm); color: var(--app-ink); font-size: 0.9rem; }
+.pm-prospect-activity-modal textarea.form-control.pm-input { min-height: 72px; }
+.pm-activity-history-heading { margin-top: 22px; padding-bottom: 8px; border-bottom: 1px solid var(--line); color: var(--ink); font-size: 0.88rem; font-weight: 700; }
+.pm-activity-history { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.pm-activity-history li { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.pm-activity-history-meta { display: flex; justify-content: space-between; gap: 14px; color: var(--ink); font-size: 0.82rem; }
+.pm-activity-history-meta span, .pm-activity-history li small { color: var(--muted); font-size: 0.74rem; }
+.pm-activity-history li p { margin: 6px 0 4px; color: var(--ink-soft); font-size: 0.85rem; white-space: pre-wrap; }
+.pm-activity-history li small { display: block; }
+.pm-activity-history li .pm-activity-follow-up-event { margin-top: 4px; color: var(--app-accent-strong); }
 .pm-viewing-modal .form-control.pm-input { min-height: 44px; padding: 10px 13px; border-color: var(--app-line); border-radius: var(--app-radius-sm); color: var(--app-ink); font-size: 0.92rem; }
 .pm-viewing-modal textarea.form-control.pm-input { min-height: 84px; }
 .pm-viewing-modal .form-control.pm-input:focus { border-color: var(--app-accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }

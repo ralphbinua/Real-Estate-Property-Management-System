@@ -3,7 +3,7 @@ from decimal import Decimal
 from rest_framework import serializers
 from django.db import transaction
 from django.utils import timezone
-from .models import Property, Unit, PropertyInquiry, RentalApplication, UnitPricingAuthorization, UnitPriceChangeRequest
+from .models import Property, Unit, PropertyInquiry, ProspectActivity, RentalApplication, UnitPricingAuthorization, UnitPriceChangeRequest
 from users.serializers import UserSerializer
 from django.contrib.auth import get_user_model
 
@@ -355,8 +355,8 @@ class PropertyInquirySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PropertyInquiry
-        fields = ['id', 'property', 'unit', 'agent', 'agentDetails', 'prospect_name', 'prospect_email', 'viewing_at', 'notes', 'status', 'created_at']
-        read_only_fields = ['id', 'agent', 'created_at']
+        fields = ['id', 'property', 'unit', 'agent', 'agentDetails', 'prospect_name', 'prospect_email', 'viewing_at', 'next_follow_up_at', 'notes', 'status', 'created_at']
+        read_only_fields = ['id', 'agent', 'next_follow_up_at', 'created_at']
 
     def validate_property(self, property_obj):
         request = self.context.get('request')
@@ -414,6 +414,30 @@ class PropertyInquirySerializer(serializers.ModelSerializer):
         self.instance = PropertyInquiry.objects.select_for_update().get(pk=instance.pk)
         validated_data = self.validate(validated_data)
         return super().update(self.instance, validated_data)
+
+
+class ProspectActivitySerializer(serializers.ModelSerializer):
+    summary = serializers.CharField(max_length=1000, allow_blank=False, trim_whitespace=True)
+    actor_name = serializers.SerializerMethodField()
+    next_follow_up_at = serializers.DateTimeField(required=False, allow_null=True)
+
+    class Meta:
+        model = ProspectActivity
+        fields = [
+            'id', 'activity_type', 'summary', 'actor_name', 'next_follow_up_at',
+            'follow_up_changed', 'created_at',
+        ]
+        read_only_fields = ['id', 'actor_name', 'follow_up_changed', 'created_at']
+
+    def validate_next_follow_up_at(self, value):
+        if value is not None and value <= timezone.now():
+            raise serializers.ValidationError('Choose a future date and time for the follow-up.')
+        return value
+
+    def get_actor_name(self, instance):
+        if not instance.actor_id:
+            return 'Former user'
+        return instance.actor.get_full_name() or instance.actor.email
 
 
 class RentalApplicationSerializer(serializers.ModelSerializer):

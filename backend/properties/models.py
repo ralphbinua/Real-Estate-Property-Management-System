@@ -101,12 +101,48 @@ class PropertyInquiry(models.Model):
     prospect_name = models.CharField(max_length=255)
     prospect_email = models.EmailField(blank=True, default='')
     viewing_at = models.DateTimeField(null=True, blank=True)
+    next_follow_up_at = models.DateTimeField(null=True, blank=True, db_index=True)
     notes = models.TextField(blank=True, default='')
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='New')
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        indexes = [models.Index(fields=['agent', 'next_follow_up_at'], name='inquiry_agent_followup_idx')]
+
     def __str__(self):
         return f"{self.prospect_name} — {self.property.title} ({self.status})"
+
+
+class ProspectActivity(models.Model):
+    ACTIVITY_TYPES = [
+        ('Call', 'Call'),
+        ('Email', 'Email'),
+        ('Message', 'Message'),
+        ('Viewing', 'Viewing'),
+        ('Note', 'Note'),
+        ('Follow-up', 'Follow-up'),
+    ]
+
+    inquiry = models.ForeignKey(PropertyInquiry, on_delete=models.CASCADE, related_name='activities')
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='prospect_activities',
+    )
+    activity_type = models.CharField(max_length=20, choices=ACTIVITY_TYPES)
+    summary = models.CharField(max_length=1000)
+    next_follow_up_at = models.DateTimeField(null=True, blank=True)
+    follow_up_changed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        indexes = [models.Index(fields=['inquiry', '-created_at'], name='prospect_activity_timeline_idx')]
+
+    def __str__(self):
+        return f'{self.activity_type}: {self.inquiry.prospect_name}'
 
 
 class RentalApplication(models.Model):

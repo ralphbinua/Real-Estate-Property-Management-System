@@ -1,9 +1,12 @@
 from rest_framework import viewsets, permissions, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from ..models import PropertyInquiry
-from ..serializers import PropertyInquirySerializer
+from ..serializers import PropertyInquirySerializer, ProspectActivitySerializer
 from users.audit import record_activity
 from core.pagination import OptInPageNumberPagination
 from notifications.models import Notification
@@ -36,22 +39,63 @@ class PropertyInquiryViewSet(viewsets.ModelViewSet):
             scoped_inquiries = inquiries.none()
         inquiry_status = self.request.query_params.get('status')
         search = self.request.query_params.get('search', '').strip()
+        follow_up = self.request.query_params.get('follow_up')
+        now = timezone.now()
         if inquiry_status:
             scoped_inquiries = scoped_inquiries.filter(status=inquiry_status)
+        if follow_up in ('due', 'upcoming'):
+            scoped_inquiries = scoped_inquiries.exclude(status__in=['Closed', 'Converted'])
+        if follow_up == 'due':
+            scoped_inquiries = scoped_inquiries.filter(next_follow_up_at__lte=now)
+        elif follow_up == 'upcoming':
+            scoped_inquiries = scoped_inquiries.filter(next_follow_up_at__gt=now)
+        elif follow_up == 'unscheduled':
+            scoped_inquiries = scoped_inquiries.filter(next_follow_up_at__isnull=True)
         if search:
             scoped_inquiries = scoped_inquiries.filter(
                 Q(prospect_name__icontains=search)
                 | Q(prospect_email__icontains=search)
                 | Q(property__title__icontains=search)
             )
-        return scoped_inquiries.order_by('-created_at', '-id')
+        return scoped_inquiries.order_by(F('next_follow_up_at').asc(nulls_last=True), '-created_at', '-id')
 
     def get_permissions(self):
+        if self.action == 'activities':
+            return [IsAdminOrPropertyManagerOrAssignedAgent()]
         if self.action == 'create':
             return [IsAdminOrPropertyManagerOrAgent()]
         if self.action in ('partial_update', 'update'):
             return [IsAdminOrPropertyManagerOrAssignedAgent()]
         return [permissions.IsAuthenticated()]
+
+    @action(detail=True, methods=['get', 'post'], url_path='activities')
+    def activities(self, request, pk=None):
+        inquiry = self.get_object()
+        if request.method == 'GET':
+            activities = inquiry.activities.select_related('actor').all()
+            return Response(ProspectActivitySerializer(activities, many=True).data)
+
+        serializer = ProspectActivitySerializer(data=request.data, context=self.get_serializer_context())
+        serializer.is_valid(raise_exception=True)
+        follow_up_changed = 'next_follow_up_at' in serializer.validated_data
+        with transaction.atomic():
+            inquiry = PropertyInquiry.objects.select_for_update().get(pk=inquiry.pk)
+            activity = serializer.save(
+                inquiry=inquiry,
+                actor=request.user,
+                follow_up_changed=follow_up_changed,
+            )
+            if follow_up_changed:
+                inquiry.next_follow_up_at = activity.next_follow_up_at
+                inquiry.save(update_fields=['next_follow_up_at'])
+            record_activity(
+                request.user,
+                'CREATE',
+                'Prospect activity',
+                activity.pk,
+                f'Logged {activity.activity_type.lower()} activity for {inquiry.prospect_name}.',
+            )
+        return Response(ProspectActivitySerializer(activity).data, status=status.HTTP_201_CREATED)
 
     @transaction.atomic
     def perform_create(self, serializer):
