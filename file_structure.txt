@@ -90,13 +90,16 @@ real-estate-management/
 │   │       ├── 0002_payment_ledger.py
 │   │       └── 0003_protect_payment_invoice_history.py
 │   ├── maintenance/                               # Tenant maintenance requests
+│   │   ├── __init__.py
 │   │   ├── models.py
 │   │   ├── serializers.py
+│   │   ├── tests.py
 │   │   ├── urls.py
 │   │   ├── views.py
 │   │   └── migrations/
 │   │       ├── __init__.py
-│   │       └── 0001_initial.py
+│   │       ├── 0001_initial.py
+│   │       └── 0002_maintenancerequest_assigned_to.py
 │   └── notifications/                             # In-app notifications and inbox API
 │       ├── __init__.py
 │       ├── apps.py

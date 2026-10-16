@@ -222,6 +222,7 @@ export default function TenantDashboard() {
                     <th>Property</th>
                     <th>Issue details</th>
                     <th>Status</th>
+                    <th>Handled by</th>
                     <th className="text-end">Date submitted</th>
                   </tr>
                 </thead>
@@ -236,6 +237,10 @@ export default function TenantDashboard() {
                         <td>
                           <TicketStatusPill status={req.status} />
                         </td>
+                        <td className="pm-cell-muted">
+                          {req.assignedToDetails?.name || 'Awaiting assignment'}
+                          {req.updated_at && <small className="d-block">Updated {new Date(req.updated_at).toLocaleDateString()}</small>}
+                        </td>
                         <td className="text-end pm-cell-muted">
                           {req.created_at ? new Date(req.created_at).toLocaleDateString() : '—'}
                         </td>
@@ -243,7 +248,7 @@ export default function TenantDashboard() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="4" className="pm-empty-row">
+                      <td colSpan="5" className="pm-empty-row">
                         No maintenance requests recorded. Click "Report new issue" to submit one.
                       </td>
                     </tr>
@@ -255,13 +260,13 @@ export default function TenantDashboard() {
         )}
 
         {/* Modal: Report Issue */}
-        <Modal show={showModal} onHide={() => setShowModal(false)} centered dialogClassName="pm-modal">
+        <Modal show={showModal} onHide={() => setShowModal(false)} centered dialogClassName="pm-modal" aria-labelledby="tenant-maintenance-title">
           <Modal.Header closeButton>
-            <Modal.Title>Report maintenance issue</Modal.Title>
+            <Modal.Title id="tenant-maintenance-title">Report maintenance issue</Modal.Title>
           </Modal.Header>
           <Form onSubmit={handleSubmit}>
             <Modal.Body>
-              <Form.Group className="mb-3">
+              <Form.Group className="mb-3" controlId="maintenance-property">
                 <Form.Label className="pm-form-label">Select unit</Form.Label>
                 <Form.Select
                   className="pm-input"
@@ -279,7 +284,7 @@ export default function TenantDashboard() {
               </Form.Group>
 
               {(availableProperties.find((property) => String(property._id) === String(formData.property))?.units || []).filter((unit) => Number(unit.tenantId) === Number(user?._id)).length > 0 && (
-                <Form.Group className="mb-3">
+                <Form.Group className="mb-3" controlId="maintenance-unit">
                   <Form.Label className="pm-form-label">Your unit</Form.Label>
                   <Form.Select className="pm-input" value={formData.unit} onChange={(e) => setFormData({ ...formData, unit: e.target.value })}>
                     <option value="">Select unit</option>
@@ -290,7 +295,7 @@ export default function TenantDashboard() {
                 </Form.Group>
               )}
 
-              <Form.Group className="mb-3">
+              <Form.Group className="mb-3" controlId="maintenance-description">
                 <Form.Label className="pm-form-label">Issue description</Form.Label>
                 <Form.Control
                   className="pm-input"

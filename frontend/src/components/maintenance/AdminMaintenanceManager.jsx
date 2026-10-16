@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Form, Alert, Spinner } from 'react-bootstrap';
 import Table from '../ui/ResponsiveTable.jsx';
-import { fetchMaintenanceRequestsPage, updateMaintenanceStatus } from '../../services/maintenance/maintenanceService';
+import { assignMaintenanceRequest, fetchMaintenanceRequestsPage, updateMaintenanceStatus } from '../../services/maintenance/maintenanceService';
 import usePaginatedCollection from '../../hooks/usePaginatedCollection';
 import CollectionPagination from '../ui/CollectionPagination';
+import { useAuth } from '../../context/useAuth';
 
 const STATUS_PILL_CLASS = {
   open: 'pm-pill-pending',
@@ -24,6 +25,7 @@ function StatusPill({ status }) {
 }
 
 export default function AdminMaintenanceManager() {
+  const { user } = useAuth();
   const { items: requests, count, page, pageCount, loading, error: loadError, setPage, refresh } = usePaginatedCollection(fetchMaintenanceRequestsPage);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -37,6 +39,18 @@ export default function AdminMaintenanceManager() {
       refresh();
     } catch {
       setError('Failed to update ticket status.');
+    }
+  };
+
+  const handleAssignmentChange = async (id, assignedTo) => {
+    setError('');
+    setSuccess('');
+    try {
+      await assignMaintenanceRequest(id, assignedTo ? Number(assignedTo) : null);
+      setSuccess('Maintenance assignment updated.');
+      refresh();
+    } catch (err) {
+      setError(err.response?.data?.assignedTo?.[0] || 'Failed to assign the request.');
     }
   };
 
@@ -58,6 +72,7 @@ export default function AdminMaintenanceManager() {
                 <th>Tenant</th>
                 <th>Description</th>
                 <th>Status</th>
+                <th>Assigned to</th>
                 <th className="text-center">Action</th>
               </tr>
             </thead>
@@ -79,6 +94,10 @@ export default function AdminMaintenanceManager() {
                     (typeof req.tenant === 'string' ? req.tenant : null) ||
                     'N/A';
 
+                  const assigneeOptions = [user, req.propertyDetails?.managerDetails, req.assignedToDetails]
+                    .filter((person) => person?._id && person.isActive !== false && person.isDeleted !== true)
+                    .filter((person, index, people) => people.findIndex((candidate) => candidate._id === person._id) === index);
+
                   return (
                     <tr key={reqId}>
                       <td className="fw-bold pm-cell-title">{propertyTitle}</td>
@@ -86,6 +105,20 @@ export default function AdminMaintenanceManager() {
                       <td className="text-secondary">{req.issueDescription || req.title}</td>
                       <td>
                         <StatusPill status={req.status} />
+                      </td>
+                      <td>
+                        <Form.Select
+                          size="sm"
+                          className="pm-input"
+                          aria-label={`Assign maintenance request ${reqId}`}
+                          value={req.assignedTo ?? ''}
+                          onChange={(e) => handleAssignmentChange(reqId, e.target.value)}
+                        >
+                          <option value="">Unassigned</option>
+                          {assigneeOptions.map((person) => (
+                            <option key={person._id} value={person._id}>{person.name || person.email}</option>
+                          ))}
+                        </Form.Select>
                       </td>
                       <td className="text-center">
                         <Form.Select
@@ -105,7 +138,7 @@ export default function AdminMaintenanceManager() {
                 })
               ) : (
                 <tr>
-                  <td colSpan="5" className="text-center text-muted py-4">No maintenance tickets submitted.</td>
+                  <td colSpan="6" className="text-center text-muted py-4">No maintenance tickets submitted.</td>
                 </tr>
               )}
             </tbody>

@@ -229,6 +229,62 @@ async function reviewManagerInquiries(page, reviewDir) {
   await page.screenshot({ path: path.join(reviewDir, 'manager-inquiries-1440.png'), fullPage: true });
 }
 
+function seedMaintenanceFixture() {
+  runPython([
+    'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
+    "import os; from django.contrib.auth import get_user_model; from properties.models import Property, Unit; U=get_user_model(); tenant=U.objects.get(email=os.environ['BROWSER_TEST_EMAIL']); manager=U.objects.get(email='ui-manager@example.test'); home=Property.objects.create(title='Browser maintenance home', address='1 Browser Test Lane', property_type='Apartment', manager=manager); Unit.objects.create(property=home, unit_number='1A', monthly_rate=1000, tenant=tenant)",
+  ]);
+}
+
+async function submitMaintenanceRequest(tenantPage) {
+  await tenantPage.reload();
+  await tenantPage.getByRole('button', { name: 'Report new issue' }).click();
+  const issueDialog = tenantPage.getByRole('dialog', { name: 'Report maintenance issue' });
+  await issueDialog.waitFor({ timeout: 5000 }).catch(async () => {
+    throw new Error(`Maintenance form did not open: ${JSON.stringify(await tenantPage.evaluate(() => ({
+      alerts: [...document.querySelectorAll('[role="alert"]')].map((element) => element.textContent),
+      modal: document.querySelector('.modal')?.outerHTML.slice(0, 1200),
+    })))}`);
+  });
+  await issueDialog.getByLabel('Select unit').selectOption({ index: 1 });
+  await issueDialog.getByLabel('Issue description').fill('Leaking tap in the kitchen');
+  const createdResponse = tenantPage.waitForResponse((response) => response.url().endsWith('/api/maintenance/') && response.request().method() === 'POST');
+  await issueDialog.getByRole('button', { name: 'Submit ticket' }).click();
+  const created = await (await createdResponse).json();
+  if (!created._id) throw new Error('Tenant maintenance request was not created.');
+  await tenantPage.locator('.workspace-frame > .workspace-sidebar .workspace-side-link').filter({ hasText: 'Maintenance' }).click();
+  await tenantPage.getByText('Leaking tap in the kitchen').waitFor();
+  return created._id;
+}
+
+async function assignMaintenanceRequestInBrowser(adminPage, requestId) {
+  await adminPage.locator('.workspace-frame > .workspace-sidebar .workspace-side-link').filter({ hasText: 'Maintenance' }).click();
+  const requestRow = adminPage.locator('tr').filter({ hasText: 'Leaking tap in the kitchen' });
+  await requestRow.waitFor();
+  await requestRow.getByRole('combobox', { name: `Assign maintenance request ${requestId}` }).selectOption({ index: 2 });
+  await adminPage.getByText('Maintenance assignment updated.').waitFor();
+  await requestRow.locator('select').last().selectOption('In Progress');
+  await adminPage.getByText('Maintenance status updated.').waitFor();
+  await adminPage.setViewportSize({ width: 320, height: 900 });
+  const adminOverflow = await adminPage.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  if (adminOverflow > 1) throw new Error(`Admin maintenance queue overflows mobile by ${adminOverflow}px.`);
+}
+
+async function verifyTenantMaintenance(tenantPage) {
+  await tenantPage.reload();
+  await tenantPage.locator('.workspace-frame > .workspace-sidebar .workspace-side-link').filter({ hasText: 'Maintenance' }).click();
+  const tenantRow = tenantPage.locator('tr').filter({ hasText: 'Leaking tap in the kitchen' });
+  await tenantRow.getByText('In Progress').waitFor();
+  await tenantRow.getByText('A Very Long Example Name For Layout Review').waitFor();
+  await tenantPage.setViewportSize({ width: 320, height: 900 });
+  const tenantOverflow = await tenantPage.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  if (tenantOverflow > 1) throw new Error(`Tenant maintenance log overflows mobile by ${tenantOverflow}px.`);
+  await tenantPage.getByRole('button', { name: /^Notifications/ }).click();
+  await tenantPage.getByText('Your maintenance request is now in progress.').waitFor();
+  await tenantPage.setViewportSize({ width: 1440, height: 900 });
+  console.log('PASS: Tenant submission, Admin assignment and status, Tenant tracking and notification');
+}
+
 async function main() {
   await assertPortFree(18000);
   await assertPortFree(15173);
@@ -293,6 +349,7 @@ async function main() {
     await page.locator('.app-account-name').getByText('Verified Smoke').waitFor();
     console.log('PASS: protected profile update');
 
+    let maintenanceRequestId;
     if (uiReview) {
       for (const width of [1440, 768, 320]) {
         await page.setViewportSize({ width, height: 900 });
@@ -313,15 +370,9 @@ async function main() {
       await page.goto(`${frontendUrl}/tenant`);
       await reviewWorkspace(page, 'Tenant', 'tenant', reviewDir);
       await reviewNotifications(page, reviewDir);
+      seedMaintenanceFixture();
+      maintenanceRequestId = await submitMaintenanceRequest(page);
     }
-
-    await page.getByRole('button', { name: 'Sign out' }).click();
-    await page.waitForURL('**/login', { timeout: 10000 });
-    const afterLogout = await page.request.get(`${frontendUrl}/api/users/me/`);
-    if (afterLogout.status() !== 403) throw new Error(`Expected 403 after logout, got ${afterLogout.status()}.`);
-    await page.goto(`${frontendUrl}/tenant`);
-    await page.waitForURL('**/login', { timeout: 10000 });
-    console.log('PASS: logout revokes access');
 
     if (uiReview) {
       for (const [role, route] of reviewRoles) {
@@ -333,12 +384,24 @@ async function main() {
         await rolePage.getByRole('button', { name: 'Sign in' }).click();
         await rolePage.waitForURL(`**/${route}`, { timeout: 10000 });
         await reviewWorkspace(rolePage, role, route, reviewDir);
-        if (route === 'admin') await reviewAdminForms(rolePage, reviewDir);
+        if (route === 'admin') {
+          await reviewAdminForms(rolePage, reviewDir);
+          await assignMaintenanceRequestInBrowser(rolePage, maintenanceRequestId);
+        }
         if (route === 'manager') await reviewManagerInquiries(rolePage, reviewDir);
         await roleContext.close();
       }
+      await verifyTenantMaintenance(page);
       console.log(`UI screenshots: ${reviewDir}`);
     }
+
+    await page.getByRole('button', { name: 'Sign out' }).click();
+    await page.waitForURL('**/login', { timeout: 10000 });
+    const afterLogout = await page.request.get(`${frontendUrl}/api/users/me/`);
+    if (afterLogout.status() !== 403) throw new Error(`Expected 403 after logout, got ${afterLogout.status()}.`);
+    await page.goto(`${frontendUrl}/tenant`);
+    await page.waitForURL('**/login', { timeout: 10000 });
+    console.log('PASS: logout revokes access');
   } finally {
     await browser.close();
   }

@@ -10,6 +10,10 @@ User = get_user_model()
 class MaintenanceRequestSerializer(serializers.ModelSerializer):
     _id = serializers.IntegerField(source='id', read_only=True)
     issueDescription = serializers.CharField(source='issue_description')
+    assignedTo = serializers.PrimaryKeyRelatedField(
+        source='assigned_to', queryset=User.objects.filter(is_active=True, is_deleted=False),
+        required=False, allow_null=True,
+    )
     
     property = serializers.PrimaryKeyRelatedField(queryset=Property.objects.filter(is_deleted=False))
     tenant = serializers.PrimaryKeyRelatedField(
@@ -20,12 +24,14 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
 
     propertyDetails = PropertySerializer(source='property', read_only=True)
     tenantDetails = UserSerializer(source='tenant', read_only=True)
+    assignedToDetails = serializers.SerializerMethodField()
 
     class Meta:
         model = MaintenanceRequest
         fields = [
             '_id', 'property', 'unit', 'tenant', 'issueDescription', 
-            'status', 'propertyDetails', 'tenantDetails', 'created_at'
+            'status', 'assignedTo', 'assignedToDetails', 'propertyDetails',
+            'tenantDetails', 'created_at', 'updated_at'
         ]
 
     def __init__(self, *args, **kwargs):
@@ -35,6 +41,16 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
             self.fields['tenant'].read_only = True
         elif request and self.instance is None:
             self.fields['tenant'].required = True
+
+    def get_assignedToDetails(self, instance):
+        assignee = instance.assigned_to
+        if not assignee:
+            return None
+        return {
+            '_id': assignee.pk,
+            'name': assignee.get_full_name() or assignee.email,
+            'role': assignee.role,
+        }
 
     def validate(self, attrs):
         request = self.context.get('request')
@@ -57,6 +73,16 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
         if user and user.role == User.Role.PROPERTY_MANAGER:
             if property_obj and property_obj.manager_id != user.id:
                 raise serializers.ValidationError({'property': 'You can only manage maintenance for assigned properties.'})
+
+        if 'assigned_to' in attrs:
+            if not user or user.role not in (User.Role.ADMIN, User.Role.PROPERTY_MANAGER):
+                raise serializers.ValidationError({'assignedTo': 'Only an administrator or property manager may assign a request.'})
+            assignee = attrs['assigned_to']
+            if assignee and not (
+                assignee.role == User.Role.ADMIN
+                or (assignee.role == User.Role.PROPERTY_MANAGER and property_obj and property_obj.manager_id == assignee.pk)
+            ):
+                raise serializers.ValidationError({'assignedTo': 'Assign an active administrator or this property’s manager.'})
 
         tenant = attrs.get('tenant', getattr(self.instance, 'tenant', user if user and user.role == User.Role.TENANT else None))
         if tenant and property_obj and not (

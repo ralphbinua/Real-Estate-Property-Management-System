@@ -12,6 +12,10 @@ class MaintenanceRequest(models.Model):
     property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name='maintenance_requests')
     unit = models.ForeignKey(Unit, on_delete=models.SET_NULL, null=True, blank=True, related_name='maintenance_requests')
     tenant = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='maintenance_requests')
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='assigned_maintenance_requests',
+    )
     issue_description = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Open')
     is_deleted = models.BooleanField(default=False)

@@ -9,7 +9,7 @@ A web application for managing rental properties, units, tenants, leases, rent r
 - Review applications according to the Owner's recorded approval rules.
 - Create and manage lease contracts.
 - Create rent invoices and record or review payment status.
-- Submit and manage maintenance requests.
+- Submit maintenance requests, assign them to an Admin or the property's Manager, track status, and receive in-app updates.
 - Review activity records and system settings.
 
 Rent payments are tracked in the system. No external payment provider is configured in this repository.

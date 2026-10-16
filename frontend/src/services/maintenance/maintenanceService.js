@@ -17,3 +17,8 @@ export const updateMaintenanceStatus = async (id, status) => {
   const response = await api.patch(`/maintenance/${id}/`, { status });
   return response.data;
 };
+
+export const assignMaintenanceRequest = async (id, assignedTo) => {
+  const response = await api.patch(`/maintenance/${id}/`, { assignedTo });
+  return response.data;
+};

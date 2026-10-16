@@ -31,7 +31,7 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = MaintenanceRequest.objects.filter(is_deleted=False).select_related(
-            'unit', 'tenant',
+            'unit', 'tenant', 'assigned_to',
         ).prefetch_related(
             Prefetch('property', queryset=property_serializer_queryset(Property.objects.all())),
         ).order_by('-id')
@@ -87,33 +87,56 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
             message='A new maintenance request was submitted for a property you manage.',
             destination=Notification.Destination.MANAGER_MAINTENANCE,
         )
+        if request_obj.assigned_to_id:
+            create_for_recipients(
+                recipients=[request_obj.assigned_to], actor=self.request.user,
+                event_type=Notification.EventType.MAINTENANCE,
+                title='Maintenance request assigned',
+                message=f'Maintenance request #{request_obj.pk} was assigned to you.',
+                destination=(Notification.Destination.MANAGER_MAINTENANCE if request_obj.assigned_to.role == 'Property Manager'
+                             else Notification.Destination.ADMIN_OVERVIEW),
+            )
 
     @transaction.atomic
     def perform_update(self, serializer):
         previous_status = serializer.instance.status
+        previous_assignee_id = serializer.instance.assigned_to_id
         request_obj = serializer.save()
         record_activity(self.request.user, 'UPDATE', 'Maintenance request', request_obj.pk, f'Updated maintenance request {request_obj.pk} to {request_obj.status}.')
-        if request_obj.status == previous_status:
+        status_changed = request_obj.status != previous_status
+        assignee_changed = request_obj.assigned_to_id != previous_assignee_id
+        if not status_changed and not assignee_changed:
             return
 
         property_obj = request_obj.property
-        create_for_recipients(
-            recipients=[property_obj.manager] if property_obj.manager_id else [],
-            actor=self.request.user,
-            event_type=Notification.EventType.MAINTENANCE,
-            title='Maintenance request updated',
-            message=f'A maintenance request status changed to {request_obj.status.lower()}.',
-            destination=Notification.Destination.MANAGER_MAINTENANCE,
-        )
+        if status_changed:
+            create_for_recipients(
+                recipients=[property_obj.manager] if property_obj.manager_id else [],
+                actor=self.request.user,
+                event_type=Notification.EventType.MAINTENANCE,
+                title='Maintenance request updated',
+                message=f'A maintenance request status changed to {request_obj.status.lower()}.',
+                destination=Notification.Destination.MANAGER_MAINTENANCE,
+            )
         create_for_recipients(
             recipients=[request_obj.tenant],
             actor=self.request.user,
             event_type=Notification.EventType.MAINTENANCE,
             title='Maintenance request updated',
-            message=f'Your maintenance request is now {request_obj.status.lower()}.',
+            message=(f'Your maintenance request is now {request_obj.status.lower()}.' if status_changed
+                     else 'The person handling your maintenance request has changed.'),
             destination=Notification.Destination.TENANT_MAINTENANCE,
         )
-        if request_obj.status == 'Resolved':
+        if assignee_changed and request_obj.assigned_to_id:
+            create_for_recipients(
+                recipients=[request_obj.assigned_to], actor=self.request.user,
+                event_type=Notification.EventType.MAINTENANCE,
+                title='Maintenance request assigned',
+                message=f'Maintenance request #{request_obj.pk} was assigned to you.',
+                destination=(Notification.Destination.MANAGER_MAINTENANCE if request_obj.assigned_to.role == 'Property Manager'
+                             else Notification.Destination.ADMIN_OVERVIEW),
+            )
+        if status_changed and request_obj.status == 'Resolved':
             create_for_recipients(
                 recipients=[property_obj.owner] if property_obj.owner_id else [],
                 actor=self.request.user,
