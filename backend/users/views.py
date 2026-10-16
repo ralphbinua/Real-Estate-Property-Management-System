@@ -180,10 +180,12 @@ class UserViewSet(viewsets.ModelViewSet):
         role = self.request.query_params.get('role')
         roles = [value.strip() for value in self.request.query_params.get('roles', '').split(',') if value.strip()]
         search = self.request.query_params.get('search', '').strip()
+        role_values = {value.casefold(): value for value in User.Role.values}
         if role:
-            users = users.filter(role=role)
+            users = users.filter(role=role_values.get(role.casefold(), role))
         elif roles:
-            users = users.filter(role__in=roles)
+            normalized_roles = [role_values.get(value.casefold(), value) for value in roles]
+            users = users.filter(role__in=normalized_roles)
         if search:
             users = users.filter(
                 Q(email__icontains=search)
