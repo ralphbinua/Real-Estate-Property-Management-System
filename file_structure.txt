@@ -113,84 +113,125 @@ real-estate-management/
 ├── docs/
 │   └── superpowers/                              # Local planning notes; ignored by Git
 └── frontend/                                     # React application built with Vite
+    ├── .superpowers/
+    │   └── sdd/
+    ├── public/
+    │   └── favicon.svg
+    ├── scripts/
+    │   ├── browser-smoke.cjs
+    │   └── profile-browser.cjs
+    ├── src/
+    │   ├── components/
+    │   │   ├── admin/
+    │   │   │   ├── AdminActivityLog.jsx
+    │   │   │   ├── AdminSystemSettings.jsx
+    │   │   │   ├── UserManagement.jsx
+    │   │   │   └── userManagementErrors.js
+    │   │   ├── billing/
+    │   │   │   ├── ManagerInvoiceTracker.jsx
+    │   │   │   ├── PaymentAcknowledgmentButton.jsx
+    │   │   │   └── TenantInvoiceViewer.jsx
+    │   │   ├── maintenance/
+    │   │   │   └── AdminMaintenanceManager.jsx
+    │   │   ├── navigation/
+    │   │   │   ├── DashboardHeader.jsx
+    │   │   │   ├── MobileFilterBar.jsx
+    │   │   │   ├── MobileWorkspaceTabs.jsx
+    │   │   │   ├── Navbar.jsx
+    │   │   │   └── WorkspaceSidebar.jsx
+    │   │   ├── notifications/
+    │   │   │   ├── NotificationCenter.css
+    │   │   │   ├── NotificationCenter.jsx
+    │   │   │   └── NotificationInbox.jsx
+    │   │   ├── properties/
+    │   │   │   └── PropertyForm.jsx
+    │   │   ├── reports/
+    │   │   │   └── ManagerReports.jsx
+    │   │   └── ui/
+    │   │       ├── CollectionPagination.jsx
+    │   │       ├── ResponsiveTable.jsx
+    │   │       └── responsiveTableLayout.js
+    │   ├── config/
+    │   │   └── workspaceNavigation.js
+    │   ├── context/
+    │   │   ├── AuthContext.jsx
+    │   │   ├── AuthContextValue.js
+    │   │   └── useAuth.js
+    │   ├── hooks/
+    │   │   ├── useMobileFilterSheet.js
+    │   │   ├── useNotificationDeepLink.js
+    │   │   └── usePaginatedCollection.js
+    │   ├── pages/
+    │   │   ├── admin/
+    │   │   │   ├── AdminDashboard.css
+    │   │   │   └── AdminDashboard.jsx
+    │   │   ├── agent/
+    │   │   │   ├── AgentDashboard.css
+    │   │   │   └── AgentDashboard.jsx
+    │   │   ├── auth/
+    │   │   │   ├── Login.css
+    │   │   │   └── Login.jsx
+    │   │   ├── manager/
+    │   │   │   ├── ManagerContractSection.jsx
+    │   │   │   ├── ManagerDashboard.css
+    │   │   │   ├── ManagerDashboard.jsx
+    │   │   │   ├── ManagerProspectsSection.jsx
+    │   │   │   └── ManagerRentChangesSection.jsx
+    │   │   ├── owner/
+    │   │   │   ├── OwnerApprovalsSection.jsx
+    │   │   │   ├── OwnerBillingSection.jsx
+    │   │   │   ├── OwnerContractsSection.jsx
+    │   │   │   ├── OwnerDashboard.css
+    │   │   │   ├── OwnerDashboard.jsx
+    │   │   │   ├── ownerDashboardPresentation.js
+    │   │   │   ├── OwnerHistorySection.jsx
+    │   │   │   ├── OwnerMaintenanceSection.jsx
+    │   │   │   ├── OwnerMetricsSection.jsx
+    │   │   │   ├── OwnerPricingSection.jsx
+    │   │   │   ├── OwnerPropertiesSection.jsx
+    │   │   │   └── OwnerStatusPill.jsx
+    │   │   ├── profile/
+    │   │   │   ├── ProfilePage.css
+    │   │   │   └── ProfilePage.jsx
+    │   │   └── tenant/
+    │   │       ├── TenantDashboard.css
+    │   │       └── TenantDashboard.jsx
+    │   ├── services/
+    │   │   ├── billing/
+    │   │   │   └── invoiceService.js
+    │   │   ├── contracts/
+    │   │   │   └── contractService.js
+    │   │   ├── core/
+    │   │   │   ├── api.js
+    │   │   │   └── pagination.js
+    │   │   ├── maintenance/
+    │   │   │   └── maintenanceService.js
+    │   │   ├── notifications/
+    │   │   │   ├── notificationNavigation.js
+    │   │   │   └── notificationService.js
+    │   │   ├── properties/
+    │   │   │   ├── applicationService.js
+    │   │   │   ├── inquiryService.js
+    │   │   │   ├── ownerService.js
+    │   │   │   ├── propertyService.js
+    │   │   │   └── unitService.js
+    │   │   └── users/
+    │   │       ├── profileService.js
+    │   │       ├── systemSettingsService.js
+    │   │       └── userService.js
+    │   ├── styles/
+    │   │   └── design-system.css
+    │   ├── utils/
+    │   │   ├── dateUtils.js
+    │   │   ├── formatCurrency.js
+    │   │   ├── formatNotificationTime.js
+    │   │   └── leaseIncome.js
+    │   ├── App.jsx
+    │   └── main.jsx
     ├── .gitignore
     ├── eslint.config.js
     ├── index.html
-    ├── package.json
     ├── package-lock.json
-    ├── vite.config.js
-    ├── public/
-    │   └── favicon.svg
-    └── src/
-        ├── App.jsx                               # Application routes and role dashboards
-        ├── main.jsx                              # Frontend entry point
-        ├── design-system.css                     # Shared application styles
-        ├── config/
-        │   └── workspaceNavigation.js
-        ├── context/                              # Authentication context and helpers
-        │   ├── AuthContext.jsx
-        │   ├── AuthContextValue.js
-        │   └── useAuth.js
-        ├── hooks/                                # Shared collection and notification hooks
-        │   ├── useNotificationDeepLink.js
-        │   └── usePaginatedCollection.js
-        ├── components/                           # Shared dashboard, form, and workflow UI
-        │   ├── AdminActivityLog.jsx
-        │   ├── AdminMaintenanceManager.jsx
-        │   ├── AdminSystemSettings.jsx
-        │   ├── CollectionPagination.jsx
-        │   ├── DashboardHeader.jsx
-        │   ├── ManagerInvoiceTracker.jsx
-        │   ├── ManagerReports.jsx
-        │   ├── Navbar.jsx
-        │   ├── NotificationCenter.css
-        │   ├── NotificationCenter.jsx
-        │   ├── NotificationInbox.jsx
-        │   ├── PaymentAcknowledgmentButton.jsx
-        │   ├── PropertyForm.jsx
-        │   ├── ResponsiveTable.jsx
-        │   ├── responsiveTable.test.js
-        │   ├── responsiveTableLayout.js
-        │   ├── TenantInvoiceViewer.jsx
-        │   ├── UserManagement.jsx
-        │   └── WorkspaceSidebar.jsx
-        ├── pages/                                # Sign-in and role-specific dashboards
-        │   ├── AdminDashboard.css
-        │   ├── AdminDashboard.jsx
-        │   ├── AgentDashboard.css
-        │   ├── AgentDashboard.jsx
-        │   ├── Login.css
-        │   ├── Login.jsx
-        │   ├── ManagerDashboard.css
-        │   ├── ManagerDashboard.jsx
-        │   ├── OwnerDashboard.css
-        │   ├── OwnerDashboard.jsx
-        │   ├── TenantDashboard.css
-        │   ├── TenantDashboard.jsx
-        │   └── manager/                           # Manager dashboard workflow sections
-        │       ├── ManagerContractSection.jsx
-        │       ├── ManagerProspectsSection.jsx
-        │       └── ManagerRentChangesSection.jsx
-        ├── services/                             # API clients and pagination helpers
-        │   ├── api.js
-        │   ├── applicationService.js
-        │   ├── contractService.js
-        │   ├── inquiryService.js
-        │   ├── invoiceService.js
-        │   ├── maintenanceService.js
-        │   ├── notificationNavigation.js
-        │   ├── notificationService.js
-        │   ├── ownerService.js
-        │   ├── pagination.js
-        │   ├── profileService.js
-        │   ├── propertyService.js
-        │   ├── systemSettingsService.js
-        │   ├── unitService.js
-        │   └── userService.js
-        └── utils/                                # Date, currency, and lease calculations
-            ├── dateUtils.js
-            ├── formatCurrency.js
-            ├── formatNotificationTime.js
-            ├── formatters.test.js
-            ├── leaseIncome.js
-            └── leaseIncome.test.js
+    ├── package.json
+    ├── vite.browser-test.config.mjs
+    └── vite.config.js

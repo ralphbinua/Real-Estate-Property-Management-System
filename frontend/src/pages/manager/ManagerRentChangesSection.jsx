@@ -1,5 +1,5 @@
-import Table from '../../components/ResponsiveTable.jsx';
-import CollectionPagination from '../../components/CollectionPagination';
+import Table from '../../components/ui/ResponsiveTable.jsx';
+import CollectionPagination from '../../components/ui/CollectionPagination';
 
 const STATUS_CLASS = {
   pending: 'pm-pill-pending',

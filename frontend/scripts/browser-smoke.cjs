@@ -114,52 +114,38 @@ async function reviewWorkspace(page, role, route, reviewDir) {
     await page.screenshot({ path: path.join(reviewDir, `${route}-${width}.png`), fullPage: true });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     if (overflow > 1) throw new Error(`${role} layout overflows ${width}px by ${overflow}px.`);
-    if (width === 768) {
-      const tabletMenu = page.getByRole('button', { name: 'Toggle navigation' });
-      await tabletMenu.click();
-      await page.waitForFunction(() => document.getElementById('app-primary-navigation')?.classList.contains('show'));
-      const backdrop = await page.locator('.app-menu-scrim').boundingBox();
-      if (!backdrop || backdrop.height < 700) throw new Error(`${role} tablet menu backdrop does not cover the page.`);
-      await page.mouse.click(24, 128);
-      if (await tabletMenu.getAttribute('aria-expanded') !== 'false') throw new Error(`${role} tablet menu backdrop did not close navigation.`);
-    }
-    if (width === 320) {
-      if (await page.locator('.workspace-frame > .workspace-sidebar').isVisible()) {
-        throw new Error(`${role} still shows a second mobile navigation bar.`);
+    if (width === 768 || width === 320) {
+      if (await page.locator('.workspace-frame > .workspace-sidebar').isVisible()) throw new Error(`${role} still shows the desktop sidebar.`);
+      const tabs = page.getByRole('navigation', { name: 'Primary workspace navigation' });
+      if (await tabs.getByRole('button').count() < 4) throw new Error(`${role} is missing primary tabs.`);
+      const more = tabs.getByRole('button', { name: 'More' });
+      if (await more.count()) {
+        await more.click();
+        await page.locator('#app-primary-navigation.show').waitFor();
+        const backdrop = await page.locator('.app-menu-scrim').boundingBox();
+        if (!backdrop || backdrop.height < 300) throw new Error(`${role} More backdrop does not cover the page.`);
+        if (width === 320) await page.screenshot({ path: path.join(reviewDir, `${route}-more-320.png`) });
+        await tabs.getByRole('button', { name: 'Close' }).click();
       }
-      const menu = page.getByRole('button', { name: 'Toggle navigation' });
-      await menu.click();
-      if (await menu.getAttribute('aria-expanded') !== 'true') throw new Error(`${role} mobile navigation did not open.`);
-      const panel = page.locator('#app-primary-navigation');
-      const links = panel.locator('.workspace-side-link');
-      await page.waitForFunction(() => document.getElementById('app-primary-navigation')?.classList.contains('show'));
-      await links.first().waitFor();
-      const panelBox = await panel.boundingBox();
-      if (!panelBox || panelBox.width < 280 || panelBox.height < 400 || panelBox.x < -1) {
-        throw new Error(`${role} mobile menu did not expand into a usable panel.`);
+      if (width === 320) {
+        await page.getByRole('button', { name: 'Account' }).click();
+        const accountSheet = page.getByRole('dialog', { name: 'Account' });
+        await accountSheet.waitFor();
+        if (!(await accountSheet.getByRole('button', { name: 'Sign out' }).isVisible())) throw new Error(`${role} sign out is missing from account.`);
+        await page.locator('.app-account-sheet-scrim').click({ position: { x: 8, y: 8 } });
+        const secondTab = tabs.getByRole('button').nth(1);
+        await secondTab.click();
+        if (['admin', 'manager', 'agent'].includes(route)) {
+          const label = route === 'agent' ? 'listings' : 'properties';
+          await page.getByRole('button', { name: `Search and filter ${label}` }).click();
+          await page.getByRole('dialog', { name: `Search and filter ${label}` }).waitFor();
+          await page.getByRole('button', { name: 'Close filters' }).click();
+        }
+        const sectionOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+        if (sectionOverflow > 1) throw new Error(`${role} second section overflows by ${sectionOverflow}px.`);
+        await page.screenshot({ path: path.join(reviewDir, `${route}-section-320.png`), fullPage: true });
+        await tabs.getByRole('button', { name: 'Overview' }).click();
       }
-      if (!(await panel.getByRole('link', { name: 'Your profile' }).isVisible())) throw new Error(`${role} profile is missing from the mobile menu.`);
-      await page.screenshot({ path: path.join(reviewDir, `${route}-menu-320.png`) });
-      const secondLink = links.nth(1);
-      const previousHeading = await page.getByRole('heading', { level: 1 }).textContent();
-      await page.keyboard.press('Tab');
-      await page.keyboard.press('Tab');
-      if (!(await secondLink.evaluate((element) => element === document.activeElement))) {
-        throw new Error(`${role} mobile navigation is not keyboard reachable.`);
-      }
-      const focusOutline = await secondLink.evaluate((element) => getComputedStyle(element).outlineStyle);
-      if (focusOutline === 'none') throw new Error(`${role} navigation focus is invisible.`);
-      await secondLink.click();
-      if (await menu.getAttribute('aria-expanded') !== 'false') throw new Error(`${role} mobile navigation did not close after selection.`);
-      if (await secondLink.getAttribute('aria-current') !== 'page') throw new Error(`${role} selected section is not announced.`);
-      await page.waitForFunction(() => !document.getElementById('app-primary-navigation')?.classList.contains('show') && !document.getElementById('app-primary-navigation')?.classList.contains('collapsing'));
-      await page.waitForFunction((heading) => document.querySelector('h1')?.textContent !== heading, previousHeading);
-      await page.screenshot({ path: path.join(reviewDir, `${route}-section-320.png`), fullPage: true });
-      const sectionOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-      if (sectionOverflow > 1) throw new Error(`${role} second section overflows by ${sectionOverflow}px.`);
-      await menu.click();
-      await links.first().click();
-      await page.waitForFunction(() => !document.getElementById('app-primary-navigation')?.classList.contains('show') && !document.getElementById('app-primary-navigation')?.classList.contains('collapsing'));
     }
   }
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -184,7 +170,7 @@ async function reviewAdminForms(page, reviewDir) {
   await propertyDialog.locator('.modal-body').evaluate((element) => { element.scrollTop = 0; });
   await page.screenshot({ path: path.join(reviewDir, 'property-form-320.png') });
   await propertyDialog.getByRole('button', { name: 'Close' }).click();
-  await page.getByRole('button', { name: 'Toggle navigation' }).click();
+  await page.getByRole('button', { name: 'More' }).click();
   await page.locator('#app-primary-navigation .workspace-side-link').filter({ hasText: 'User accounts' }).click();
   await page.getByRole('button', { name: 'Add User' }).click();
   const userDialog = page.getByRole('dialog', { name: 'Create New User Account' });
@@ -206,7 +192,6 @@ async function reviewAdminForms(page, reviewDir) {
 
 async function reviewNotifications(page, reviewDir) {
   await page.setViewportSize({ width: 320, height: 640 });
-  await page.getByRole('button', { name: 'Toggle navigation' }).click();
   await page.getByRole('button', { name: 'Notifications', exact: true }).click();
   const panel = page.getByRole('dialog', { name: 'Recent notifications' });
   await panel.waitFor();
@@ -231,7 +216,7 @@ async function reviewManagerInquiries(page, reviewDir) {
     await route.fulfill({ json: { count: results.length, results, next: null, previous: null } });
   });
   await page.setViewportSize({ width: 320, height: 900 });
-  await page.getByRole('button', { name: 'Toggle navigation' }).click();
+  await page.getByRole('button', { name: 'More' }).click();
   await page.locator('#app-primary-navigation .workspace-side-link').filter({ hasText: 'Inquiries' }).click();
   await page.waitForFunction(() => !document.getElementById('app-primary-navigation')?.classList.contains('show') && !document.getElementById('app-primary-navigation')?.classList.contains('collapsing'));
   await page.getByRole('heading', { name: 'Inquiry pipeline' }).waitFor();
@@ -320,8 +305,8 @@ async function main() {
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         if (overflow > 1) throw new Error(`Profile page overflows ${width}px by ${overflow}px.`);
       }
-      await page.getByRole('button', { name: 'Toggle navigation' }).click();
-      await page.locator('#app-primary-navigation .workspace-side-link').filter({ hasText: 'Rent & payments' }).click();
+      await page.locator('.app-brand').click();
+      await page.getByRole('navigation', { name: 'Primary workspace navigation' }).getByRole('button', { name: 'Payments' }).click();
       await page.waitForURL('**/tenant?section=payments', { timeout: 10000 });
       await page.getByRole('heading', { name: 'Rent & payments' }).waitFor();
       await page.setViewportSize({ width: 1440, height: 900 });

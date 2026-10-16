@@ -1,4 +1,4 @@
-import Table from '../../components/ResponsiveTable.jsx';
+import Table from '../../components/ui/ResponsiveTable.jsx';
 import OwnerStatusPill from './OwnerStatusPill.jsx';
 
 export default function OwnerMaintenanceSection({ requests }) {

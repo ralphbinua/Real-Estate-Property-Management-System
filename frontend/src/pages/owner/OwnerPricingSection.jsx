@@ -1,5 +1,5 @@
 import { Button } from 'react-bootstrap';
-import Table from '../../components/ResponsiveTable.jsx';
+import Table from '../../components/ui/ResponsiveTable.jsx';
 import OwnerStatusPill from './OwnerStatusPill.jsx';
 import { getRentChangeEffectiveDate } from './ownerDashboardPresentation.js';
 

@@ -1,5 +1,5 @@
 import { Button, Form } from 'react-bootstrap';
-import Table from '../../components/ResponsiveTable.jsx';
+import Table from '../../components/ui/ResponsiveTable.jsx';
 import OwnerStatusPill from './OwnerStatusPill.jsx';
 import { getOwnerPropertyMetrics } from './ownerDashboardPresentation.js';
 

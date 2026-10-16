@@ -1,17 +1,17 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/useAuth';
-import NavigationBar from './components/Navbar';
-import WorkspaceSidebar from './components/WorkspaceSidebar';
-import Login from './pages/Login';
+import NavigationBar from './components/navigation/Navbar';
+import WorkspaceSidebar from './components/navigation/WorkspaceSidebar';
+import Login from './pages/auth/Login';
 
-const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
-const TenantDashboard = lazy(() => import('./pages/TenantDashboard'));
-const ManagerDashboard = lazy(() => import('./pages/ManagerDashboard'));
-const AgentDashboard = lazy(() => import('./pages/AgentDashboard'));
-const OwnerDashboard = lazy(() => import('./pages/OwnerDashboard'));
-const NotificationInbox = lazy(() => import('./components/NotificationInbox'));
-const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
+const TenantDashboard = lazy(() => import('./pages/tenant/TenantDashboard'));
+const ManagerDashboard = lazy(() => import('./pages/manager/ManagerDashboard'));
+const AgentDashboard = lazy(() => import('./pages/agent/AgentDashboard'));
+const OwnerDashboard = lazy(() => import('./pages/owner/OwnerDashboard'));
+const NotificationInbox = lazy(() => import('./components/notifications/NotificationInbox'));
+const ProfilePage = lazy(() => import('./pages/profile/ProfilePage'));
 
 // ProtectedRoute component handling authentication and case-insensitive role checks
 const ProtectedRoute = ({ children, allowedRoles }) => {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import AuthContext from './AuthContextValue';
-import api, { resetSessionExpiry } from '../services/api';
+import api, { resetSessionExpiry } from '../services/core/api';
 
 export const AuthProvider = ({ children }) => {
   const [sessionExpired, setSessionExpired] = useState(false);

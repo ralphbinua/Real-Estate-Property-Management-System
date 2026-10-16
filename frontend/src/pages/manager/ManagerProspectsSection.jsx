@@ -1,6 +1,6 @@
 import { Button, Form } from 'react-bootstrap';
-import Table from '../../components/ResponsiveTable.jsx';
-import CollectionPagination from '../../components/CollectionPagination';
+import Table from '../../components/ui/ResponsiveTable.jsx';
+import CollectionPagination from '../../components/ui/CollectionPagination';
 
 const STATUS_CLASS = {
   available: 'pm-pill-available',

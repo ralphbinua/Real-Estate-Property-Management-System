@@ -22,6 +22,34 @@ export const ROLE_WORKSPACES = {
   Tenant: { key: 'tenant', path: '/tenant', label: 'Tenant' },
 };
 
+export const MOBILE_PRIMARY_SECTIONS = {
+  admin: ['overview', 'properties', 'contracts', 'maintenance'],
+  manager: ['overview', 'properties', 'contracts', 'maintenance'],
+  agent: ['overview', 'listings', 'inquiries', 'applications'],
+  owner: ['overview', 'portfolio', 'approvals', 'maintenance'],
+  tenant: ['overview', 'payments', 'lease', 'maintenance'],
+};
+
+export const MOBILE_TAB_LABELS = {
+  admin: { contracts: 'Leases' },
+  manager: { contracts: 'Leases' },
+  agent: { listings: 'Listings' },
+  owner: { portfolio: 'Portfolio', approvals: 'Approvals' },
+  tenant: { payments: 'Payments', lease: 'Lease' },
+};
+
+export const MOBILE_SEARCH_SECTIONS = {
+  admin: 'properties',
+  manager: 'properties',
+  agent: 'listings',
+};
+
+export const MOBILE_MORE_GROUPS = {
+  admin: [['Manage', 'users', 'billing'], ['Insights', 'reports', 'activity'], ['Settings', 'settings']],
+  manager: [['Leasing', 'inquiries', 'applications', 'pricing'], ['Insights', 'reports', 'billing']],
+  owner: [['Leasing', 'contracts', 'pricing'], ['Records', 'history', 'billing']],
+};
+
 export function isWorkspaceSection(role, section) {
   return Boolean(WORKSPACE_NAVIGATION[role]?.some(([key]) => key === section));
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PAGE_SIZE, normalizePage } from '../services/pagination';
+import { PAGE_SIZE, normalizePage } from '../services/core/pagination';
 
 export default function usePaginatedCollection(fetchPage, filters = {}) {
   const filtersKey = JSON.stringify(filters || {});

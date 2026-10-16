@@ -1,7 +1,7 @@
 import { Col, Row } from 'react-bootstrap';
-import Table from '../../components/ResponsiveTable.jsx';
-import CollectionPagination from '../../components/CollectionPagination';
-import PaymentAcknowledgmentButton from '../../components/PaymentAcknowledgmentButton';
+import Table from '../../components/ui/ResponsiveTable.jsx';
+import CollectionPagination from '../../components/ui/CollectionPagination';
+import PaymentAcknowledgmentButton from '../../components/billing/PaymentAcknowledgmentButton';
 import OwnerStatusPill from './OwnerStatusPill.jsx';
 
 export default function OwnerBillingSection({

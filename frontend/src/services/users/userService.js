@@ -1,0 +1,30 @@
+import api from '../core/api';
+import { fetchPage } from '../core/pagination';
+
+export const fetchUsersPage = (params) => fetchPage('/users/', params);
+export const fetchSystemActivityPage = (params) => fetchPage('/users/activity/', params);
+
+export const fetchUsers = async () => {
+  const response = await api.get('/users/');
+  return response.data;
+};
+
+export const fetchAssignableTenants = async () => {
+  const response = await api.get('/users/tenants/');
+  return response.data;
+};
+
+export const createUserByAdmin = async (userData) => {
+  const response = await api.post('/users/', userData);
+  return response.data;
+};
+
+export const updateUser = async (userId, userData) => {
+  const response = await api.patch(`/users/${userId}/`, userData);
+  return response.data;
+};
+
+export const deleteUser = async (userId) => {
+  const response = await api.delete(`/users/${userId}/`);
+  return response.data;
+};
