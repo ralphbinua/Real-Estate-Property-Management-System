@@ -19,3 +19,4 @@ DATABASES = {
 }
 
 CSRF_TRUSTED_ORIGINS = [*CSRF_TRUSTED_ORIGINS, 'http://127.0.0.1:15173']  # noqa: F405
+CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}

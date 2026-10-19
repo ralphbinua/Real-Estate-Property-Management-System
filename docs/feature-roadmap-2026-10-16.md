@@ -1,108 +1,126 @@
 # Real Estate Management Feature Roadmap
 
-**Sources:** [System guide](https://docs.google.com/document/d/1yDqmKlsxEOQnLDDy0pO3GjFLjLmH08sUNASpuYDchoU/edit) and [feature matrix / Delivery Plan](https://docs.google.com/spreadsheets/d/1-EG-5CiSopA7r_Z-xSXFlAcomM8ag0sievccWr1SH5U/edit), reviewed 2026-10-16.
+**Updated:** 2026-10-19. This revision replaces the original future-work baseline with the current code baseline, local acceptance evidence, and release priorities.
 
-**Goal:** Complete the operational workflows identified in the project documents while preserving role and property boundaries. Ship each phase independently. This is a delivery roadmap; each phase gets its own implementation spec and task plan before coding.
+**Sources:** [System guide](https://docs.google.com/document/d/1yDqmKlsxEOQnLDDy0pO3GjFLjLmH08sUNASpuYDchoU/edit), [feature matrix and Delivery Plan](https://docs.google.com/spreadsheets/d/1-EG-5CiSopA7r_Z-xSXFlAcomM8ag0sievccWr1SH5U/edit), and the repository review on 2026-10-17.
+
+**Goal:** Verify the existing property management workflows for a controlled release, preserve role and property boundaries, and then select one useful product improvement.
+
+**Detailed task plan:** [Release readiness implementation plan](release-readiness-plan-2026-10-17.md).
+
+## Status definitions
+
+- **Implemented in code:** Models, APIs, or UI exist; this does not imply staging acceptance or production deployment.
+- **Locally verified:** A named check passed in a local environment, with a recorded date.
+- **Staging accepted:** Representative allowed and forbidden workflows passed against a non-production deployment.
+- **Production verified:** Migrations, configuration, and actual deployed behavior have supporting evidence.
+- **Proposed:** Future work requiring a bounded scope and acceptance criteria.
 
 ## Current baseline
 
-- Django API and React/Vite frontend support five roles: Admin, Owner, Manager, Agent, and Tenant.
-- Monthly invoice generation already exists in `backend/billing/services.py` and `backend/billing/management/commands/generate_monthly_invoices.py`. It is callable manually, but no deployment scheduler or run health view exists.
-- Maintenance requests already support Tenant submission, Admin or assigned Manager assignment, status updates, and in-app notifications. Vendor, cost, estimate, approval, and per-change history are absent.
-- Leases support pending, active, terminated, and expired records, with authority checks for activation and termination. Renewals, expiry reminders, notices, move-out, settlement, and turnover are absent.
-- The documents list operating expenses, Owner statements, inspections, and CSV export as future work. The feature matrix predates maintenance assignment; update it after reconciling the live workflow.
+The Django API and React/Vite frontend support Admin, Owner, Property Manager, Agent, and Tenant roles. The following capabilities are implemented in code; staging and production acceptance remain unverified by this review.
+
+| Area | Existing capability | Remaining release work |
+| --- | --- | --- |
+| Property and access management | Properties/units; Owner onboarding; Admin-recorded staff assignments; role/property scope; separate Manager authorities | Five-role staging acceptance and documentation reconciliation |
+| Prospects and applications | Inquiries, viewings, activity history, follow-up queues; application decision-rule snapshots; rent-change proposals | Verify migration state, scoped queues, decision authority, and application-to-lease journey |
+| Monthly billing | Invoice generation, BillingRun persistence, staff run history, failure records and Admin in-app alerts; manual command and scheduled endpoint | Verify deployed cron, migrations, recovery, PostgreSQL concurrency, and detection of missing scheduled invocations |
+| Payments | Submitted/direct payment records, verification/rejection/reversal, split payments, balances, verified-payment acknowledgment PDFs | Reconcile financial scenarios and test access/download scope |
+| Lease renewals and reminders | Owner/Manager renewal proposals, Owner decisions, successor preparation after the original term ends; deduplicated 60/30/7-day in-app reminders | Accept the full lifecycle, boundary dates, activation rules, and deployed reminder execution |
+| Maintenance | Tenant requests; staff assignment; urgency; vendor details; estimates/actual costs; per-job Owner approval and history | Validate approval gates, rejected-estimate revision, private fields, and manual expense handoff |
+| Expenses and Owner statements | Staff expense entry; Owner approval/rejection/reversal; calendar-month verified receipts minus approved expenses | Reconcile amounts, dates, reversals, scope, and duplicate-entry risks |
+| Inspections and turnover | Versioned move-in/move-out inspections, evidence references, Tenant acknowledgement, Owner deposit decisions, turnover completion | Verify deposit limits and availability gates through the full move-out flow |
+| Exports and notifications | Scoped invoice/payment/lease/maintenance CSV exports capped at 10,000 rows; role-targeted in-app notifications | Validate filters, safe CSV values, recipient scope, and mobile navigation |
+
+`vercel.json` configures monthly billing and daily lease reminders. Repository configuration alone does not establish that either job runs in production. Database migration state was not inspected.
+
+## Known documentation and operational gaps
+
+- Reconciled on 2026-10-17: ordinary application-based lease preparation is limited to Admins and assigned Managers. Owner renewal-successor preparation is a separate action. The Sheet also now reflects Tenant access to all four scoped exports and lease-controlled occupancy assignment.
+- Application settings use UTC; confirm the intended business timezone and scheduler timing. The Google Sheet's Singapore timezone does not configure the application.
+- Billing failures create records and in-app alerts, but an independent detector for a scheduler that never invokes the app was not found in the reviewed code. Reminder operational run history is also less complete than billing history.
+- A new quality workflow runs backend checks/tests, frontend lint/build, and existing browser checks alongside the dependency audit. Its actual GitHub execution remains unverified until pushed and run.
+- Browser smoke checks include role layouts and a Tenant/Admin maintenance scenario. They do not prove the full application, lease, renewal, settlement, and statement journey.
+- README database SSL guidance now matches DB_SSLMODE configuration. Installed Django metadata permits Python 3.12; the Node 22 minimum is 22.13 because of ESLint. The local baseline uses Python 3.12 and Node 22.14.
 
 ## Delivery order
 
 | Phase | Deliverable | Priority | Depends on |
 | --- | --- | --- | --- |
-| 0 | Role and authority verification baseline | P1 | Test accounts and non-production environment |
-| 1 | Scheduled monthly billing with run health | P1 | Hosting scheduler choice |
-| 2 | Lease expiry reminders and renewal decision | P2 | Renewal policy, notice timing, authorization rules |
-| 3 | Maintenance work orders and approvals | P2 | Vendor data and approval thresholds |
-| 4 | Scoped CSV exports | P3 | Export fields and privacy rules |
-| 5 | Property expenses and Owner statements | P3 | Categories and statement format |
-| 6 | Inspections, move-out, deposit settlement, turnover | P3 | Condition checklist and settlement policy; coordinate with Phase 2 |
+| 0 | Reconcile documentation and delivery states — locally complete | P1 | Current role/API review |
+| 1 | Reproducible local checks and quality CI — partially verified | P1 | Compatible Python/Node runtimes and installed dependencies |
+| 2 | Role permissions and rental journey — local API and browser journey verified; staging pending | P1 | Passing baseline and isolated test accounts/data |
+| 3 | Verified migrations, deployment, and scheduled operations | P1 | Staging access, configuration, backup/recovery procedure |
+| 4 | Lifecycle and financial reconciliation acceptance | P2 | Staged leases, invoices, and verified authority rules |
+| 5 | One selected product improvement | P3 | Release gates and pilot feedback |
 
-Phases 0 and 1 can run together. Phases 2 and 3 can be planned separately. Phase 5 should precede any statement that claims net income. Phase 6 uses the lease-end events established in Phase 2.
+Phases 2 and 3 can progress independently after the baseline is established. All release gates must pass before claiming production readiness.
 
-## Phase 0 — Verify roles and authority
+## Phase 0 — Reconcile documentation
 
-1. Create non-production fixtures with two properties, distinct Owners, Managers, Agents, and Tenants, plus an Admin. Include one delegated and one Owner-decided application.
-2. Exercise property scoping, application decisions, rent-change proposals, lease activation and termination, billing, maintenance assignment, and record views across every role.
-3. Verify unauthorized API requests fail even if the UI hides the action. Verify written Owner instruction and reference are recorded where an Admin acts for an Owner.
-4. Record any discovered defects as separate fixes before extending the affected workflow.
+Update the guide, matrix, README, and delivery tracker to distinguish existing code from verified deployment. Correct ordinary lease-preparation wording and operational setup instructions. Keep Owner decisions distinct from Admin access, and preserve separate pricing, activation, and termination authorities.
 
-**Acceptance:** Each allowed action succeeds; cross-property and forbidden-role actions fail; no unauthorized record appears in lists, detail views, exports, or notifications. Keep these as automated backend tests plus a focused browser pass on desktop and mobile.
+**Acceptance:** Role descriptions agree with API actions; each delivery status includes its evidence, environment, and date. Policy ambiguities are recorded rather than resolved by silently broadening permissions.
 
-## Phase 1 — Automatic monthly billing
+## Phase 1 — Establish the automated baseline
 
-**Backend:** Add a `BillingRun` record with month, start/end time, status, created count, error summary, and trigger (`scheduled` or `manual`). Make the existing command create/update this record around `generate_monthly_invoices`; retain the current per-lease duplicate protection. Add a narrowly scoped Admin/Manager run-history API. Ensure a concurrent or retried invocation is represented clearly without creating duplicate invoices.
+Create an isolated backend environment compatible with the pinned requirements. Run Django system checks, migration drift checks, and the full backend suite. Run frontend lint/build and existing browser checks. Add quality CI alongside dependency audits. Fix reproducible failures in focused changes with regression coverage.
 
-**Operations:** Configure one hosting scheduler to call `python manage.py generate_monthly_invoices --month YYYY-MM` shortly after the first day begins in the billing timezone. Capture exit status and stderr in deployment logs. Alert an operator on failure or a missing monthly success; avoid assuming that a zero-invoice run is automatically a failure. Document recovery with the explicit `--month` command.
+**Acceptance:** A clean checkout can reproduce the documented checks, and CI enforces them. PostgreSQL locking/concurrency checks supplement the SQLite test baseline.
 
-**Frontend:** Show last run, month, outcome, created count, and a retry action in the existing billing management view. Keep the manual run action. Show errors only to permitted staff.
+## Phase 2 — Verify five roles and the rental journey
 
-**Tests:** Repeat run for the same month; concurrent runs; active versus pending/ended leases; due day and lease boundaries; skipped deleted properties; failure mid-run; Tenant/Owner invoice scope; scheduler retry. Confirm only one invoice per eligible lease and month.
+Use Admin plus two distinct sets of Owners, Managers, Agents, and Tenants, with assigned/unrelated properties, unitless properties, and both application decision rules. Exercise registration → assignment → inquiry/viewing → application → authorized decision → Admin-created matching Tenant account → lease preparation → authorized activation.
 
-**Acceptance:** A successful scheduled run is visible, a failed or missing run alerts an operator, and reruns do not duplicate invoices. Owners and Tenants see only their scoped invoices.
+Test forbidden actions directly through the API, including unrelated record IDs. Verify lists, details, mutations, exports, and notifications. Test rule snapshots, applicant email mismatch, and revoked Manager authority. Add representative desktop/mobile browser coverage.
 
-## Phase 2 — Lease lifecycle
+**Acceptance:** Allowed actions succeed; forbidden actions fail without leaking unrelated records; required Owner instructions and references are retained.
 
-**First release:** Add configurable reminder milestones (proposed defaults: 60, 30, and 7 days before end), idempotent in-app notifications, a renewal decision record, and a dated timeline. Keep signatures external and record the signed-copy reference. A renewal creates a new pending lease term instead of silently extending the active agreement. Activation uses the existing Owner/Manager/Admin authority rules; no automatic renewal.
+**Progress (2026-10-19, local only):** Six focused Django API tests passed across the two rental lifecycle paths and role/data isolation between two separate property portfolios. A synthetic browser journey also passed from Agent viewing/application through Manager review, Owner decision, Admin-created matching Tenant, pending lease preparation, Owner activation, and the Tenant's active lease view at 320px. Agents had no decision controls, and Managers could not make an Owner-reserved decision. See [local acceptance record](acceptance/2026-10-17-local-baseline.md). Staging acceptance and the saved-rule/revoked-authority edge cases remain open.
 
-**Second release:** Record notice, move-out date, and reason; close the lease with a dated event. Unit availability must follow the existing reservation and active-lease rules. Deposit settlement and final turnover belong in Phase 6.
+## Phase 3 — Verify deployment and scheduled operations
 
-**Views:** Owner and Manager see leases needing action; Tenant sees their own end date, reminder, and decision status; Admin sees authorized system-wide records. Agent has no lease financial access.
+Inventory all migrations with showmigrations and migrate --plan; do not assume only the migration named in the Sheet is pending. Back up staging, apply migrations, verify data preservation, and rehearse restore/recovery. Verify production configuration without exposing secret values, including database SSL, Redis, hosts/origins, secure sessions/CSRF, and CRON_SECRET.
 
-**Tests:** Reminder deduplication, timezone/date boundaries, renewal refusal, overlapping terms, role authority, signed-copy reference, and correct unit status after termination/expiry.
+Confirm business timezone and actual deployed cron logs. Test authenticated endpoints, repeated/concurrent billing, failed-run recording, explicit-month recovery, reminder deduplication, and correct recipients. Add independent monitoring for missing scheduled executions with an operator and recovery action. Run Django deployment checks with target configuration.
 
-**Acceptance:** Each approaching lease appears once per reminder milestone, the right people receive notices, and every renewal or ending has actor/date/authority history.
+**Acceptance:** Migration and deployment evidence exists; eligible leases receive one invoice per month; retries are safe; failures and absent invocations are detectable; deployed reminder execution is evidenced.
 
-**Decisions before implementation:** Notice periods, who may initiate a renewal, whether rent changes use the existing proposal flow, and whether the Tenant may accept or only acknowledge an externally signed renewal.
+## Phase 4 — Validate lifecycle and money reconciliation
 
-## Phase 3 — Maintenance work orders
+Verify renewal proposals and Owner decisions, preparation after expiry, signed-copy references, and successor activation under current authority rules. Test declined renewal behavior and record whether a replacement-proposal flow is needed before designing one.
 
-**Data:** Extend a request with urgency, a separate assignment to a vendor/contact, estimate, approved amount, actual cost, and immutable activity entries. Keep staff assignment distinct from vendor assignment. Record who changed status, costs, or approval and when.
+Exercise maintenance estimate approval/rejection and revision, actual costs, private-field visibility, and separate expense entry. Reconcile split payments, rejected/reversed payments, expense reversals, late fees, and calendar-month statement totals. Verify payment acknowledgment access.
 
-**Workflow:** Tenant submits and tracks the issue. Admin or assigned Manager triages, assigns staff/vendor, enters estimate, requests approval if required, records work and actual cost, then resolves. Owner sees owned-property work and any approval decision assigned to them. Urgent requests remain prominent and follow the property's emergency procedure outside the app.
+Complete move-out, versioned inspection, Tenant acknowledgement, Owner deposit decision, unresolved-maintenance blocking, and turnover. Check both units and unitless properties.
 
-**Views:** A detail page or panel for staff with status timeline, vendor, estimate, approval, and cost; a simplified Tenant view showing progress without private vendor/financial fields; Owner approval queue. Notify the Tenant of meaningful status changes and the assigned decision-maker of pending approval.
+**Acceptance:** Historical records remain intact; deposit deductions stay within the deposit; statements reconcile to source rows; the home stays unavailable until required turnover gates pass. Representative browser journeys pass on staging.
 
-**Tests:** Cross-property access, Tenant visibility limits, status history order, rejected/approved estimates, cost changes after approval, and notification recipients.
+## Phase 5 — Choose the next improvement
 
-**Acceptance:** Permitted roles can see assignment, approval, costs, and a dated history without losing the existing Tenant-to-staff status flow.
+Select one item after pilot feedback; write its own implementation spec and acceptance criteria before coding.
 
-**Decisions before implementation:** Vendor record fields, approval threshold and approver, emergency override procedure, whether estimates/costs feed the expense ledger, and any receipt attachment policy.
+| Candidate | Purpose | Decisions needed |
+| --- | --- | --- |
+| Additional scoped CSV exports | Extend reporting to expenses, applications, or prospects | Resources, columns, roles, filters, caps |
+| Maintenance-to-expense assistance | Reduce duplicate entry while preserving Owner approval | Linked draft creation and duplicate prevention |
+| Private document uploads | Store lease, receipt, and inspection evidence | Provider, access, retention, file limits |
+| Email reminders | Reach users outside the in-app inbox | Provider, preferences, delivery/retry policy |
+| Formal notice tracking | Extend lease lifecycle records | Approved notice policy, dates, responsible roles |
+| Online payments or electronic signing | Reduce external manual steps | Provider, callbacks, reconciliation, authority and recovery |
 
-## Phase 4 — Scoped CSV exports
+**Recommendation:** Start with expense CSV exports if reporting is the main pilot need, or linked expense drafts if repeated maintenance entry is the main problem. A configurable report builder, bulk changes, chat, uploads, online payments, and electronic signing remain future scope.
 
-Start with separate exports for invoices, payments, leases, and maintenance. Apply the same queryset and role filters as the corresponding list APIs before serializing. Use explicit columns, stable date and decimal formats, UTF-8, and a clear filename including dataset and date. Exclude credentials and private notes. Add one download action on each applicable list page.
+## Release gate and current evidence
 
-**Tests/acceptance:** Export row IDs exactly match what the role may list for the same filters; cross-property data never leaks; empty exports include headers; large exports stream or use bounded pagination. Defer bulk changes until exports have shipped and their permissions are verified.
+For each affected workflow, require automated checks, direct API permission checks, desktop/mobile staging acceptance, migration verification, and recovery documentation. Record production evidence separately. Update the delivery tracker only after the corresponding checks pass.
 
-**Decisions:** Required columns, whether archived records appear, maximum period/row limits, and whether Tenant exports are in scope.
+Review evidence through 2026-10-19:
 
-## Phase 5 — Expenses and Owner statements
+- Frontend lint passed.
+- Frontend production build passed.
+- Django system checks and migration drift checks passed locally; two test-isolation regressions passed. The full backend suite passed: 108 tests ran, 104 passed and 4 were skipped. The focused role and rental lifecycle suite passed 6 tests.
+- Frontend lint/build passed. Browser security/UI checks passed, including role layouts and Tenant/Admin maintenance. The synthetic browser rental journey passed across all five roles at mobile width; renewal/move-out browser acceptance remains open.
+- Staging acceptance, database migration application, deployment inspection, and production cron execution were not performed.
 
-Add property-level expense entries with category, amount, incurred date, payee/reference, approval state, and audit history. Only verified rent receipts count as collected income. Generate a period statement for one property that shows opening balance (if tracked), verified receipts, approved expenses, and closing/net figure, with links to source records. Owner can view only owned-property statements; Manager only assigned properties; Admin system-wide within authority.
-
-**Tests/acceptance:** Statement totals reconcile to ledger rows for the same property and period; unverified/reversed payments and unapproved expenses do not inflate totals; cross-property access fails; corrections retain history. Do not call the statement a cash payout record unless payouts are actually tracked.
-
-**Decisions:** Expense categories, tax treatment, approval rights, statement period, opening balance policy, and whether maintenance costs create expense entries automatically.
-
-## Phase 6 — Inspections and turnover
-
-Introduce move-in/move-out inspection records with a versioned condition checklist, dated findings, photos or external references, and participant acknowledgment. Link move-out inspection to lease ending. Record deposit deductions and return amount with reasons and supporting references; keep the settlement separate from rent payments. Complete turnover only after the inspection and required work are recorded, then update unit availability through the existing unit-state rules.
-
-**Tests/acceptance:** Owner/Manager/Tenant see only permitted records; old inspection versions stay intact; deductions cannot exceed deposit without a separately recorded claim; no unit is advertised available while an active lease or unresolved reservation still holds it.
-
-**Decisions:** Checklist items, photo storage versus links, acknowledgment meaning, deposit timeline and allowed deductions, and whether a Tenant can contest findings.
-
-## Cross-phase release gate
-
-For each phase: implement API permission checks first; add focused model/service tests and role tests; run Django checks and targeted tests, then the full backend suite; run frontend lint/build and a mobile/desktop browser pass for changed screens; apply migrations on a non-production copy; verify data backfill and rollback; update the README, Google feature matrix, and delivery state after release. Do not mark a phase complete from a passing UI alone.
-
-## Suggested first implementation slice
-
-Build Phase 1 in three reviewable changes: (1) billing-run persistence and command logging, (2) scheduler and failure alert integration for the actual hosting environment, (3) staff run-history UI and recovery documentation. Phase 0 role tests should land before or with the first change.
+The next actionable slices are to verify saved application-rule snapshots and revoked authority, then repeat the rental journey on staging when access is available. Do not claim staging or production readiness from the local results.

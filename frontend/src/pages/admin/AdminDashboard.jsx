@@ -15,6 +15,7 @@ import AdminActivityLog from '../../components/admin/AdminActivityLog';
 import AdminSystemSettings from '../../components/admin/AdminSystemSettings';
 import { fetchSystemSettings } from '../../services/users/systemSettingsService';
 import { addMonthsToDate } from '../../utils/dateUtils';
+import { getPortfolioUnitSummary, getPropertyUnitSummary, propertyMatchesStatus } from '../../utils/propertyAvailability';
 import { createUnit, deleteUnit, updateUnit } from '../../services/properties/unitService';
 import CollectionPagination from '../../components/ui/CollectionPagination';
 import ExportCsvButton from '../../components/ui/ExportCsvButton';
@@ -265,7 +266,7 @@ export default function AdminDashboard() {
 
   const handleUnitSave = async (e) => {
     e.preventDefault();
-    const payload = { property: Number(unitData.property), unitNumber: unitData.unitNumber, monthlyRate: Number(unitData.monthlyRate), status: unitData.status };
+    const payload = { property: Number(unitData.property), unitNumber: unitData.unitNumber, monthlyRate: Number(unitData.monthlyRate) };
     try {
       if (unitData.id) await updateUnit(unitData.id, payload);
       else await createUnit(payload);
@@ -273,7 +274,20 @@ export default function AdminDashboard() {
       setSuccess(unitData.id ? 'Unit updated.' : 'Unit added.');
       await loadData();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Failed to save unit.');
+      setError(err.response?.data?.detail || err.response?.data?.status?.[0] || 'Failed to save unit.');
+    }
+  };
+
+  const handleUnitStatusChange = async (status) => {
+    if (!unitData.id) return;
+    setError('');
+    try {
+      await updateUnit(unitData.id, { status });
+      setUnitData((current) => ({ ...current, status }));
+      setSuccess(status === 'Maintenance' ? 'Unit marked for maintenance.' : 'Unit returned to available inventory.');
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.detail || err.response?.data?.status?.[0] || 'Unable to update unit availability.');
     }
   };
 
@@ -426,31 +440,21 @@ export default function AdminDashboard() {
       const matchesSearch =
         prop.title?.toLowerCase().includes(q) || prop.address?.toLowerCase().includes(q);
       const matchesType = filterType ? prop.propertyType === filterType : true;
-      const matchesStatus = filterStatus ? prop.status?.toLowerCase() === filterStatus.toLowerCase() : true;
+      const matchesStatus = propertyMatchesStatus(prop, filterStatus);
       return matchesSearch && matchesType && matchesStatus;
     });
   }, [properties, search, filterType, filterStatus]);
 
   const metrics = useMemo(() => {
-    let totalOccupiedUnits = 0;
-    let totalUnits = 0;
-
-    properties.forEach((p) => {
-      if (Array.isArray(p.units) && p.units.length > 0) {
-        totalUnits += p.units.length;
-        totalOccupiedUnits += p.units.filter((u) => u.status === 'Occupied').length;
-      } else {
-        totalUnits += 1;
-        if (['occupied', 'rented'].includes(p.status?.toLowerCase())) totalOccupiedUnits += 1;
-      }
-    });
+    const unitSummary = getPortfolioUnitSummary(properties);
 
     return {
       totalProperties: properties.length,
-      occupiedCount: totalOccupiedUnits,
-      totalUnits,
-      vacantUnits: Math.max(0, totalUnits - totalOccupiedUnits),
-      occupancyRate: totalUnits ? Math.round((totalOccupiedUnits / totalUnits) * 100) : 0,
+      ...unitSummary,
+      totalUnits: unitSummary.total,
+      occupiedCount: unitSummary.occupied,
+      vacantUnits: unitSummary.available,
+      occupancyRate: unitSummary.total ? Math.round((unitSummary.occupied / unitSummary.total) * 100) : 0,
       activeContracts: Number(financialSummary?.activeLeasesCount || 0),
       totalRevenue: Number(financialSummary?.activeLeasesRent || 0),
       pendingInvoices: Number(financialSummary?.pendingInvoices || 0),
@@ -524,8 +528,16 @@ export default function AdminDashboard() {
                 <span className="pm-metric-value">{metrics.totalProperties}</span>
               </div>
               <div className="pm-metric">
+                <span className="pm-metric-label">Available units</span>
+                <span className="pm-metric-value">{metrics.available}</span>
+              </div>
+              <div className="pm-metric">
                 <span className="pm-metric-label">Occupied units</span>
-                <span className="pm-metric-value">{metrics.occupiedCount}</span>
+                <span className="pm-metric-value">{metrics.occupied}</span>
+              </div>
+              <div className="pm-metric">
+                <span className="pm-metric-label">Reserved / maintenance</span>
+                <span className="pm-metric-value">{metrics.reserved} / {metrics.maintenance}</span>
               </div>
               <div className="pm-metric">
                 <span className="pm-metric-label">Active contracts</span>
@@ -548,9 +560,9 @@ export default function AdminDashboard() {
                   <small>{metrics.occupiedCount} of {metrics.totalUnits} units occupied</small>
                 </div>
                 <div className="pm-admin-summary-item">
-                  <span>Vacant units</span>
+                  <span>Available units</span>
                   <strong>{metrics.vacantUnits}</strong>
-                  <small>Across {metrics.totalProperties} properties</small>
+                  <small>{metrics.reserved} reserved · {metrics.maintenance} in maintenance</small>
                 </div>
                 <div className="pm-admin-summary-item">
                   <span>Active accounts</span>
@@ -627,8 +639,7 @@ export default function AdminDashboard() {
                   {filteredProperties.length > 0 ? (
                     filteredProperties.map((prop) => {
                       const propId = prop._id || prop.id;
-                      const totalUnits = prop.totalUnits || prop.units?.length || 1;
-                      const occupiedCount = prop.occupiedUnits || (prop.units ? prop.units.filter((u) => u.status === 'Occupied').length : 0);
+                      const unitSummary = getPropertyUnitSummary(prop);
                       const rateDisplay = prop.monthlyRate !== undefined ? prop.monthlyRate : prop.price || 0;
 
                       return (
@@ -641,7 +652,8 @@ export default function AdminDashboard() {
                             {prop.units?.length > 0 && <span className="pm-property-rate-note">per month and up</span>}
                           </td>
                           <td>
-                            <StatusPill status={occupiedCount > 0 ? `${occupiedCount}/${totalUnits} Occupied` : prop.status || 'Available'} />
+                            <StatusPill status={unitSummary.availabilityLabel} />
+                            <small className="d-block text-muted mt-1">{unitSummary.available} available · {unitSummary.reserved} reserved · {unitSummary.occupied} occupied · {unitSummary.maintenance} maintenance</small>
                           </td>
                           <td className="text-center">
                             <div className="pm-property-actions">
@@ -973,7 +985,12 @@ export default function AdminDashboard() {
             <Modal.Body>
               <Form.Group className="mb-3"><Form.Label>Unit number</Form.Label><Form.Control value={unitData.unitNumber} onChange={(e) => setUnitData({ ...unitData, unitNumber: e.target.value })} required /></Form.Group>
               <Form.Group className="mb-3"><Form.Label>Monthly rent (₱)</Form.Label><Form.Control type="number" min="0" step="0.01" value={unitData.monthlyRate} onChange={(e) => setUnitData({ ...unitData, monthlyRate: e.target.value })} required /></Form.Group>
-              <Form.Group><Form.Label>Status</Form.Label><Form.Select value={unitData.status} onChange={(e) => setUnitData({ ...unitData, status: e.target.value })}>{['Available', 'Occupied', 'Maintenance', 'Reserved'].map((status) => <option key={status}>{status}</option>)}</Form.Select></Form.Group>
+              {unitData.id && <div className="border rounded p-3">
+                <div className="mb-2"><strong>Current status:</strong> <StatusPill status={unitData.status} /></div>
+                {unitData.status === 'Available' && <Button type="button" variant="outline-warning" onClick={() => handleUnitStatusChange('Maintenance')}>Mark for maintenance</Button>}
+                {unitData.status === 'Maintenance' && <Button type="button" variant="outline-success" onClick={() => handleUnitStatusChange('Available')}>Return to available</Button>}
+                {['Occupied', 'Reserved'].includes(unitData.status) && <small className="text-muted">{unitData.status} status follows the lease and rental application workflow.</small>}
+              </div>}
             </Modal.Body>
             <Modal.Footer className="justify-content-between">
               {unitData.id && <Button variant="outline-danger" onClick={handleUnitDelete}>Remove unit</Button>}

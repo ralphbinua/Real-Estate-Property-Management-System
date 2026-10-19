@@ -10,7 +10,6 @@ export default function PropertyForm({ onPropertyCreated }) {
     address: '',
     price: '',
     propertyType: 'Apartment',
-    status: 'Available',
     applicationApprovalMode: 'Owner',
     instructionNote: '',
     instructionReference: '',
@@ -53,7 +52,6 @@ export default function PropertyForm({ onPropertyCreated }) {
       address: formData.address,
       price: Number(formData.price || (['Apartment', 'Condo'].includes(formData.propertyType) ? formData.units[0]?.monthlyRate : 0) || 0),
       propertyType: formData.propertyType,
-      status: formData.status,
       applicationApprovalMode: formData.applicationApprovalMode,
       assignedAgents: formData.assignedAgents,
     };
@@ -175,20 +173,7 @@ export default function PropertyForm({ onPropertyCreated }) {
       </Row>
 
       <Row className="mb-3">
-        <Col md={4}>
-          <Form.Group controlId="property-status">
-            <Form.Label className="fw-bold text-secondary">Status</Form.Label>
-            <Form.Select 
-              value={formData.status} 
-              onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-            >
-              <option value="Available">Available</option>
-              <option value="Occupied">Occupied</option>
-              <option value="Under Maintenance">Under Maintenance</option>
-            </Form.Select>
-          </Form.Group>
-        </Col>
-        <Col md={4}>
+        <Col md={6}>
           <Form.Group controlId="property-owner">
             <Form.Label className="fw-bold text-secondary">Assign Property Owner</Form.Label>
             <Form.Select 
@@ -205,7 +190,7 @@ export default function PropertyForm({ onPropertyCreated }) {
             </Form.Select>
           </Form.Group>
         </Col>
-        <Col md={4}>
+        <Col md={6}>
           <Form.Group controlId="property-manager">
             <Form.Label className="fw-bold text-secondary">Assign Property Manager</Form.Label>
             <Form.Select 

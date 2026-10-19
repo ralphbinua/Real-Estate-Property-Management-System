@@ -94,7 +94,12 @@ class UnitManagementSerializer(serializers.ModelSerializer):
                 else None
             )
             if requested_status != expected:
-                raise serializers.ValidationError({'status': 'Units become occupied or reserved through a lease contract.'})
+                message = (
+                    'Occupied status follows an active lease or recorded move-in.'
+                    if requested_status == 'Occupied'
+                    else 'Reserved status follows an approved application or pending lease.'
+                )
+                raise serializers.ValidationError({'status': message})
         if self.instance and self.instance.contracts.filter(status__in=['Active', 'Pending'], is_deleted=False).exists():
             expected_status = 'Occupied' if self.instance.contracts.filter(status='Active', is_deleted=False).exists() else 'Reserved'
             if property_obj and property_obj.pk != self.instance.property_id:

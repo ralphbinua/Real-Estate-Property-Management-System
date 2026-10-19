@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "test:browser": "node scripts/browser-smoke.cjs",
+    "test:rental": "node scripts/browser-smoke.cjs --rental-journey",
     "test:ui": "node scripts/browser-smoke.cjs --ui-review",
     "test:profile": "node scripts/profile-browser.cjs",
     "preview": "vite preview"

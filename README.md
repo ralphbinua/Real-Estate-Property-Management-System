@@ -46,9 +46,9 @@ Access and decision authority should follow the written management agreement and
 
 ### Requirements
 
-- Python and pip
+- Python **3.12** and pip (the baseline runtime used for verification)
 - PostgreSQL, either local or hosted
-- Node.js **20.19+** or **22.12+**, with npm
+- Node.js **20.19+** (20.x), **22.13+** (22.x), or **24+**, with npm
 
 ### 1. Configure and start the backend
 
@@ -73,9 +73,10 @@ DB_USER=postgres
 DB_PASSWORD=your-database-password
 DB_HOST=127.0.0.1
 DB_PORT=5432
+DB_SSLMODE=require
 ```
 
-For a hosted Supabase database, use the connection details supplied by Supabase for `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_PORT`. The backend enables SSL when the database host contains `supabase`.
+For a hosted Supabase database, use the connection details supplied by Supabase for `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_PORT`. Database TLS is controlled by `DB_SSLMODE`, defaulting to `require` when debug is disabled and `prefer` in debug mode; it does not depend on the hostname. The loopback-only `core.local_settings` overrides this to `prefer` for local PostgreSQL. Use `--settings=core.local_settings` on local migration and account-setup commands if your local database does not support TLS.
 
 Run the database setup and start Django:
 
@@ -100,7 +101,7 @@ Open a second PowerShell window from the project folder:
 
 ```powershell
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -115,6 +116,39 @@ npm run test:browser
 ```
 
 The test starts its own servers on ports `18000` and `15173`, creates a temporary SQLite database and Tenant account, then checks sign-in, session restore after refresh, profile editing, and logout. It cleans up its test data and servers afterward. It leaves `DJANGO_DEBUG` disabled and does not use your PostgreSQL database. On Windows it uses installed Brave or Edge; if neither is installed, run `npx playwright install chromium` once. Set `PYTHON_EXECUTABLE` to your virtual environment's Python path if `python` does not point to it.
+
+### Automated quality baseline
+
+With the backend virtual environment activated, run from `backend`:
+
+```powershell
+python manage.py check --settings=core.test_settings
+python manage.py makemigrations --check --dry-run --settings=core.test_settings
+python manage.py test --settings=core.test_settings --noinput
+```
+
+These checks use an isolated in-memory SQLite database and a process-local cache,
+even if the environment configures Redis. Browser tests also use a process-local
+cache. They do not verify
+production migrations or PostgreSQL locking behavior. From `frontend`, run:
+
+```powershell
+npm ci
+npm run lint
+npm run build
+npm run test:browser
+npm run test:ui
+```
+
+`test:ui` includes the security smoke journey, five-role layout checks at
+1440, 768, and 320 pixels, and the Tenant/Admin maintenance scenario. It writes
+synthetic screenshots to `frontend/.ui-review/`. These checks do not establish
+complete rental-to-renewal or move-out browser acceptance.
+
+The `Quality checks` GitHub workflow uses Python 3.12 and Node 22, runs backend
+checks/tests and frontend lint/build, and runs `test:ui` with Playwright Chromium.
+The separate `Security checks` workflow audits dependencies. Local passing checks
+do not imply the GitHub workflow has run; review its result after pushing.
 
 ## Prepare a Vercel deployment
 
@@ -184,10 +218,23 @@ cost, and dated history; Tenants do not receive those private fields. Apply
 
 ## CSV exports
 
-Invoices, payments, leases, and maintenance lists provide a CSV download. Each
+Invoices, payments, leases, and maintenance lists provide a CSV download. Tenants
+can export their own records in all four areas. Each
 export uses the same role and query filters as its list API. Exports contain up
 to 10,000 rows, include headers even when empty, and omit private maintenance
 financial columns for Tenants. Spreadsheet formula-like values are escaped.
+
+## Delivery status
+
+The [feature roadmap](docs/feature-roadmap-2026-10-16.md) distinguishes implemented
+code, local verification, staging acceptance, and production verification.
+Existing features and cron entries are not evidence of a successful deployment.
+Application dates currently use UTC; confirm the business timezone before release.
+The configured billing and reminder jobs run at 00:05 UTC on the first of the
+month and 00:15 UTC daily, respectively. Billing records failures and sends Admin
+in-app alerts, but detecting a scheduler that never invokes the app requires
+independent monitoring. Verify all target database migrations, not only those
+named in individual feature sections.
 
 ## Inspections and move-out
 

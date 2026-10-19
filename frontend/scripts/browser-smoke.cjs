@@ -14,6 +14,8 @@ const python = process.env.PYTHON_EXECUTABLE || 'python';
 const email = 'browser-smoke@example.test';
 const password = crypto.randomBytes(24).toString('base64url');
 const uiReview = process.argv.includes('--ui-review');
+const rentalJourney = process.argv.includes('--rental-journey');
+const applicantEmail = 'rental-applicant@example.test';
 const reviewRoles = [
   ['Admin', 'admin'], ['Property Manager', 'manager'], ['Agent', 'agent'],
   ['Owner', 'owner'],
@@ -236,6 +238,217 @@ function seedMaintenanceFixture() {
   ]);
 }
 
+function seedRentalJourneyFixture() {
+  runPython([
+    'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
+    "import os; from django.contrib.auth import get_user_model; from properties.models import Property, Unit; U=get_user_model(); password=os.environ['BROWSER_TEST_PASSWORD']; admin=U.objects.create_user(username='rental_admin', email='rental-admin@example.test', password=password, first_name='Rental', last_name='Admin', role=U.Role.ADMIN); owner=U.objects.create_user(username='rental_owner', email='rental-owner@example.test', password=password, first_name='Rental', last_name='Owner', role=U.Role.OWNER); manager=U.objects.create_user(username='rental_manager', email='rental-manager@example.test', password=password, first_name='Rental', last_name='Manager', role=U.Role.PROPERTY_MANAGER); agent=U.objects.create_user(username='rental_agent', email='rental-agent@example.test', password=password, first_name='Rental', last_name='Agent', role=U.Role.AGENT); home=Property.objects.create(title='Acceptance Journey Home', address='1 Acceptance Test Lane', property_type='Apartment', owner=owner, manager=manager, application_approval_mode='Owner'); unit=Unit.objects.create(property=home, unit_number='A-101', monthly_rate=32000, status='Available'); home.assigned_agents.add(agent)",
+  ]);
+}
+
+function dateInputValue(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function dateTimeInputValue(date) {
+  return `${dateInputValue(date)}T${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+async function loginAs(browser, role, width) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  context.setDefaultTimeout(10000);
+  const page = await context.newPage();
+  await page.goto(frontendUrl);
+  await page.getByLabel('Email address').fill(`rental-${role}@example.test`);
+  await page.getByLabel('Password').fill(password);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.waitForURL(`**/${role === 'admin' ? 'admin' : role === 'owner' ? 'owner' : role === 'manager' ? 'manager' : role === 'agent' ? 'agent' : 'tenant'}`, { timeout: 10000 });
+  await page.locator(`.pm-${role}`).waitFor({ state: 'visible' });
+  if (width !== 1440) await page.setViewportSize({ width, height: 900 });
+  return { context, page };
+}
+
+async function selectWorkspaceSection(page, role, section, label) {
+  const width = await page.evaluate(() => window.innerWidth);
+  if (width <= 768) {
+    const tabs = page.getByRole('navigation', { name: 'Primary workspace navigation' });
+    const primaryTab = tabs.getByRole('button', { name: label, exact: true });
+    if (await primaryTab.count()) {
+      await primaryTab.click();
+    } else {
+      const moreButton = tabs.getByRole('button', { name: 'More', exact: true });
+      if (await moreButton.count()) {
+        await moreButton.click();
+        await page.locator('#app-primary-navigation .workspace-side-link').filter({ hasText: label }).click();
+      } else {
+        throw new Error(`Mobile ${role} navigation has no ${label} tab; rendered buttons: ${(await tabs.getByRole('button').allTextContents()).join(' | ')}`);
+      }
+    }
+  } else {
+    await page.locator('.workspace-frame > .workspace-sidebar .workspace-side-link').filter({ hasText: label }).click();
+  }
+  await page.locator(`.pm-${role}[data-active-section="${section}"]`).waitFor();
+}
+
+async function assertNoMobileOverflow(page, label) {
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  if (overflow > 1) throw new Error(`${label} overflows mobile viewport by ${overflow}px.`);
+}
+
+async function runRentalJourney(browser, reviewDir) {
+  const propertyTitle = 'Acceptance Journey Home';
+  const applicantName = 'Rental Journey Applicant';
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  const futureDate = dateInputValue(date);
+
+  const agentSession = await loginAs(browser, 'agent', 320);
+  const agentPage = agentSession.page;
+  await selectWorkspaceSection(agentPage, 'agent', 'listings', 'Listings');
+  await agentPage.getByRole('button', { name: 'Inspect Units (1)' }).click();
+  await agentPage.locator('.pm-agent .rounded.border').filter({ hasText: 'A-101' }).click();
+  await agentPage.screenshot({ path: path.join(reviewDir, 'rental-agent-unit-click-320.png'), fullPage: true });
+  const viewingDate = new Date();
+  viewingDate.setDate(viewingDate.getDate() + 2);
+  const viewingDialog = agentPage.locator('.pm-viewing-modal').filter({ has: agentPage.getByText('Schedule a viewing', { exact: true }) });
+  await viewingDialog.waitFor();
+  await viewingDialog.getByLabel('Prospect name').fill(applicantName);
+  await viewingDialog.getByLabel('Prospect email').fill(applicantEmail);
+  await viewingDialog.getByLabel('Viewing date and time').fill(dateTimeInputValue(viewingDate));
+  await viewingDialog.getByLabel('Notes').fill('Local browser acceptance viewing.');
+  await viewingDialog.getByRole('button', { name: 'Schedule viewing' }).click();
+  const prospectRow = agentPage.locator('tr').filter({ hasText: applicantName });
+  await prospectRow.waitFor();
+  await agentPage.waitForFunction(({ applicantName }) => {
+    const row = [...document.querySelectorAll('tr')].find((candidate) => candidate.textContent.includes(applicantName));
+    return row?.querySelector('select')?.value === 'Viewing Scheduled';
+  }, { applicantName });
+  await agentPage.screenshot({ path: path.join(reviewDir, 'rental-agent-viewing-320.png'), fullPage: true });
+  await assertNoMobileOverflow(agentPage, 'Agent prospect pipeline');
+
+  await prospectRow.getByRole('button', { name: 'Start application' }).click();
+  const applicationDialog = agentPage.locator('.pm-application-modal').filter({ has: agentPage.getByText('Rental application', { exact: true }) });
+  await applicationDialog.waitFor();
+  await applicationDialog.getByLabel('Employment / occupation').fill('Local acceptance test');
+  await applicationDialog.getByLabel('Monthly income (₱)').fill('85000');
+  await applicationDialog.getByLabel('Requested move-in date').fill(futureDate);
+  await applicationDialog.getByLabel('Application notes').fill('Synthetic browser acceptance data.');
+  await applicationDialog.getByRole('button', { name: 'Submit application' }).click();
+  await agentPage.getByText(`Rental application submitted for ${applicantName}.`).waitFor();
+  await selectWorkspaceSection(agentPage, 'agent', 'applications', 'Applications');
+  const applicationRow = agentPage.locator('tr').filter({ hasText: applicantEmail });
+  await applicationRow.getByText('Submitted', { exact: true }).waitFor();
+  if (await applicationRow.getByRole('button', { name: /approve|reject/i }).count()) {
+    throw new Error('Agent application row exposes a decision action.');
+  }
+  await agentPage.screenshot({ path: path.join(reviewDir, 'rental-agent-application-320.png'), fullPage: true });
+  await agentSession.context.close();
+  console.log('PASS: Agent viewing and application submission at 320px; no decision controls');
+
+  const managerSession = await loginAs(browser, 'manager', 1440);
+  const managerPage = managerSession.page;
+  await selectWorkspaceSection(managerPage, 'manager', 'applications', 'Applications');
+  let managerApplicationRow = managerPage.locator('tr').filter({ hasText: applicantEmail });
+  await managerApplicationRow.getByRole('button', { name: 'Begin review' }).click();
+  await managerApplicationRow.getByLabel(`Manager review notes for ${applicantName}`).fill('Reviewed in the local browser journey.');
+  await managerApplicationRow.getByRole('button', { name: 'Send to owner' }).click();
+  await managerApplicationRow.getByText('Pending Owner Approval', { exact: true }).waitFor();
+  if (await managerApplicationRow.getByRole('button', { name: 'Approve', exact: true }).count()) {
+    throw new Error('Manager can approve an Owner-decision application in the browser.');
+  }
+  await managerPage.screenshot({ path: path.join(reviewDir, 'rental-manager-review-1440.png'), fullPage: true });
+  console.log('PASS: Manager review stops at Owner decision');
+
+  const ownerSession = await loginAs(browser, 'owner', 320);
+  const ownerPage = ownerSession.page;
+  await selectWorkspaceSection(ownerPage, 'owner', 'approvals', 'Approvals');
+  const ownerApplicationRow = ownerPage.locator('tr').filter({ hasText: applicantEmail });
+  await ownerApplicationRow.getByLabel(`Decision notes for ${applicantName}`).fill('Approved in the local browser journey.');
+  await ownerApplicationRow.getByRole('button', { name: 'Approve', exact: true }).click();
+  await ownerApplicationRow.getByText('Approved', { exact: true }).waitFor();
+  await ownerPage.screenshot({ path: path.join(reviewDir, 'rental-owner-approval-320.png'), fullPage: true });
+  await assertNoMobileOverflow(ownerPage, 'Owner application approvals');
+  console.log('PASS: Owner decision at 320px');
+
+  const adminSession = await loginAs(browser, 'admin', 1440);
+  const adminPage = adminSession.page;
+  await selectWorkspaceSection(adminPage, 'admin', 'users', 'User accounts');
+  await adminPage.getByRole('button', { name: /Add User/ }).click();
+  const userDialog = adminPage.getByRole('dialog', { name: 'Create New User Account' });
+  await userDialog.waitFor();
+  await userDialog.getByLabel('First name').fill('Rental Journey');
+  await userDialog.getByLabel('Last name').fill('Applicant');
+  await userDialog.getByLabel('Email Address').fill(applicantEmail);
+  await userDialog.getByLabel('Password').fill(password);
+  await userDialog.getByLabel('Account Role').selectOption('Tenant');
+  await userDialog.getByRole('button', { name: 'Create Account' }).click();
+  await adminPage.getByLabel('Tenants').getByText(applicantEmail, { exact: true }).waitFor();
+  await adminSession.context.close();
+  console.log('PASS: Admin creates matching Tenant account');
+
+  const leaseManagerPage = managerPage;
+  await leaseManagerPage.reload();
+  await leaseManagerPage.locator('.pm-manager').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(leaseManagerPage, 'manager', 'applications', 'Applications');
+  const approvedRow = leaseManagerPage.locator('tr').filter({ hasText: applicantEmail });
+  await approvedRow.getByRole('button', { name: 'Create lease' }).click();
+  const leaseDialog = leaseManagerPage.locator('.modal').filter({ has: leaseManagerPage.getByText(`Create lease · ${applicantName}`, { exact: true }) });
+  await leaseDialog.waitFor();
+  const tenantSelect = leaseDialog.locator('.modal-body .mb-3').filter({ hasText: 'Select tenant account' }).locator('select');
+  await tenantSelect.locator('option').filter({ hasText: applicantEmail }).waitFor({ state: 'attached' });
+  const tenantOptionValue = await tenantSelect.locator('option').evaluateAll(
+    (options) => options.find((option) => option.textContent.includes('rental-applicant@example.test'))?.value || '',
+  );
+  if (!tenantOptionValue) throw new Error(`Matching Tenant account is not available for lease preparation; options: ${(await tenantSelect.locator('option').allTextContents()).join(' | ')}`);
+  await tenantSelect.selectOption(tenantOptionValue);
+  const start = new Date();
+  start.setDate(1);
+  const end = new Date(start);
+  end.setFullYear(end.getFullYear() + 1);
+  await leaseDialog.locator('input[type="date"]').nth(0).fill(dateInputValue(start));
+  await leaseDialog.locator('input[type="date"]').nth(1).fill(dateInputValue(end));
+  await leaseDialog.getByRole('button', { name: 'Prepare lease' }).click();
+  await leaseManagerPage.getByText(`Lease prepared for ${applicantName}. It is pending until all parties sign and an authorized person activates it.`).waitFor();
+  await managerSession.context.close();
+  console.log('PASS: Manager prepares pending application lease');
+
+  const activationOwnerPage = ownerPage;
+  await activationOwnerPage.reload();
+  await activationOwnerPage.locator('.pm-owner').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(activationOwnerPage, 'owner', 'contracts', 'Lease contracts');
+  const pendingLeaseRow = activationOwnerPage.locator('tr').filter({ hasText: applicantEmail });
+  await pendingLeaseRow.getByRole('button', { name: 'Record signatures & activate' }).click();
+  const activationDialog = activationOwnerPage.locator('.modal').filter({ has: activationOwnerPage.getByText('Activate signed lease', { exact: true }) });
+  await activationDialog.waitFor();
+  await activationDialog.locator('input[maxlength="500"]').fill('test-only/browser-journey-signed-lease.pdf');
+  await activationDialog.locator('#owner-confirm-signed-lease').check();
+  await activationDialog.getByRole('button', { name: 'Activate lease' }).click();
+  await pendingLeaseRow.getByText('Active', { exact: true }).waitFor();
+  await activationOwnerPage.screenshot({ path: path.join(reviewDir, 'rental-owner-activation-320.png'), fullPage: true });
+  await assertNoMobileOverflow(activationOwnerPage, 'Owner lease contracts');
+  await ownerSession.context.close();
+  console.log('PASS: Owner activates signed lease at 320px');
+
+  const tenantContext = await browser.newContext({ viewport: { width: 320, height: 900 } });
+  const tenantPage = await tenantContext.newPage();
+  await tenantPage.goto(frontendUrl);
+  await tenantPage.getByLabel('Email address').fill(applicantEmail);
+  await tenantPage.getByLabel('Password').fill(password);
+  await tenantPage.getByRole('button', { name: 'Sign in' }).click();
+  try {
+    await tenantPage.waitForURL('**/tenant', { timeout: 10000 });
+  } catch {
+    throw new Error(`Tenant login did not reach workspace. URL: ${tenantPage.url()}; alerts: ${(await tenantPage.locator('[role="alert"]').allTextContents()).join(' | ')}`);
+  }
+  await tenantPage.locator('.pm-tenant').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(tenantPage, 'tenant', 'lease', 'Lease');
+  await tenantPage.getByText(propertyTitle).waitFor();
+  await tenantPage.getByText('Active', { exact: true }).waitFor();
+  await tenantPage.screenshot({ path: path.join(reviewDir, 'rental-tenant-active-lease-320.png'), fullPage: true });
+  await assertNoMobileOverflow(tenantPage, 'Tenant lease view');
+  await tenantContext.close();
+  console.log('PASS: Tenant sees own active lease at 320px');
+}
+
 async function submitMaintenanceRequest(tenantPage) {
   await tenantPage.reload();
   await tenantPage.getByRole('button', { name: 'Report new issue' }).click();
@@ -274,7 +487,7 @@ async function verifyTenantMaintenance(tenantPage) {
   await tenantPage.reload();
   await tenantPage.locator('.workspace-frame > .workspace-sidebar .workspace-side-link').filter({ hasText: 'Maintenance' }).click();
   const tenantRow = tenantPage.locator('tr').filter({ hasText: 'Leaking tap in the kitchen' });
-  await tenantRow.getByText('In Progress').waitFor();
+  await tenantRow.getByText('In Progress', { exact: true }).waitFor();
   await tenantRow.getByText('A Very Long Example Name For Layout Review').waitFor();
   await tenantPage.setViewportSize({ width: 320, height: 900 });
   const tenantOverflow = await tenantPage.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -293,6 +506,7 @@ async function main() {
     'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
     "import os; from django.contrib.auth import get_user_model; U=get_user_model(); U.objects.create_user(username='browser_smoke', email=os.environ['BROWSER_TEST_EMAIL'], password=os.environ['BROWSER_TEST_PASSWORD'], first_name='Browser', last_name='Smoke', role=U.Role.TENANT)",
   ]);
+  if (rentalJourney) seedRentalJourneyFixture();
   if (uiReview) {
     runPython([
       'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
@@ -311,7 +525,7 @@ async function main() {
     const context = await browser.newContext();
     const page = await context.newPage();
     const reviewDir = path.join(frontendDir, '.ui-review');
-    if (uiReview) fs.mkdirSync(reviewDir, { recursive: true });
+    if (uiReview || rentalJourney) fs.mkdirSync(reviewDir, { recursive: true });
     await page.goto(frontendUrl);
     if (uiReview) {
       await page.getByRole('heading', { name: 'Sign in' }).waitFor();
@@ -325,29 +539,31 @@ async function main() {
       }
       await page.setViewportSize({ width: 1440, height: 900 });
     }
-    await page.getByLabel('Email address').fill(email);
-    await page.getByLabel('Password').fill(password);
-    await page.getByRole('button', { name: 'Sign in' }).click();
-    await page.waitForURL('**/tenant', { timeout: 10000 });
-    console.log('PASS: sign in');
+    if (!rentalJourney || uiReview) {
+      await page.getByLabel('Email address').fill(email);
+      await page.getByLabel('Password').fill(password);
+      await page.getByRole('button', { name: 'Sign in' }).click();
+      await page.waitForURL('**/tenant', { timeout: 10000 });
+      console.log('PASS: sign in');
 
-    await page.reload();
-    await page.getByRole('link', { name: 'Your profile' }).waitFor();
-    console.log('PASS: session survives refresh');
+      await page.reload();
+      await page.getByRole('link', { name: 'Your profile' }).waitFor();
+      console.log('PASS: session survives refresh');
 
-    await page.getByRole('link', { name: 'Your profile' }).click();
-    await page.waitForURL('**/profile', { timeout: 10000 });
-    await page.getByLabel('First name').fill('Verified');
-    const patchResponse = page.waitForResponse((response) =>
-      response.url().endsWith('/api/users/me/') && response.request().method() === 'PATCH');
-    await page.getByRole('button', { name: 'Save profile' }).click();
-    if (!(await patchResponse).ok()) throw new Error('Profile PATCH failed.');
-    const profile = await page.request.get(`${frontendUrl}/api/users/me/`);
-    if (!profile.ok() || (await profile.json()).first_name !== 'Verified') {
-      throw new Error(`Profile was not saved: HTTP ${profile.status()}`);
+      await page.getByRole('link', { name: 'Your profile' }).click();
+      await page.waitForURL('**/profile', { timeout: 10000 });
+      await page.getByLabel('First name').fill('Verified');
+      const patchResponse = page.waitForResponse((response) =>
+        response.url().endsWith('/api/users/me/') && response.request().method() === 'PATCH');
+      await page.getByRole('button', { name: 'Save profile' }).click();
+      if (!(await patchResponse).ok()) throw new Error('Profile PATCH failed.');
+      const profile = await page.request.get(`${frontendUrl}/api/users/me/`);
+      if (!profile.ok() || (await profile.json()).first_name !== 'Verified') {
+        throw new Error(`Profile was not saved: HTTP ${profile.status()}`);
+      }
+      await page.locator('.app-account-name').getByText('Verified Smoke').waitFor();
+      console.log('PASS: protected profile update');
     }
-    await page.locator('.app-account-name').getByText('Verified Smoke').waitFor();
-    console.log('PASS: protected profile update');
 
     let maintenanceRequestId;
     if (uiReview) {
@@ -395,13 +611,17 @@ async function main() {
       console.log(`UI screenshots: ${reviewDir}`);
     }
 
-    await page.getByRole('button', { name: 'Sign out' }).click();
-    await page.waitForURL('**/login', { timeout: 10000 });
-    const afterLogout = await page.request.get(`${frontendUrl}/api/users/me/`);
-    if (afterLogout.status() !== 403) throw new Error(`Expected 403 after logout, got ${afterLogout.status()}.`);
-    await page.goto(`${frontendUrl}/tenant`);
-    await page.waitForURL('**/login', { timeout: 10000 });
-    console.log('PASS: logout revokes access');
+    if (rentalJourney) await runRentalJourney(browser, reviewDir);
+
+    if (!rentalJourney || uiReview) {
+      await page.getByRole('button', { name: 'Sign out' }).click();
+      await page.waitForURL('**/login', { timeout: 10000 });
+      const afterLogout = await page.request.get(`${frontendUrl}/api/users/me/`);
+      if (afterLogout.status() !== 403) throw new Error(`Expected 403 after logout, got ${afterLogout.status()}.`);
+      await page.goto(`${frontendUrl}/tenant`);
+      await page.waitForURL('**/login', { timeout: 10000 });
+      console.log('PASS: logout revokes access');
+    }
   } finally {
     await browser.close();
   }
