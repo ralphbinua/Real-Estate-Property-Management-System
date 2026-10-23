@@ -9,6 +9,7 @@ A web application for managing rental properties, units, tenants, leases, rent r
 - Review applications according to the Owner's recorded approval rules.
 - Create and manage lease contracts.
 - Create rent invoices and record or review payment status.
+- Record property expenses for Owner approval and review calendar-month statements; download scoped expense CSVs for a selected property.
 - Submit maintenance requests, assign them to an Admin or the property's Manager, track status, and receive in-app updates.
 - Review activity records and system settings.
 
@@ -142,8 +143,15 @@ npm run test:ui
 
 `test:ui` includes the security smoke journey, five-role layout checks at
 1440, 768, and 320 pixels, and the Tenant/Admin maintenance scenario. It writes
-synthetic screenshots to `frontend/.ui-review/`. These checks do not establish
-complete rental-to-renewal or move-out browser acceptance.
+synthetic screenshots to `frontend/.ui-review/`. `npm run test:rental` exercises
+the five-role application-to-lease path, renewal approval and successor
+activation, move-out inspection acknowledgement, deposit approval, maintenance
+blocking, and turnover completion using synthetic SQLite data. The journey uses
+authenticated session API calls for Tenant acknowledgement, maintenance
+resolution, and final unit-availability verification; other steps exercise the
+UI. Expense CSV export is available to Admins, assigned Managers, and Owners for the selected
+property; it follows existing property/status filters and shared CSV formula
+safety and 10,000-row limit behavior.
 
 The `Quality checks` GitHub workflow uses Python 3.12 and Node 22, runs backend
 checks/tests and frontend lint/build, and runs `test:ui` with Playwright Chromium.

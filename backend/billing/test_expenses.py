@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
 from contracts.models import Contract
+from maintenance.models import MaintenanceRequest
 from properties.models import Property, Unit
 from .models import Invoice, Payment, PropertyExpense
 
@@ -64,3 +65,26 @@ class ExpenseStatementTests(APITestCase):
         self.assertEqual(self.client.get('/api/expenses/').data, [])
         self.client.force_authenticate(self.tenant)
         self.assertEqual(self.client.get('/api/expenses/').status_code, 403)
+
+    def test_maintenance_cost_is_recorded_separately_and_enters_statement_once(self):
+        work = MaintenanceRequest.objects.create(
+            property=self.property, tenant=self.tenant, issue_description='Replace leaking valve',
+            status='Resolved', actual_cost=Decimal('250.00'),
+        )
+        self.client.force_authenticate(self.manager)
+        created = self.client.post('/api/expenses/', {
+            'propertyId': self.property.pk, 'category': 'Repairs', 'amount': '250.00',
+            'incurredOn': '2026-10-06', 'payee': 'Plumber',
+            'reference': f'Maintenance #{work.pk}', 'description': 'Replace leaking valve',
+        }, format='json')
+        self.assertEqual(created.status_code, 201, created.data)
+        self.client.force_authenticate(self.owner)
+        approved = self.client.post(f'/api/expenses/{created.data["id"]}/decide/', {'approved': True}, format='json')
+        self.assertEqual(approved.status_code, 200, approved.data)
+
+        statement = self.client.get(f'/api/expenses/statement/?propertyId={self.property.pk}&month=2026-10')
+        self.assertEqual(statement.data['approvedExpenses'], '250')
+        self.assertEqual(statement.data['netCash'], '450')
+        self.assertEqual(len(statement.data['expenseItems']), 1)
+        self.assertEqual(statement.data['expenseItems'][0]['expenseId'], created.data['id'])
+        self.assertEqual(PropertyExpense.objects.filter(property=self.property, reference=f'Maintenance #{work.pk}').count(), 1)

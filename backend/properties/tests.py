@@ -384,6 +384,91 @@ class RentalLifecycleApiTests(APITestCase):
     def act_as(self, user):
         self.client.force_authenticate(user=user)
 
+    def submit_application(self, *, approval_mode, name):
+        self.property.application_approval_mode = approval_mode
+        self.property.save(update_fields=['application_approval_mode'])
+        inquiry = PropertyInquiry.objects.create(
+            property=self.property,
+            unit=self.unit,
+            agent=self.agent,
+            prospect_name=name,
+            prospect_email=self.tenant.email,
+        )
+        self.act_as(self.manager)
+        response = self.client.post('/api/properties/applications/', {
+            'inquiry': inquiry.pk,
+            'applicantEmail': self.tenant.email,
+            'employment': 'Engineer',
+            'monthlyIncome': '85000.00',
+            'moveInDate': date.today().isoformat(),
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        return RentalApplication.objects.get(pk=response.data['id'])
+
+    def test_application_keeps_owner_rule_after_property_rule_changes_to_manager(self):
+        application = self.submit_application(approval_mode='Owner', name='Owner rule snapshot applicant')
+        self.assertEqual(application.approval_mode, 'Owner')
+
+        self.property.application_approval_mode = 'Manager'
+        self.property.save(update_fields=['application_approval_mode'])
+        self.act_as(self.manager)
+        application_url = f'/api/properties/applications/{application.pk}/'
+        response = self.client.patch(application_url, {'status': 'Under Review'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        response = self.client.patch(application_url, {'status': 'Approved'}, format='json')
+        self.assertEqual(response.status_code, 400, response.data)
+        application.refresh_from_db()
+        self.assertEqual(application.status, 'Under Review')
+        self.assertEqual(application.approval_mode, 'Owner')
+
+        response = self.client.patch(application_url, {'status': 'Pending Owner Approval'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.act_as(self.owner)
+        response = self.client.patch(application_url, {
+            'status': 'Approved', 'ownerReviewNotes': 'Approved under the submitted application rule.',
+        }, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_application_keeps_manager_rule_after_property_rule_changes_to_owner(self):
+        application = self.submit_application(approval_mode='Manager', name='Manager rule snapshot applicant')
+        self.assertEqual(application.approval_mode, 'Manager')
+
+        self.property.application_approval_mode = 'Owner'
+        self.property.save(update_fields=['application_approval_mode'])
+        self.act_as(self.manager)
+        response = self.client.patch(
+            f'/api/properties/applications/{application.pk}/', {'status': 'Approved'}, format='json',
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        application.refresh_from_db()
+        self.assertEqual(application.status, 'Approved')
+        self.assertEqual(application.approval_mode, 'Manager')
+
+    def test_revoked_manager_cannot_list_read_or_decide_assigned_property_application(self):
+        application = self.submit_application(approval_mode='Manager', name='Reassigned application')
+        application_url = f'/api/properties/applications/{application.pk}/'
+
+        replacement_manager = self.create_user('replacement-manager', User.Role.PROPERTY_MANAGER)
+        self.property.manager = replacement_manager
+        self.property.save(update_fields=['manager'])
+
+        self.act_as(self.manager)
+        list_response = self.client.get('/api/properties/applications/')
+        self.assertEqual(list_response.status_code, 200, list_response.data)
+        old_manager_ids = {item['id'] for item in list_response.data}
+        self.assertNotIn(application.pk, old_manager_ids)
+        self.assertEqual(self.client.get(application_url).status_code, 404)
+        response = self.client.patch(application_url, {'status': 'Approved'}, format='json')
+        self.assertEqual(response.status_code, 404, response.data)
+        application.refresh_from_db()
+        self.assertEqual(application.status, 'Submitted')
+
+        self.act_as(replacement_manager)
+        new_manager_list = self.client.get('/api/properties/applications/')
+        self.assertEqual(new_manager_list.status_code, 200, new_manager_list.data)
+        self.assertIn(application.pk, {item['id'] for item in new_manager_list.data})
+        self.assertEqual(self.client.get(application_url).status_code, 200)
+
     def test_rental_lifecycle_through_payment_and_lease_termination(self):
         # Agent schedules a viewing and opens an application for the prospect.
         self.act_as(self.agent)

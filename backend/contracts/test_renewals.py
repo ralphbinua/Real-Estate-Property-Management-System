@@ -73,6 +73,16 @@ class LeaseRenewalTests(APITestCase):
         }, format='json')
         self.assertEqual(early.status_code, 400)
         self.assertEqual(self.client.post(url).status_code, 400)
+        activation_payload = {'signaturesComplete': True, 'signedCopyReference': 'signed-renewal.pdf'}
+        with patch('contracts.views.timezone.localdate', return_value=successor.start_date):
+            self.client.force_authenticate(self.manager)
+            manager_activation = self.client.post(f'/api/contracts/{successor.pk}/activate/', activation_payload, format='json')
+            self.assertEqual(manager_activation.status_code, 400, manager_activation.data)
+            self.client.force_authenticate(self.owner)
+            owner_activation = self.client.post(f'/api/contracts/{successor.pk}/activate/', activation_payload, format='json')
+        self.assertEqual(owner_activation.status_code, 200, owner_activation.data)
+        successor.refresh_from_db()
+        self.assertEqual(successor.status, 'Active')
 
     def test_declined_proposal_cannot_prepare_and_tenant_cannot_change_it(self):
         self.assertEqual(self.propose(self.manager).status_code, 201)

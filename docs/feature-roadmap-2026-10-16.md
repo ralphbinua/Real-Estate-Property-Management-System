@@ -1,6 +1,6 @@
 # Real Estate Management Feature Roadmap
 
-**Updated:** 2026-10-19. This revision replaces the original future-work baseline with the current code baseline, local acceptance evidence, and release priorities.
+**Updated:** 2026-10-23. This revision records current implementation, local acceptance evidence, and release priorities.
 
 **Sources:** [System guide](https://docs.google.com/document/d/1yDqmKlsxEOQnLDDy0pO3GjFLjLmH08sUNASpuYDchoU/edit), [feature matrix and Delivery Plan](https://docs.google.com/spreadsheets/d/1-EG-5CiSopA7r_Z-xSXFlAcomM8ag0sievccWr1SH5U/edit), and the repository review on 2026-10-17.
 
@@ -51,8 +51,8 @@ The Django API and React/Vite frontend support Admin, Owner, Property Manager, A
 | 1 | Reproducible local checks and quality CI — partially verified | P1 | Compatible Python/Node runtimes and installed dependencies |
 | 2 | Role permissions and rental journey — local API and browser journey verified; staging pending | P1 | Passing baseline and isolated test accounts/data |
 | 3 | Verified migrations, deployment, and scheduled operations | P1 | Staging access, configuration, backup/recovery procedure |
-| 4 | Lifecycle and financial reconciliation acceptance | P2 | Staged leases, invoices, and verified authority rules |
-| 5 | One selected product improvement | P3 | Release gates and pilot feedback |
+| 4 | Lifecycle and financial reconciliation acceptance — locally verified; staging pending | P2 | Staged leases, invoices, and verified authority rules |
+| 5 | Scoped expense CSV export — implemented and locally verified; pilot use pending | P3 | Staging access and pilot feedback |
 
 Phases 2 and 3 can progress independently after the baseline is established. All release gates must pass before claiming production readiness.
 
@@ -94,33 +94,39 @@ Exercise maintenance estimate approval/rejection and revision, actual costs, pri
 
 Complete move-out, versioned inspection, Tenant acknowledgement, Owner deposit decision, unresolved-maintenance blocking, and turnover. Check both units and unitless properties.
 
-**Acceptance:** Historical records remain intact; deposit deductions stay within the deposit; statements reconcile to source rows; the home stays unavailable until required turnover gates pass. Representative browser journeys pass on staging.
+**Local progress (2026-10-23):** Core local scenarios passed for renewal proposal, Owner decision, successor preparation after expiry, Owner-only activation, move-out, inspection acknowledgement, deposit approval, unresolved-maintenance blocking, and turnover completion. The synthetic browser journey uses authenticated browser-session API calls for Tenant acknowledgement, maintenance resolution, and final unit-availability verification; other steps exercise the UI. API tests also cover payment rejection/reversal, maintenance expense entry, statement reconciliation, and CSV scope. Broader P2 acceptance remains open, including declined renewal/replacement, maintenance privacy/history and approval variations, late fees, expense reversals, verified-only acknowledgement access, and complete actor/history/notification evidence. A regression found and fixed a Manager unable to resolve existing maintenance after tenant move-out.
 
-## Phase 5 — Choose the next improvement
+**Acceptance:** Historical records remain intact; deposit deductions stay within the deposit; statements reconcile to source rows; the home stays unavailable until required turnover gates pass. Core local scenarios passed, additional P2 scenarios remain open, and representative staging acceptance is pending.
 
-Select one item after pilot feedback; write its own implementation spec and acceptance criteria before coding.
+## Phase 5 — Deliver the selected improvement
+
+The selected increment is the scoped expense CSV export. It is implemented and locally verified; collect pilot feedback before selecting another increment.
 
 | Candidate | Purpose | Decisions needed |
 | --- | --- | --- |
-| Additional scoped CSV exports | Extend reporting to expenses, applications, or prospects | Resources, columns, roles, filters, caps |
+| Expense CSV export (selected; locally complete) | Export property expense history for reconciliation | Supported roles, columns, filters, and cap are implemented |
+| Additional scoped CSV exports | Extend reporting to applications or prospects | Resources, columns, roles, filters, caps |
 | Maintenance-to-expense assistance | Reduce duplicate entry while preserving Owner approval | Linked draft creation and duplicate prevention |
 | Private document uploads | Store lease, receipt, and inspection evidence | Provider, access, retention, file limits |
 | Email reminders | Reach users outside the in-app inbox | Provider, preferences, delivery/retry policy |
 | Formal notice tracking | Extend lease lifecycle records | Approved notice policy, dates, responsible roles |
 | Online payments or electronic signing | Reduce external manual steps | Provider, callbacks, reconciliation, authority and recovery |
 
-**Recommendation:** Start with expense CSV exports if reporting is the main pilot need, or linked expense drafts if repeated maintenance entry is the main problem. A configurable report builder, bulk changes, chat, uploads, online payments, and electronic signing remain future scope.
+**Status:** Expense CSV is the selected and implemented P3 increment. It reuses expense list authorization and property/status filters, neutralizes formula-like cells, and caps exports at 10,000 rows. Linked expense drafts, configurable reports, bulk changes, chat, uploads, online payments, and electronic signing remain future scope pending evidence or provider decisions.
 
 ## Release gate and current evidence
 
 For each affected workflow, require automated checks, direct API permission checks, desktop/mobile staging acceptance, migration verification, and recovery documentation. Record production evidence separately. Update the delivery tracker only after the corresponding checks pass.
 
-Review evidence through 2026-10-19:
+Review evidence through 2026-10-23:
 
 - Frontend lint passed.
 - Frontend production build passed.
-- Django system checks and migration drift checks passed locally; two test-isolation regressions passed. The full backend suite passed: 108 tests ran, 104 passed and 4 were skipped. The focused role and rental lifecycle suite passed 6 tests.
-- Frontend lint/build passed. Browser security/UI checks passed, including role layouts and Tenant/Admin maintenance. The synthetic browser rental journey passed across all five roles at mobile width; renewal/move-out browser acceptance remains open.
+- Django system checks and migration drift checks passed locally. The full backend suite passed: 129 tests ran, 125 passed and 4 were skipped. Expense export tests cover roles, filters, formula safety, and the 10,000-row cap.
+- Frontend lint/build and browser security/UI checks passed, including all-role layouts, Tenant/Admin maintenance, scoped expense downloads, and the synthetic five-role rental/renewal/move-out browser journey.
+- Local tests use SQLite and synthetic users/data. Staging acceptance, PostgreSQL concurrency, target migrations, backup/restore, deployment configuration, GitHub CI execution, and production scheduler evidence remain pending.
+- Admin Lease Contracts now defaults to Active, exposes Pending, History (Expired and Terminated), and All views, and supports tenant/email/property/unit search with server-side sort and pagination. Local verification passed 8 focused filter/ordering API tests plus the full UI browser smoke suite, frontend lint, and production build. Staging and production behavior remain unverified; see [Admin lease views and search plan](admin-lease-views-and-search-plan.md).
+- The P1 application-rule and Manager-revocation cases were verified locally on 2026-10-23: applications continued to follow their saved Owner/Manager rule after the property rule changed in either direction; after reassignment, the former Manager could not list, read, or update the application and the replacement Manager could. Three focused API regressions and the full 121-test backend suite passed (117 passed, 4 skipped); frontend lint/build, all-role UI review, and the five-role rental browser journey passed. Staging remains pending.
 - Staging acceptance, database migration application, deployment inspection, and production cron execution were not performed.
 
-The next actionable slices are to verify saved application-rule snapshots and revoked authority, then repeat the rental journey on staging when access is available. Do not claim staging or production readiness from the local results.
+The next actionable slice is to repeat the five-role rental journey on staging, then complete the separate migration, recovery, and scheduled-operations checks. Local verification does not establish staging or production readiness.

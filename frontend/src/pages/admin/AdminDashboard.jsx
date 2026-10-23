@@ -56,6 +56,10 @@ export default function AdminDashboard() {
   const [properties, setProperties] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [contractPageInfo, setContractPageInfo] = useState({ count: 0, page: 1, pageCount: 1 });
+  const [contractOrdering, setContractOrdering] = useState('active_first');
+  const [contractStatusView, setContractStatusView] = useState('Active');
+  const [contractSearchInput, setContractSearchInput] = useState('');
+  const [contractSearch, setContractSearch] = useState('');
   const [userList, setUserList] = useState([]);
   const [userChoicesLoaded, setUserChoicesLoaded] = useState(false);
   const [invoices, setInvoices] = useState([]);
@@ -120,7 +124,12 @@ export default function AdminDashboard() {
     try {
       const [propData, contractsPage, summaryData] = await Promise.all([
         fetchProperties(),
-        fetchContractsPage({ page: 1 }),
+        fetchContractsPage({
+          page: 1,
+          ordering: contractOrdering,
+          ...(contractStatusView !== 'All' ? { status: contractStatusView } : {}),
+          ...(contractSearch ? { search: contractSearch } : {}),
+        }),
         fetchOwnerPortfolio('overview'),
       ]);
       setProperties(Array.isArray(propData) ? propData : []);
@@ -137,7 +146,7 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [contractOrdering, contractStatusView, contractSearch]);
 
   const loadReportInvoices = useCallback(async () => {
     if (reportInvoicesLoaded.current) return;
@@ -185,6 +194,11 @@ export default function AdminDashboard() {
     void Promise.resolve().then(loadData);
     fetchSystemSettings().then((settings) => setLeaseTermMonths(settings.default_lease_term_months || 12)).catch(() => {});
   }, [loadData]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setContractSearch(contractSearchInput.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [contractSearchInput]);
 
   useEffect(() => {
     const handleWorkspaceNavigation = (event) => {
@@ -777,7 +791,45 @@ export default function AdminDashboard() {
             {/* Active Contracts */}
             <div className="pm-panel mb-4" id="contracts" data-workspace-section="contracts">
               <div className="pm-panel-header">Lease contracts ({contractPageInfo.count})</div>
-              <div className="d-flex justify-content-end p-2"><ExportCsvButton resource="contracts" /></div>
+              <div className="d-flex justify-content-between align-items-center gap-2 flex-wrap p-2">
+                <div className="d-flex flex-wrap gap-2 flex-grow-1">
+                  <Form.Select
+                    aria-label="Lease contract view"
+                    className="pm-input"
+                    value={contractStatusView}
+                    onChange={(event) => setContractStatusView(event.target.value)}
+                    style={{ maxWidth: 240 }}
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Pending">Pending — needs action</option>
+                    <option value="History">History — expired and terminated</option>
+                    <option value="All">All contracts</option>
+                  </Form.Select>
+                  <Form.Control
+                    aria-label="Search lease contracts"
+                    className="pm-input"
+                    type="search"
+                    placeholder="Search tenant, email, property, or unit"
+                    value={contractSearchInput}
+                    onChange={(event) => setContractSearchInput(event.target.value)}
+                    style={{ maxWidth: 360 }}
+                  />
+                  <Form.Select
+                    aria-label="Sort lease contracts"
+                    className="pm-input"
+                    value={contractOrdering}
+                    onChange={(event) => setContractOrdering(event.target.value)}
+                    style={{ maxWidth: 280 }}
+                  >
+                    <option value="active_first">Active first</option>
+                    <option value="end_date">Lease end date: soonest</option>
+                    <option value="end_date_desc">Lease end date: latest</option>
+                    <option value="property">Property: A–Z</option>
+                    <option value="tenant">Tenant: A–Z</option>
+                  </Form.Select>
+                </div>
+                <ExportCsvButton resource="contracts" />
+              </div>
               <Table responsive className="pm-table mb-0">
                 <thead>
                   <tr>
@@ -821,7 +873,13 @@ export default function AdminDashboard() {
                     })
                   ) : (
                     <tr>
-                      <td colSpan="5" className="pm-empty-row">No lease contracts recorded.</td>
+                      <td colSpan="5" className="pm-empty-row">
+                        {contractSearch
+                          ? `No lease contracts match “${contractSearch}”.`
+                          : contractStatusView === 'All'
+                            ? 'No lease contracts recorded.'
+                            : `No ${contractStatusView.toLowerCase()} lease contracts recorded.`}
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -832,7 +890,12 @@ export default function AdminDashboard() {
                 pageCount={contractPageInfo.pageCount}
                 onPageChange={async (page) => {
                   try {
-                    const response = await fetchContractsPage({ page });
+                    const response = await fetchContractsPage({
+                      page,
+                      ordering: contractOrdering,
+                      ...(contractStatusView !== 'All' ? { status: contractStatusView } : {}),
+                      ...(contractSearch ? { search: contractSearch } : {}),
+                    });
                     setContracts(response.results);
                     setContractPageInfo({ count: response.count, page, pageCount: Math.max(1, Math.ceil(response.count / 50)) });
                   } catch {

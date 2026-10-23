@@ -1,4 +1,4 @@
-# Local release baseline — updated 2026-10-19
+# Local release baseline — updated 2026-10-23
 
 ## Scope
 
@@ -9,6 +9,14 @@ push was performed. Local results do not establish staging or production readine
 Runtime: Windows, Python 3.12.14, Node 22.14.0, Django 6.1.2. Backend dependencies
 were installed from `backend/requirements.txt` into the ignored root `.venv`;
 frontend dependencies were installed from the lockfile with `npm ci`.
+
+## Changes and acceptance completed this pass
+
+- Added an expense CSV endpoint and selected-property download for Admins, assigned Managers, and Owners. It reuses expense list scope and property/status filters, exports the approved column order, neutralizes spreadsheet formulas, and applies the shared 10,000-row cap.
+- Added API acceptance for export roles, filtering, formula safety, and the row cap; browser downloads passed for Admin, Manager, and Owner.
+- Expanded the five-role browser journey through Manager renewal proposal, Owner decision, successor preparation after expiry, Owner-only activation, move-out, inspection acknowledgement, deposit decision, maintenance blocking, and turnover completion.
+- The browser journey uses authenticated session API calls for Tenant inspection acknowledgement, maintenance resolution, and final unit-availability verification; other journey actions exercise the UI. Broader lifecycle acceptance cases remain open as listed in the release plan.
+- Fixed an acceptance-discovered defect: assigned Managers can now update an existing maintenance request after its Tenant moves out, while a changed tenant/property still has to satisfy current-tenancy validation.
 
 ## Findings corrected
 
@@ -46,13 +54,15 @@ frontend dependencies were installed from the lockfile with `npm ci`.
 | Infrastructure regressions before fixes | Failed for all three contract modules and both Redis-inheriting settings |
 | Infrastructure regressions after fixes | 2 passed, including invocation from repository root |
 | Expanded backend discovery | 108 cases, including contract workflows |
-| Expanded full backend suite | Passed: 108 tests ran, 104 passed and 4 were skipped; no Django system-check issues |
+| Expanded full backend suite | Passed: 129 tests ran, 125 passed and 4 were skipped; no Django system-check issues |
 | Frontend lint and build after lockfile install | Passed |
 | Browser security smoke | Passed: sign-in, session restore, profile edit, logout |
 | Browser UI rerun | Passed: all five roles at 1440/768/320 pixels; Tenant/Admin maintenance and notification flow; logout |
 | Rental journey and role isolation API acceptance (2026-10-19) | Passed: 6 focused tests across both lifecycle paths and two-world permission isolation |
 | Five-role browser rental journey (2026-10-19) | Passed on temporary SQLite: Agent viewing/application at 320px; Manager review stops at Owner decision; Owner approval at 320px; Admin creates matching Tenant; Manager prepares pending lease; Owner activates at 320px; Tenant sees own active lease at 320px. Mobile overflow checks passed for Agent, Owner, and Tenant views. |
-| Frontend lint/build after browser acceptance changes | Passed |
+| Application-rule snapshot and revoked Manager assignment regressions (2026-10-23) | Passed: 3 API tests cover both directions of property-rule change after submission, and former Manager list/detail/update denial after reassignment while the replacement Manager retains access. |
+| Full backend suite and current browser acceptance (2026-10-23) | Passed: 129 tests ran, 125 passed and 4 skipped; Django system checks clean. Frontend lint/build, browser security smoke, all-role UI review, selected-property expense downloads for Admin/Manager/Owner, and core five-role rental/renewal/move-out scenarios passed locally. Some lifecycle actions use authenticated session API calls; additional P2 scenarios remain open in the release plan. |
+| Expense CSV API acceptance | Passed: scoped roles, property/status filters, ordered fields, formula neutralization, and 10,000-row cap; no migrations introduced. |
 | Google document readback | Corrected text, heading and normal-body structure verified |
 | Google Sheet readback | Target values and wrapping verified; browser visual access timed out |
 | Quality workflow | Added and reviewed; execution on GitHub pending |
@@ -63,11 +73,14 @@ screenshots are written to the ignored `frontend/.ui-review/` directory.
 
 ## Remaining release gates
 
-- Saved application-rule snapshot and revoked-authority edge cases remain to be
-  verified. The browser journey covers one Owner-decision application path and
-  the API suite covers scoped lists, forbidden actions, and cross-world detail
-  reads using two unrelated property portfolios. Renewal/move-out browser
-  acceptance remains untested.
+- Additional local P2 scenarios remain open, including declined renewal/replacement,
+  broader maintenance approval/privacy/history cases, late fees, expense reversals,
+  verified-only payment acknowledgement access, and complete lifecycle
+  actor/history/notification evidence. See Task 5 in the release plan.
+- Staging acceptance remains pending. Local API and browser tests cover saved
+  application rules, revoked Manager assignment, core renewal, move-out,
+  settlement, and turnover; rerun representative workflows against staging when
+  access is available.
 - PostgreSQL concurrency/locking verification; SQLite cannot establish it.
 - Target migration inventory, data preservation, backup/restore rehearsal,
   HTTPS/session/CSRF deployment checks, and actual billing/reminder run evidence.
@@ -75,5 +88,7 @@ screenshots are written to the ignored `frontend/.ui-review/` directory.
   operational recovery procedure.
 - Actual quality CI execution after the changes are committed and pushed.
 
-New exports, linked expense drafts, uploads, communications, signing, and online
-payments remain proposed work, subject to the roadmap's selection gate.
+Expense CSV export is implemented and locally verified. Linked expense drafts,
+application/prospect exports, uploads, communications, electronic signing, and
+online payments remain future work, subject to pilot feedback and provider or
+policy decisions.

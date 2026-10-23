@@ -3,7 +3,8 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Case, IntegerField, Prefetch, Q, Value, When
+from django.db.models.functions import Lower
 from django.utils import timezone
 import os
 from secrets import compare_digest
@@ -115,20 +116,42 @@ class ContractViewSet(viewsets.ModelViewSet):
         contract_status = self.request.query_params.get('status')
         search = self.request.query_params.get('search', '').strip()
         if contract_status:
-            scoped_contracts = scoped_contracts.filter(status=contract_status)
+            if contract_status == 'History':
+                scoped_contracts = scoped_contracts.filter(status__in=['Terminated', 'Expired'])
+            else:
+                scoped_contracts = scoped_contracts.filter(status=contract_status)
         if search:
-            scoped_contracts = scoped_contracts.filter(
-                Q(property__title__icontains=search)
-                | Q(tenant__email__icontains=search)
-                | Q(tenant__first_name__icontains=search)
-                | Q(tenant__last_name__icontains=search)
-                | Q(unit__unit_number__icontains=search)
-            )
-        return scoped_contracts.select_related(
+            for term in search.split():
+                scoped_contracts = scoped_contracts.filter(
+                    Q(property__title__icontains=term)
+                    | Q(tenant__email__icontains=term)
+                    | Q(tenant__first_name__icontains=term)
+                    | Q(tenant__last_name__icontains=term)
+                    | Q(unit__unit_number__icontains=term)
+                )
+        contracts = scoped_contracts.select_related(
             'tenant', 'unit', 'unit__tenant', 'activated_by', 'terminated_by',
         ).prefetch_related(
             Prefetch('property', queryset=property_serializer_queryset(Property.objects.all())),
-        ).order_by('-id')
+        )
+        ordering = self.request.query_params.get('ordering', 'newest')
+        ordering_fields = {
+            'newest': ('-id',),
+            'active_first': (
+                Case(
+                    When(status='Active', then=Value(0)),
+                    When(status='Pending', then=Value(1)),
+                    default=Value(2),
+                    output_field=IntegerField(),
+                ),
+                'end_date', '-id',
+            ),
+            'end_date': ('end_date', 'id'),
+            'end_date_desc': ('-end_date', '-id'),
+            'property': (Lower('property__title'), '-id'),
+            'tenant': (Lower('tenant__last_name'), Lower('tenant__first_name'), '-id'),
+        }
+        return contracts.order_by(*ordering_fields.get(ordering, ordering_fields['active_first']))
 
     def get_permissions(self):
         if self.action == 'activate':

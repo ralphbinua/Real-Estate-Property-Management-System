@@ -10,6 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
+from core.csv_exports import csv_response
 from core.pagination import OptInPageNumberPagination
 from properties.models import Property
 from users.audit import record_activity
@@ -156,6 +157,18 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         PropertyExpenseEvent.objects.create(expense=item, actor=user, action='Reversed', summary=f'Owner reversed the expense: {reason.strip()[:440]}')
         record_activity(user, 'UPDATE', 'Property expense', item.pk, f'Reversed expense {item.pk}.')
         return Response(self.get_serializer(item).data)
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        return csv_response('expenses', [
+            ('ID', lambda item: item.pk), ('Property', lambda item: item.property.title),
+            ('Incurred date', lambda item: item.incurred_on), ('Category', lambda item: item.category),
+            ('Amount', lambda item: item.amount), ('Payee', lambda item: item.payee),
+            ('Reference', lambda item: item.reference), ('Description', lambda item: item.description),
+            ('Status', lambda item: item.status), ('Decided by', lambda item: item.decided_by_id),
+            ('Decided at', lambda item: item.decided_at.isoformat() if item.decided_at else ''),
+            ('Decision note', lambda item: item.decision_note),
+        ], self.get_queryset())
 
     @action(detail=False, methods=['get'])
     def statement(self, request):

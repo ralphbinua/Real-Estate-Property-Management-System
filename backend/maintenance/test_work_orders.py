@@ -92,3 +92,13 @@ class MaintenanceWorkOrderTests(APITestCase):
         self.assertIsNone(work.estimate_amount)
         self.client.force_authenticate(other_manager)
         self.assertEqual(self.client.post(f'/api/maintenance/{work.pk}/request-approval/').status_code, 404)
+
+    def test_assigned_manager_can_resolve_existing_work_after_tenant_moves_out(self):
+        request_id = self.make_request()
+        Unit.objects.filter(pk=self.unit.pk).update(tenant=None, status='Available')
+        self.client.force_authenticate(self.manager)
+
+        response = self.client.patch(f'/api/maintenance/{request_id}/', {'status': 'Resolved'}, format='json')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['status'], 'Resolved')

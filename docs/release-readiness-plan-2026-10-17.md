@@ -74,7 +74,7 @@ Verification during this scan: `npm run lint` passed; `npm run build` passed. Ba
 
 ## Task 3: Prove five-role access and the rental journey — P1
 
-**Progress (2026-10-19, local API and browser):** Six focused API tests passed across existing-account/new-applicant journeys and two-world role isolation. The new synthetic browser journey passed Agent viewing and application, Manager review, Owner decision, Admin Tenant creation, Manager lease preparation, Owner activation, and Tenant active-lease access at 320px. Agent decision controls and Manager approval of an Owner-reserved application were denied in the UI. Saved-rule/revoked-authority edge cases and staging acceptance remain open. See [local acceptance record](acceptance/2026-10-17-local-baseline.md).
+**Progress (updated 2026-10-23, local only):** The full backend suite passed with 129 tests (125 passed, 4 skipped), including saved application-rule, revoked Manager assignment, expense export, and post-move-out maintenance regressions. Frontend lint/build, browser security smoke, all-role UI review, selected-property expense downloads for Admin/Manager/Owner, and five-role application/renewal/move-out browser acceptance passed locally. Staging acceptance remains open. See [local acceptance record](acceptance/2026-10-17-local-baseline.md).
 
 **Files:** `backend/properties/tests.py`, `backend/contracts/tests.py`, `backend/users/test_security.py`, `backend/core/test_csv_exports.py`, `frontend/scripts/browser-smoke.cjs`; new staging acceptance record under `docs/acceptance/`.
 
@@ -83,7 +83,8 @@ Verification during this scan: `npm run lint` passed; `npm run build` passed. Ba
 - [ ] Seed non-production data with Admin plus two distinct Owners, Managers, Agents, and Tenants. Include assigned and unrelated properties, properties with and without units, and both application decision rules. Use generated test credentials.
 - [ ] Exercise property registration → Admin staff assignment → inquiry/viewing → application → correct decision-maker → Admin-created matching Tenant account → pending lease → authorized activation.
 - [ ] Verify Agents cannot decide applications or read lease/payment financial records; Managers cannot create properties or Tenant users; unrelated Owners/Managers/Tenants cannot access another property's records by direct IDs.
-- [ ] Verify changing a property's application rule does not change an existing application's saved rule. Test applicant/Tenant email mismatch and revoked Manager authority before activation.
+- [x] Verify changing a property's application rule does not change an existing application's saved rule, and verify revoked Manager list/detail/update access.
+- [ ] Test applicant/Tenant email mismatch before lease preparation.
 - [ ] Assert role boundaries on list, detail, mutations, notifications, and CSV downloads, including direct API calls when the UI hides an action.
 - [x] Add and run browser acceptance for the core journey at mobile size; retain the existing layout checks. Desktop rental acceptance and staging rerun remain open.
 
@@ -109,34 +110,37 @@ Verification during this scan: `npm run lint` passed; `npm run build` passed. Ba
 
 ## Task 5: Validate lifecycle and financial reconciliation — P2
 
+**Progress (2026-10-23, local only):** Core local cases passed for renewal authority and expiry, successor activation, inspection acknowledgement, deposit approval, unresolved-maintenance blocking, turnover completion, maintenance expense entry/reconciliation, and rejected/reversed payment balance checks. The synthetic browser journey uses authenticated browser-session API calls for Tenant inspection acknowledgement, maintenance resolution, and final unit-availability verification; other journey steps use the UI. A regression found and fixed Manager updates being rejected for existing work after the Tenant moved out. The broader acceptance checklist below remains open, and staging acceptance is pending.
+
 **Files:** `backend/contracts/test_renewals.py`, `backend/contracts/test_move_out.py`, `backend/maintenance/test_work_orders.py`, `backend/billing/test_payment_workflow.py`, `backend/billing/test_expenses.py`; related React workflow components if defects are found.
 
 **Interfaces:** Consumes staged leases/invoices and verified authority rules; produces acceptance evidence for the existing advanced workflows.
 
-- [ ] Test Manager renewal → Owner approval/rejection → successor preparation after the old term ends → external signed reference → authorized activation. Confirm a manually recorded successor follows the current manual-lease activation restrictions.
+- [x] Locally test Manager renewal → Owner approval → successor preparation after the old term ends → authorized activation; manual successor activation remains Owner-only. Rejection/replacement and external signed-reference evidence remain open.
 - [ ] Test rejected renewal and expiry boundaries. Investigate whether a declined proposal needs a new proposal path; the current service permits only one renewal record per original lease. Treat changes as a separate policy decision.
-- [ ] Test maintenance approval pending/rejected/approved, estimate revision, actual cost, private-field visibility, and tenant-visible status history. Assert work cannot advance while required approval is pending.
-- [ ] Record the maintenance cost separately as an expense; approve it as Owner. Assert it enters the correct calendar-month statement once, with no automatic duplicate expense.
-- [ ] Reconcile split payments, verification, rejection, reversal, late fees, and expense reversal against balances and monthly statements. Assert acknowledgment download is restricted to verified payments and the correct role scope.
-- [ ] Test move-out → versioned inspection → Tenant acknowledgement → deposit deduction within deposit → Owner decision → unresolved maintenance block → turnover completion. Assert the unit/property remains unavailable until all gates pass.
-- [ ] Repeat the representative lifecycle in the browser and capture results, actor/date/history, notification recipients, and mobile usability.
+- [ ] Test maintenance approval pending/rejected/approved, estimate revision, actual cost, private-field visibility, and tenant-visible status history. Existing local coverage verifies a selected approval/expense path and turnover blocking; the broader cases remain open.
+- [x] Locally record maintenance cost separately as an expense, approve it as Owner, and verify statement reconciliation without a duplicate expense. Expense reversal and broader calendar/date cases remain open.
+- [ ] Reconcile split payments, verification, rejection, reversal, late fees, and expense reversal against balances and monthly statements. Assert acknowledgment download is restricted to verified payments and the correct role scope. Rejection/reversal balance cases passed; the other cases remain open.
+- [x] Locally test move-out, inspection acknowledgement, deposit approval, unresolved maintenance blocking, and turnover completion. Tenant acknowledgement, maintenance resolution, and final unit-availability checks use authenticated browser-session API calls. Versioned inspection changes, deduction-limit cases, and actor/date/history/notification evidence remain open.
+- [ ] Complete representative browser acceptance and capture actor/date/history, notification recipients, and mobile usability for the full lifecycle; current synthetic journey is partial UI plus authenticated session API calls.
 
-**Done when:** Lease availability, deposit decisions, and financial totals reconcile throughout the full journey. Any defect gets a focused test and fix before release.
+**Done when:** The remaining lifecycle and financial scenarios above pass locally and on staging, with lease availability, deposit decisions, and financial totals reconciled through the full journey. Any defect gets a focused test and fix before release.
 
 ## Task 6: Select the next product increment — P3, after release gates
 
-Do not start all options at once. Rank them using pilot feedback and write one bounded spec before implementation.
+The selected increment is scoped expense CSV export. Its implementation, focused API coverage, role-specific browser downloads, and local verification are complete. Use pilot feedback before selecting another increment.
 
 | Candidate | Benefit | Decision needed | Acceptance direction |
 | --- | --- | --- | --- |
-| Expense/application/prospect CSV exports | Extend existing reporting with relatively little workflow change | Resources, columns, roles, filters, caps | Export matches scoped list results; privacy and CSV injection checks pass |
+| Expense CSV export (selected; locally complete) | Reconcile property expense history | Admin, assigned Manager, and Owner scope; property/status filters; 12 ordered columns; 10,000-row cap; formula neutralization | API and browser acceptance passed locally; pilot/staging use pending |
+| Application/prospect CSV exports | Extend existing reporting | Resources, columns, roles, filters, caps | Export matches scoped list results; privacy and CSV injection checks pass |
 | Maintenance-to-expense assistance | Reduce repeated entry | Draft creation/linking and duplicate policy | One linked draft per work order; Owner approval still required; no automatic statement double count |
 | Private document uploads | Keep lease, receipt, and inspection evidence accessible | Storage provider, size/type limits, retention and access policy | Authorized uploads/downloads, revoked access, evidence linkage and audit history |
 | Email reminders | Reach users outside the in-app inbox | Provider, preferences, recipients and delivery policy | Retry/deduplication, delivery history and correct scoped recipients |
 | Formal notice tracking | Complete an identified lease lifecycle limit | Approved notice policy, dates and responsible roles | Dated notice/reference history and scoped reminders; separate from e-signing |
 | Online rent payment or e-signing | Reduce external manual steps | Provider, reconciliation/signing model and error recovery | Provider callbacks are authenticated/idempotent; existing authority and ledger rules remain valid |
 
-**Recommendation:** If pilot users need more reporting, start with scoped expense CSV export. If repeated maintenance entry is the dominant problem, specify a linked expense-draft workflow first. Defer provider integrations until the existing release has acceptance evidence.
+**Deferred:** Linked expense drafts, private uploads, external communications, formal notice tracking, online payment, and electronic signing remain future work pending pilot need and provider/policy decisions.
 
 ## Suggested execution order
 

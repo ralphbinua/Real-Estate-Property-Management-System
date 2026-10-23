@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
+from maintenance.models import MaintenanceRequest
 from properties.models import Property, Unit
 from .models import Contract, DepositSettlement, LeaseInspection
 
@@ -60,6 +61,33 @@ class MoveOutWorkflowTests(APITestCase):
         self.assertEqual(self.unit.status, 'Available')
         self.assertEqual(LeaseInspection.objects.filter(contract=self.contract, kind='Move Out').count(), 1)
         self.assertEqual(DepositSettlement.objects.get(contract=self.contract).status, 'Approved')
+
+    def test_unresolved_maintenance_blocks_turnover_until_resolved(self):
+        inspection_id = self.start_and_inspect()
+        MaintenanceRequest.objects.create(
+            property=self.property, unit=self.unit, tenant=self.tenant,
+            issue_description='Repair damaged floor', status='Open',
+        )
+        self.client.force_authenticate(self.tenant)
+        self.assertEqual(self.client.post(self.path('inspection-acknowledge'), {'inspectionId': inspection_id}, format='json').status_code, 200)
+        self.client.force_authenticate(self.manager)
+        self.assertEqual(self.client.post(self.path('deposit-settlement'), {'deductions': '100.00', 'reason': 'Floor repair'}, format='json').status_code, 200)
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self.client.post(self.path('deposit-decision'), {'approved': True}, format='json').status_code, 200)
+
+        self.client.force_authenticate(self.manager)
+        blocked = self.client.post(self.path('complete-turnover'))
+        self.assertEqual(blocked.status_code, 400, blocked.data)
+        self.unit.refresh_from_db()
+        self.contract.refresh_from_db()
+        self.assertEqual(self.unit.status, 'Maintenance')
+        self.assertTrue(self.contract.turnover_pending)
+
+        MaintenanceRequest.objects.filter(unit=self.unit).update(status='Resolved')
+        completed = self.client.post(self.path('complete-turnover'))
+        self.assertEqual(completed.status_code, 200, completed.data)
+        self.unit.refresh_from_db()
+        self.assertEqual(self.unit.status, 'Available')
 
     def test_inspection_versions_are_immutable(self):
         self.start_and_inspect()

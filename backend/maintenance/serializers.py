@@ -125,7 +125,14 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'assignedTo': 'Assign an active administrator or this property’s manager.'})
 
         tenant = attrs.get('tenant', getattr(self.instance, 'tenant', user if user and user.role == User.Role.TENANT else None))
-        if tenant and property_obj and not (
+        historical_tenant_unchanged = bool(
+            self.instance
+            and tenant
+            and tenant.pk == self.instance.tenant_id
+            and property_obj
+            and property_obj.pk == self.instance.property_id
+        )
+        if tenant and property_obj and not historical_tenant_unchanged and not (
             property_obj.units.filter(tenant=tenant).exists()
             or property_obj.contracts.filter(tenant=tenant, status='Active', is_deleted=False).exists()
         ):

@@ -3,7 +3,7 @@ import { Alert, Button, Form, Spinner } from 'react-bootstrap';
 import Table from '../ui/ResponsiveTable.jsx';
 import { useAuth } from '../../context/useAuth';
 import { fetchProperties } from '../../services/properties/propertyService';
-import { createExpense, decideExpense, fetchExpenses, fetchOwnerStatement, reviseExpense, reverseExpense } from '../../services/billing/expenseService';
+import { createExpense, decideExpense, exportExpenses, fetchExpenses, fetchOwnerStatement, reviseExpense, reverseExpense } from '../../services/billing/expenseService';
 import formatCurrency from '../../utils/formatCurrency';
 
 const emptyForm = { category: 'Repairs', amount: '', incurredOn: new Date().toISOString().slice(0, 10), payee: '', reference: '', description: '' };
@@ -28,6 +28,7 @@ export default function PropertyFinancePanel() {
   const [editing, setEditing] = useState(null);
   const [decisionNote, setDecisionNote] = useState({});
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -93,6 +94,25 @@ export default function PropertyFinancePanel() {
       await refresh();
     } catch (err) { setError(errorMessage(err)); }
   };
+  const exportCsv = async () => {
+    if (!propertyId) return;
+    setError(''); setExporting(true);
+    try {
+      const response = await exportExpenses(propertyId);
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `expenses-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return <section className="mt-4" aria-label="Property expenses and Owner statement">
     <h5 className="fw-bold mb-2">Property expenses and Owner statement</h5>
@@ -125,7 +145,7 @@ export default function PropertyFinancePanel() {
       </div>
       <div className="mt-2"><Button size="sm" type="submit">{editing ? 'Resubmit expense' : 'Submit expense'}</Button>{editing && <Button size="sm" variant="link" onClick={() => { setEditing(null); setForm(emptyForm); }}>Cancel edit</Button>}</div>
     </Form>}
-    {propertyId && <><h6>Expense history</h6><Table responsive className="pm-table"><thead><tr><th>Date</th><th>Category</th><th>Payee</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>
+    {propertyId && <><div className="d-flex flex-wrap align-items-center justify-content-between gap-2"><h6 className="mb-0">Expense history</h6><Button size="sm" variant="outline-secondary" disabled={!propertyId || exporting} onClick={exportCsv}>{exporting ? 'Exporting…' : 'Export expenses CSV'}</Button></div><Table responsive className="pm-table mt-2"><thead><tr><th>Date</th><th>Category</th><th>Payee</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>
       {expenses.map((item) => <tr key={item.id}><td>{item.incurredOn}</td><td>{item.category}</td><td>{item.payee}{item.reference && <small className="d-block">Reference: {item.reference}</small>}</td><td>{formatCurrency(item.amount)}</td><td>{item.status}{item.decisionNote && <small className="d-block">{item.decisionNote}</small>}</td><td>
         {owner && item.status === 'Pending' && <><Form.Control size="sm" className="mb-1" aria-label={`Decision note for expense ${item.id}`} placeholder="Decision note" value={decisionNote[item.id] || ''} onChange={(e) => setDecisionNote((current) => ({ ...current, [item.id]: e.target.value }))} /><Button size="sm" className="me-1" onClick={() => decide(item.id, true)}>Approve</Button><Button size="sm" variant="outline-danger" onClick={() => decide(item.id, false)}>Reject</Button></>}
         {owner && item.status === 'Approved' && <><Form.Control size="sm" className="mb-1" aria-label={`Reversal reason for expense ${item.id}`} placeholder="Reason for reversal" value={decisionNote[item.id] || ''} onChange={(e) => setDecisionNote((current) => ({ ...current, [item.id]: e.target.value }))} /><Button size="sm" variant="outline-danger" disabled={!decisionNote[item.id]?.trim()} onClick={() => reverse(item.id)}>Reverse</Button></>}

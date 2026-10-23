@@ -173,3 +173,27 @@ class PaymentWorkflowApiTests(APITestCase):
         self.assertEqual(response.status_code, 400, response.data)
         self.assertEqual(Payment.objects.get(pk=second_id).status, Payment.Status.PENDING_VERIFICATION)
         self.assert_invoice('20000.00', '12000.00', 'Partially Paid')
+
+    def test_rejected_and_reversed_payments_do_not_count_toward_invoice_balance(self):
+        self.client.force_authenticate(self.tenant)
+        rejected_id = self.submit_payment('12000.00', 'REJECTED-001')
+        self.client.force_authenticate(self.manager)
+        rejected = self.client.post(f'/api/payments/{rejected_id}/reject/', {'reason': 'Reference is unclear'}, format='json')
+        self.assertEqual(rejected.status_code, 200, rejected.data)
+        self.assertEqual(rejected.data['status'], Payment.Status.REJECTED)
+
+        self.client.force_authenticate(self.tenant)
+        self.assert_invoice('0.00', '32000.00', 'Pending')
+        verified_id = self.submit_payment('12000.00', 'VERIFIED-001')
+        self.client.force_authenticate(self.manager)
+        verified = self.client.post(f'/api/payments/{verified_id}/verify/', {}, format='json')
+        self.assertEqual(verified.status_code, 200, verified.data)
+        self.client.force_authenticate(self.tenant)
+        self.assert_invoice('12000.00', '20000.00', 'Partially Paid')
+
+        self.client.force_authenticate(self.manager)
+        reversed_payment = self.client.post(f'/api/payments/{verified_id}/reverse/', {'reason': 'Bank transfer returned'}, format='json')
+        self.assertEqual(reversed_payment.status_code, 200, reversed_payment.data)
+        self.assertEqual(reversed_payment.data['status'], Payment.Status.REVERSED)
+        self.client.force_authenticate(self.tenant)
+        self.assert_invoice('0.00', '32000.00', 'Pending')

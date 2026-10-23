@@ -15,6 +15,7 @@ const email = 'browser-smoke@example.test';
 const password = crypto.randomBytes(24).toString('base64url');
 const uiReview = process.argv.includes('--ui-review');
 const rentalJourney = process.argv.includes('--rental-journey');
+const expenseExportOnly = process.argv.includes('--expense-export-only');
 const applicantEmail = 'rental-applicant@example.test';
 const reviewRoles = [
   ['Admin', 'admin'], ['Property Manager', 'manager'], ['Agent', 'agent'],
@@ -192,6 +193,44 @@ async function reviewAdminForms(page, reviewDir) {
   await page.setViewportSize({ width: 1440, height: 900 });
 }
 
+async function reviewAdminLeaseViews(page) {
+  await selectWorkspaceSection(page, 'admin', 'contracts', 'Lease contracts');
+  const view = page.getByLabel('Lease contract view');
+  const search = page.getByLabel('Search lease contracts');
+  await view.waitFor();
+  await search.waitFor();
+  if (await view.inputValue() !== 'Active') throw new Error('Admin lease list does not default to Active contracts.');
+  const rows = page.locator('#contracts tbody tr');
+  await page.locator('#contracts').getByText('Admin Lease Search Fixture').first().waitFor();
+  if (await rows.count() !== 1) throw new Error(`Active view should show one lease, got ${await rows.count()}.`);
+
+  await view.selectOption('Pending');
+  await rows.getByText('Pending', { exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelectorAll('#contracts tbody tr').length === 1);
+  if (await rows.count() !== 1) throw new Error('Pending view should show one lease.');
+
+  await view.selectOption('History');
+  await rows.getByText('Expired', { exact: true }).waitFor();
+  await rows.getByText('Terminated', { exact: true }).waitFor();
+  await page.waitForFunction(() => document.querySelectorAll('#contracts tbody tr').length === 2);
+  if (await rows.count() !== 2) throw new Error(`History should show expired and terminated leases, got ${await rows.count()}.`);
+
+  await view.selectOption('All');
+  await search.fill('A Very Long Example');
+  await page.waitForFunction(() => document.querySelectorAll('#contracts tbody tr').length === 4);
+  if (await rows.count() !== 4) throw new Error(`Tenant search should return four leases across statuses, got ${await rows.count()}.`);
+
+  await search.fill('no matching tenant query');
+  await page.locator('#contracts').getByText('No lease contracts match “no matching tenant query”.').waitFor();
+  await search.fill('');
+  await page.waitForFunction(() => document.querySelectorAll('#contracts tbody tr').length === 4);
+  if (await rows.count() !== 4 || await view.inputValue() !== 'All') {
+    throw new Error('Clearing lease search did not restore the selected All view.');
+  }
+  await selectWorkspaceSection(page, 'admin', 'overview', 'Overview');
+  console.log('PASS: Admin lease Active, Pending, History, All, and tenant search views');
+}
+
 async function reviewNotifications(page, reviewDir) {
   await page.setViewportSize({ width: 320, height: 640 });
   await page.getByRole('button', { name: 'Notifications', exact: true }).click();
@@ -238,6 +277,58 @@ function seedMaintenanceFixture() {
   ]);
 }
 
+function seedAdminLeaseFixture() {
+  runPython([
+    'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
+    "from datetime import date; from django.contrib.auth import get_user_model; from properties.models import Property; from contracts.models import Contract; U=get_user_model(); owner=U.objects.get(email='ui-owner@example.test'); tenant=U.objects.create_user(username='ui_lease_tenant', email='ui-lease-tenant@example.test', first_name='A Very Long Example Name', last_name='For Layout Review', role=U.Role.TENANT); home=Property.objects.create(title='Admin Lease Search Fixture', address='1 Lease Search Lane', property_type='Apartment', owner=owner); [Contract.objects.create(property=home, tenant=tenant, start_date=start, end_date=end, rent_amount=1200, status=status) for status,start,end in [('Active',date(2026,1,1),date(2027,1,1)),('Pending',date(2027,1,1),date(2027,12,31)),('Expired',date(2024,1,1),date(2024,12,31)),('Terminated',date(2023,1,1),date(2023,12,31))] ]",
+  ]);
+}
+
+function seedExpenseFixture() {
+  runPython([
+    'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
+    "from datetime import date; from django.contrib.auth import get_user_model; from properties.models import Property; from billing.models import PropertyExpense; U=get_user_model(); owner=U.objects.get(email='ui-owner@example.test'); manager=U.objects.get(email='ui-manager@example.test'); home=Property.objects.create(title='Browser Expense Export', address='1 Expense Export Lane', property_type='Apartment', owner=owner, manager=manager); PropertyExpense.objects.create(property=home, category='Repairs', amount='123.45', incurred_on=date(2026,10,6), payee='CSV test vendor', reference='EXP-CSV', description='Browser export fixture', created_by=manager)",
+  ]);
+}
+
+async function verifyExpenseExport(page, role) {
+  const sectionLabel = role === 'manager' ? 'Rent ledger' : 'Payments';
+  await selectWorkspaceSection(page, role, 'billing', sectionLabel);
+  await page.getByRole('heading', { name: 'Property expenses and Owner statement' }).waitFor();
+  const propertySelect = page.locator('section[aria-label="Property expenses and Owner statement"] select').first();
+  await propertySelect.selectOption({ label: 'Browser Expense Export' });
+  const propertyId = await propertySelect.inputValue();
+  const exportRequests = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/expenses/export/')) exportRequests.push(request.url());
+  });
+  const responseWait = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === '/api/expenses/export/'
+      && url.searchParams.get('propertyId') === propertyId
+      && response.request().method() === 'GET';
+  });
+  const downloadWait = page.waitForEvent('download');
+  const button = page.getByRole('button', { name: 'Export expenses CSV' });
+  await button.waitFor();
+  if (!(await button.isEnabled())) throw new Error(`${role} expense export button is disabled.`);
+  console.log(`Checking ${role} expense export for property ${propertyId}.`);
+  await button.click();
+  const [response, download] = await Promise.all([
+    responseWait.catch((error) => { throw new Error(`${role} expense export made no matching API request (${exportRequests.join(', ') || 'none'}).`, { cause: error }); }),
+    downloadWait,
+  ]);
+  if (!response.ok()) throw new Error(`${role} expense export returned HTTP ${response.status()}.`);
+  if (!download.suggestedFilename().startsWith('expenses-') || !download.suggestedFilename().endsWith('.csv')) {
+    throw new Error(`${role} expense export did not download a date-stamped CSV.`);
+  }
+  const csv = fs.readFileSync(await download.path(), 'utf8');
+  if (!csv.includes('EXP-CSV') || !csv.includes('Browser Expense Export')) {
+    throw new Error(`${role} expense CSV is missing property ${propertyId}'s fixture: ${JSON.stringify(csv.slice(0, 400))}`);
+  }
+  console.log(`PASS: ${role} selected-property expense CSV download`);
+}
+
 function seedRentalJourneyFixture() {
   runPython([
     'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
@@ -251,6 +342,54 @@ function dateInputValue(date) {
 
 function dateTimeInputValue(date) {
   return `${dateInputValue(date)}T${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+async function sessionApi(page, endpoint, method = 'GET', body) {
+  return page.evaluate(async ({ endpoint, method, body }) => {
+    const csrfCookie = document.cookie.split('; ').find((cookie) => cookie.startsWith('csrftoken='))?.slice('csrftoken='.length);
+    const response = await fetch(`/api${endpoint}`, {
+      method,
+      credentials: 'include',
+      headers: body === undefined ? {} : { 'Content-Type': 'application/json', 'X-CSRFToken': decodeURIComponent(csrfCookie || '') },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const clone = response.clone();
+    const data = await response.json().catch(() => null);
+    const raw = data === null ? await clone.text() : '';
+    return { status: response.status, data, raw };
+  }, { endpoint, method, body });
+}
+
+async function expireRentalContract(contractId) {
+  env.BROWSER_RENTAL_CONTRACT_ID = String(contractId);
+  runPython([
+    'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
+    "import os; from datetime import timedelta; from django.utils import timezone; from contracts.models import Contract; contract=Contract.objects.get(pk=os.environ['BROWSER_RENTAL_CONTRACT_ID']); contract.end_date=timezone.localdate()-timedelta(days=1); contract.save(update_fields=['end_date']); renewal=contract.renewal; renewal.proposed_start_date=timezone.localdate(); renewal.save(update_fields=['proposed_start_date'])",
+  ]);
+}
+
+async function setRentalContractUpcoming(contractId) {
+  env.BROWSER_RENTAL_CONTRACT_ID = String(contractId);
+  runPython([
+    'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
+    "import os; from datetime import timedelta; from django.utils import timezone; from contracts.models import Contract; contract=Contract.objects.get(pk=os.environ['BROWSER_RENTAL_CONTRACT_ID']); contract.end_date=timezone.localdate()+timedelta(days=30); contract.save(update_fields=['end_date'])",
+  ]);
+}
+
+async function seedTurnoverMaintenance(propertyTitle) {
+  env.BROWSER_RENTAL_PROPERTY = propertyTitle;
+  runPython([
+    'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
+    "import os; from django.contrib.auth import get_user_model; from properties.models import Property; from maintenance.models import MaintenanceRequest; U=get_user_model(); home=Property.objects.get(title=os.environ['BROWSER_RENTAL_PROPERTY']); tenant=U.objects.get(email='rental-applicant@example.test'); MaintenanceRequest.objects.create(property=home, unit=home.units.get(unit_number='A-101'), tenant=tenant, issue_description='Browser turnover repair gate')",
+  ]);
+}
+
+async function setRentalDeposit(contractId) {
+  env.BROWSER_RENTAL_CONTRACT_ID = String(contractId);
+  runPython([
+    'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
+    "import os; from contracts.models import Contract; contract=Contract.objects.get(pk=os.environ['BROWSER_RENTAL_CONTRACT_ID']); contract.deposit_amount='500.00'; contract.save(update_fields=['deposit_amount'])",
+  ]);
 }
 
 async function loginAs(browser, role, width) {
@@ -408,7 +547,6 @@ async function runRentalJourney(browser, reviewDir) {
   await leaseDialog.locator('input[type="date"]').nth(1).fill(dateInputValue(end));
   await leaseDialog.getByRole('button', { name: 'Prepare lease' }).click();
   await leaseManagerPage.getByText(`Lease prepared for ${applicantName}. It is pending until all parties sign and an authorized person activates it.`).waitFor();
-  await managerSession.context.close();
   console.log('PASS: Manager prepares pending application lease');
 
   const activationOwnerPage = ownerPage;
@@ -425,7 +563,6 @@ async function runRentalJourney(browser, reviewDir) {
   await pendingLeaseRow.getByText('Active', { exact: true }).waitFor();
   await activationOwnerPage.screenshot({ path: path.join(reviewDir, 'rental-owner-activation-320.png'), fullPage: true });
   await assertNoMobileOverflow(activationOwnerPage, 'Owner lease contracts');
-  await ownerSession.context.close();
   console.log('PASS: Owner activates signed lease at 320px');
 
   const tenantContext = await browser.newContext({ viewport: { width: 320, height: 900 } });
@@ -445,6 +582,134 @@ async function runRentalJourney(browser, reviewDir) {
   await tenantPage.getByText('Active', { exact: true }).waitFor();
   await tenantPage.screenshot({ path: path.join(reviewDir, 'rental-tenant-active-lease-320.png'), fullPage: true });
   await assertNoMobileOverflow(tenantPage, 'Tenant lease view');
+
+  const managerLifecyclePage = leaseManagerPage;
+  const lifecycleLeases = await sessionApi(managerLifecyclePage, '/contracts/');
+  const lifecycleLease = (Array.isArray(lifecycleLeases.data) ? lifecycleLeases.data : lifecycleLeases.data.results || []).find((item) => item.tenantDetails?.email === applicantEmail);
+  if (!lifecycleLease) throw new Error('Could not identify the active synthetic lease before renewal acceptance.');
+  await setRentalContractUpcoming(lifecycleLease._id);
+  await managerLifecyclePage.reload();
+  await managerLifecyclePage.locator('.pm-manager').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(managerLifecyclePage, 'manager', 'contracts', 'Leases');
+  const managerLeaseRow = managerLifecyclePage.locator('tr').filter({ hasText: applicantName });
+  await managerLeaseRow.getByRole('button', { name: 'Propose renewal' }).click();
+  const renewalDialog = managerLifecyclePage.locator('.modal').filter({ has: managerLifecyclePage.getByText('Propose lease renewal', { exact: true }) });
+  await renewalDialog.waitFor();
+  const renewalEnd = new Date(end);
+  renewalEnd.setFullYear(renewalEnd.getFullYear() + 1);
+  await renewalDialog.locator('input[type="date"]').fill(dateInputValue(renewalEnd));
+  await renewalDialog.locator('input[type="number"]').fill('33000');
+  await renewalDialog.getByRole('button', { name: 'Save proposal' }).click();
+  await managerLeaseRow.getByText('Renewal: Proposed', { exact: false }).waitFor();
+  const ownerLifecyclePage = activationOwnerPage;
+  await ownerLifecyclePage.reload();
+  await ownerLifecyclePage.locator('.pm-owner').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(ownerLifecyclePage, 'owner', 'contracts', 'Lease contracts');
+  const ownerLeaseRow = ownerLifecyclePage.locator('tr').filter({ hasText: applicantEmail });
+  await ownerLeaseRow.getByRole('button', { name: 'Approve renewal' }).click();
+  await ownerLeaseRow.getByText('Renewal: Approved', { exact: false }).waitFor();
+  const leasesResponse = await sessionApi(managerLifecyclePage, '/contracts/');
+  if (leasesResponse.status !== 200) throw new Error(`Manager could not read own lease for lifecycle acceptance: HTTP ${leasesResponse.status}.`);
+  const activeLease = (Array.isArray(leasesResponse.data) ? leasesResponse.data : leasesResponse.data.results || []).find((item) => item.tenantDetails?.email === applicantEmail || item.tenant?.email === applicantEmail);
+  if (!activeLease) throw new Error(`Could not identify the browser journey lease in the manager list: ${JSON.stringify(leasesResponse.data).slice(0, 500)}`);
+  await expireRentalContract(activeLease.id || activeLease._id);
+  await managerLifecyclePage.reload();
+  await managerLifecyclePage.locator('.pm-manager').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(managerLifecyclePage, 'manager', 'contracts', 'Leases');
+  const expiredLeaseRow = managerLifecyclePage.locator('tr').filter({ hasText: applicantName });
+  await expiredLeaseRow.getByRole('button', { name: 'Prepare next lease' }).click();
+  await expiredLeaseRow.getByText(/Next lease #\d+ is waiting for external signatures/).waitFor();
+  if (await expiredLeaseRow.getByRole('button', { name: 'Record signatures & activate' }).count()) throw new Error('Manager can activate the manually prepared renewal successor.');
+  await ownerLifecyclePage.reload();
+  await ownerLifecyclePage.locator('.pm-owner').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(ownerLifecyclePage, 'owner', 'contracts', 'Lease contracts');
+  const successorRow = ownerLifecyclePage.locator('tr').filter({ hasText: applicantEmail }).filter({ hasText: 'Pending' }).last();
+  await successorRow.getByRole('button', { name: 'Record signatures & activate' }).click();
+  const successorActivation = ownerLifecyclePage.locator('.modal').filter({ has: ownerLifecyclePage.getByText('Activate signed lease', { exact: true }) });
+  await successorActivation.waitFor();
+  await successorActivation.getByPlaceholder('File name, document location, or reference').fill('test-only/browser-journey-renewal.pdf');
+  await successorActivation.getByPlaceholder('Existing tenancy or offline arrangement').fill('Approved renewal successor from the browser acceptance journey.');
+  await successorActivation.locator('#owner-confirm-signed-lease').check();
+  const successorActivationResponse = ownerLifecyclePage.waitForResponse((response) => response.url().includes('/activate/') && response.request().method() === 'POST');
+  await successorActivation.getByRole('button', { name: 'Activate lease' }).click();
+  const activationResult = await successorActivationResponse;
+  if (!activationResult.ok()) throw new Error(`Owner renewal successor activation returned HTTP ${activationResult.status()}: ${await activationResult.text()}`);
+  const activatedLeases = await sessionApi(ownerLifecyclePage, '/contracts/');
+  const activeSuccessor = (Array.isArray(activatedLeases.data) ? activatedLeases.data : activatedLeases.data.results || []).find((item) => item.manualLeaseReference?.startsWith('Lease renewal #') && item.status === 'Active');
+  if (!activeSuccessor) throw new Error(`Owner activation succeeded but successor is not Active: ${JSON.stringify(activatedLeases.data).slice(0, 700)}`);
+  console.log('PASS: Manager proposes, Owner approves, post-expiry preparation and Owner-only renewal activation');
+
+  await setRentalDeposit(activeSuccessor._id);
+  await seedTurnoverMaintenance(propertyTitle);
+  const currentOwnerLeaseRow = ownerLifecyclePage.locator('tr').filter({ hasText: applicantEmail }).filter({ hasText: 'Active' }).last();
+  await currentOwnerLeaseRow.getByRole('button', { name: 'Inspections and move-out' }).click();
+  await currentOwnerLeaseRow.getByLabel('Move-out reason').fill('Browser lifecycle acceptance');
+  const moveOutResponse = ownerLifecyclePage.waitForResponse((response) => response.url().includes('/move-out/') && response.request().method() === 'POST');
+  await currentOwnerLeaseRow.getByRole('button', { name: 'Start move-out' }).click();
+  const moveOutResult = await moveOutResponse;
+  if (!moveOutResult.ok()) throw new Error(`Owner move-out returned HTTP ${moveOutResult.status()}: ${await moveOutResult.text()}`);
+  await ownerLifecyclePage.getByText('Turnover in progress. The unit remains unavailable until completion.').waitFor();
+  await managerLifecyclePage.reload();
+  await managerLifecyclePage.locator('.pm-manager').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(managerLifecyclePage, 'manager', 'contracts', 'Leases');
+  const managerTurnoverRow = managerLifecyclePage.locator('tr').filter({ hasText: applicantName }).filter({ hasText: 'Terminated' }).last();
+  await managerTurnoverRow.getByRole('button', { name: 'Inspections and move-out' }).click();
+  await managerTurnoverRow.getByLabel('Inspection type').selectOption({ label: 'Move Out' });
+  await managerTurnoverRow.getByLabel('walls condition').selectOption({ label: 'Good' });
+  await managerTurnoverRow.getByRole('button', { name: 'Save inspection version' }).click();
+  await tenantPage.reload();
+  await tenantPage.locator('.pm-tenant').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(tenantPage, 'tenant', 'lease', 'Lease');
+  const moveOutInspections = await sessionApi(managerLifecyclePage, `/contracts/${activeSuccessor._id}/inspection/`);
+  const moveOutInspection = Array.isArray(moveOutInspections.data) && moveOutInspections.data.find((item) => item.kind === 'Move Out');
+  if (moveOutInspections.status !== 200 || !moveOutInspection) throw new Error(`Manager move-out inspection was not recorded: ${JSON.stringify(moveOutInspections.data)}`);
+  const acknowledgement = await sessionApi(tenantPage, `/contracts/${activeSuccessor._id}/inspection-acknowledge/`, 'POST', { inspectionId: moveOutInspection.id });
+  if (acknowledgement.status !== 200 || !acknowledgement.data?.tenantAcknowledgedAt) throw new Error(`Tenant inspection acknowledgement failed: HTTP ${acknowledgement.status} ${JSON.stringify(acknowledgement.data)}`);
+  await managerLifecyclePage.reload();
+  await managerLifecyclePage.locator('.pm-manager').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(managerLifecyclePage, 'manager', 'contracts', 'Leases');
+  const managerSettlementRow = managerLifecyclePage.locator('tr').filter({ hasText: applicantName }).filter({ hasText: 'Terminated' }).last();
+  await managerSettlementRow.getByRole('button', { name: 'Inspections and move-out' }).click();
+  await managerSettlementRow.getByLabel('Deposit deductions').fill('100');
+  await managerSettlementRow.getByLabel('Deduction reason').fill('Repair cost under review');
+  await managerSettlementRow.getByRole('button', { name: 'Request Owner approval' }).click();
+  await ownerLifecyclePage.reload();
+  await ownerLifecyclePage.locator('.pm-owner').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(ownerLifecyclePage, 'owner', 'contracts', 'Lease contracts');
+  const ownerSettlementRow = ownerLifecyclePage.locator('tr').filter({ hasText: applicantEmail }).filter({ hasText: 'Terminated' }).last();
+  await ownerSettlementRow.getByRole('button', { name: 'Inspections and move-out' }).click();
+  await ownerSettlementRow.getByRole('button', { name: 'Approve', exact: true }).last().click();
+  await ownerSettlementRow.getByText('Decision: Approved.', { exact: false }).waitFor();
+  await managerLifecyclePage.reload();
+  await managerLifecyclePage.locator('.pm-manager').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(managerLifecyclePage, 'manager', 'contracts', 'Leases');
+  const managerCompletionRow = managerLifecyclePage.locator('tr').filter({ hasText: applicantName }).filter({ hasText: 'Terminated' }).last();
+  await managerCompletionRow.getByRole('button', { name: 'Inspections and move-out' }).click();
+  await managerCompletionRow.getByRole('button', { name: 'Complete turnover' }).click();
+  await managerCompletionRow.getByText('Resolve open maintenance work before turnover.').waitFor();
+  await managerLifecyclePage.reload();
+  await managerLifecyclePage.locator('.pm-manager').waitFor({ state: 'visible' });
+  const workOrders = await sessionApi(managerLifecyclePage, '/maintenance/');
+  if (workOrders.status !== 200) throw new Error(`Manager maintenance list returned HTTP ${workOrders.status}: ${workOrders.raw}`);
+  const openWork = (Array.isArray(workOrders.data) ? workOrders.data : workOrders.data.results || []).find((item) => item.description === 'Browser turnover repair gate' || item.issueDescription === 'Browser turnover repair gate');
+  if (!openWork) throw new Error(`Could not find turnover maintenance fixture: ${JSON.stringify(workOrders.data).slice(0, 500)}`);
+  const workId = openWork.id || openWork._id;
+  const resolveResponse = await sessionApi(managerLifecyclePage, `/maintenance/${workId}/`, 'PATCH', { status: 'Resolved' });
+  if (resolveResponse.status >= 300) throw new Error(`Manager could not resolve lifecycle maintenance: HTTP ${resolveResponse.status} ${JSON.stringify(resolveResponse.data)}`);
+  await selectWorkspaceSection(managerLifecyclePage, 'manager', 'contracts', 'Leases');
+  await managerLifecyclePage.reload();
+  await managerLifecyclePage.locator('.pm-manager').waitFor({ state: 'visible' });
+  await selectWorkspaceSection(managerLifecyclePage, 'manager', 'contracts', 'Leases');
+  const completedTurnoverRow = managerLifecyclePage.locator('tr').filter({ hasText: applicantName }).filter({ hasText: 'Terminated' }).last();
+  await completedTurnoverRow.getByRole('button', { name: 'Inspections and move-out' }).click();
+  await completedTurnoverRow.getByRole('button', { name: 'Complete turnover' }).click();
+  await completedTurnoverRow.getByText('Turnover completed', { exact: false }).waitFor();
+  const unitsResponse = await sessionApi(managerLifecyclePage, '/properties/units/');
+  const unit = (Array.isArray(unitsResponse.data) ? unitsResponse.data : unitsResponse.data.results || []).find((item) => item.unitNumber === 'A-101');
+  if (unit?.status !== 'Available') throw new Error(`Turnover completion did not release the unit: ${JSON.stringify(unit)}`);
+  console.log('PASS: Move-out, tenant inspection acknowledgement, Owner settlement, maintenance block and turnover completion');
+  await managerSession.context.close();
+  await ownerSession.context.close();
   await tenantContext.close();
   console.log('PASS: Tenant sees own active lease at 320px');
 }
@@ -507,11 +772,13 @@ async function main() {
     "import os; from django.contrib.auth import get_user_model; U=get_user_model(); U.objects.create_user(username='browser_smoke', email=os.environ['BROWSER_TEST_EMAIL'], password=os.environ['BROWSER_TEST_PASSWORD'], first_name='Browser', last_name='Smoke', role=U.Role.TENANT)",
   ]);
   if (rentalJourney) seedRentalJourneyFixture();
-  if (uiReview) {
+  if (uiReview || expenseExportOnly) {
     runPython([
       'manage.py', 'shell', '--settings=core.browser_test_settings', '-c',
       `import os; from django.contrib.auth import get_user_model; U=get_user_model(); roles=${JSON.stringify(reviewRoles)}; [U.objects.create_user(username='ui_'+path, email='ui-'+path+'@example.test', password=os.environ['BROWSER_TEST_PASSWORD'], first_name='A Very Long Example Name', last_name='For Layout Review', role=role) for role,path in roles]`,
     ]);
+    seedAdminLeaseFixture();
+    seedExpenseFixture();
   }
 
   const backend = start(python, ['-u', 'manage.py', 'runserver', '127.0.0.1:18000', '--settings=core.browser_test_settings', '--noreload'], backendDir);
@@ -539,7 +806,7 @@ async function main() {
       }
       await page.setViewportSize({ width: 1440, height: 900 });
     }
-    if (!rentalJourney || uiReview) {
+    if ((!rentalJourney || uiReview) && !expenseExportOnly) {
       await page.getByLabel('Email address').fill(email);
       await page.getByLabel('Password').fill(password);
       await page.getByRole('button', { name: 'Sign in' }).click();
@@ -590,8 +857,11 @@ async function main() {
       maintenanceRequestId = await submitMaintenanceRequest(page);
     }
 
-    if (uiReview) {
-      for (const [role, route] of reviewRoles) {
+    if (uiReview || expenseExportOnly) {
+      const rolesToReview = expenseExportOnly
+        ? reviewRoles.filter(([, route]) => ['admin', 'manager', 'owner'].includes(route))
+        : reviewRoles;
+      for (const [role, route] of rolesToReview) {
         const roleContext = await browser.newContext();
         const rolePage = await roleContext.newPage();
         await rolePage.goto(frontendUrl);
@@ -599,21 +869,25 @@ async function main() {
         await rolePage.getByLabel('Password').fill(password);
         await rolePage.getByRole('button', { name: 'Sign in' }).click();
         await rolePage.waitForURL(`**/${route}`, { timeout: 10000 });
-        await reviewWorkspace(rolePage, role, route, reviewDir);
-        if (route === 'admin') {
+        if (uiReview) await reviewWorkspace(rolePage, role, route, reviewDir);
+        if (uiReview && route === 'admin') {
+          await reviewAdminLeaseViews(rolePage);
           await reviewAdminForms(rolePage, reviewDir);
           await assignMaintenanceRequestInBrowser(rolePage, maintenanceRequestId);
         }
-        if (route === 'manager') await reviewManagerInquiries(rolePage, reviewDir);
+        if (uiReview && route === 'manager') await reviewManagerInquiries(rolePage, reviewDir);
+        if (['admin', 'manager', 'owner'].includes(route)) await verifyExpenseExport(rolePage, route);
         await roleContext.close();
       }
-      await verifyTenantMaintenance(page);
-      console.log(`UI screenshots: ${reviewDir}`);
+      if (uiReview) {
+        await verifyTenantMaintenance(page);
+        console.log(`UI screenshots: ${reviewDir}`);
+      }
     }
 
     if (rentalJourney) await runRentalJourney(browser, reviewDir);
 
-    if (!rentalJourney || uiReview) {
+    if ((!rentalJourney || uiReview) && !expenseExportOnly) {
       await page.getByRole('button', { name: 'Sign out' }).click();
       await page.waitForURL('**/login', { timeout: 10000 });
       const afterLogout = await page.request.get(`${frontendUrl}/api/users/me/`);
