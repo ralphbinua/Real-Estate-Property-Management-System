@@ -1,31 +1,32 @@
 # Real Estate Property Management System
 
-A web application for managing rental properties, units, tenants, leases, rent records, maintenance requests, and rental inquiries. The system has separate access for Admins, Property Owners, Property Managers, Agents, and Tenants.
+A website for managing rental properties and the people who live in or manage them. It keeps property details, rental applications, leases, rent records, expenses, and maintenance requests together.
 
-## What the system supports
+The system has five account types: Admin, Property Owner, Property Manager, Agent, and Tenant. Each type has access to the tasks and information it needs.
 
-- Manage properties and their individual units, including rent and availability.
-- Record prospect inquiries, arrange viewings, and submit rental applications.
-- Review applications according to the Owner's recorded approval rules.
-- Create and manage lease contracts.
-- Create rent invoices and record or review payment status.
-- Record property expenses for Owner approval and review calendar-month statements; download scoped expense CSVs for a selected property.
-- Submit maintenance requests, assign them to an Admin or the property's Manager, track status, and receive in-app updates.
-- Review activity records and system settings.
+## What you can do
 
-Rent payments are tracked in the system. No external payment provider is configured in this repository.
+- Add properties and units, and keep their rent and availability up to date.
+- Track rental inquiries, schedule viewings, and review applications.
+- Prepare and manage leases.
+- Create rent invoices and record payments.
+- Submit property expenses for Owner review and view monthly statements.
+- Submit and track maintenance requests.
+- View in-app updates, activity history, and system settings.
 
-## Roles
+The system records payments; it does not collect money online. No payment service is connected.
 
-- **Admin:** Creates and manages accounts, assigns roles, configures the system, and oversees all records. An Admin may record an exception only with the Owner's written instruction and a reference to it; Admin access alone does not make the Admin the property decision-maker.
-- **Property Owner:** Registers properties they own, chooses who decides rental applications, reviews property performance, and makes decisions reserved to them by the management agreement.
-- **Property Manager:** Runs day-to-day work for assigned properties, including units, tenants, applications within the Owner's chosen approval rule, lease preparation, rent records, and maintenance. A Manager can activate an application-based lease or end a lease only when the Owner has separately recorded the relevant authority.
-- **Agent:** Works with assigned listings and prospective tenants: answers inquiries, schedules viewings, and helps prepare applications. Agents do not approve applications or activate leases.
-- **Tenant:** Uses their own account to view their home and lease, check rent records, submit and track maintenance requests, and update personal information.
+## Who uses the system
+
+- **Admin:** Manages user accounts and system settings, and helps oversee records. Admins need the Owner's written instruction to record decisions reserved for an Owner.
+- **Property Owner:** Adds their properties, chooses who reviews rental applications, and makes decisions reserved to them.
+- **Property Manager:** Handles everyday tasks for assigned properties, such as maintaining unit details, preparing leases, recording rent, and coordinating repairs. Some actions require the Owner's recorded permission.
+- **Agent:** Answers prospective tenants' questions, schedules viewings, and helps prepare applications. Agents cannot approve applications or activate leases.
+- **Tenant:** Views their home, lease, and rent records; submits maintenance requests; and updates personal information.
 
 Access and decision authority should follow the written management agreement and applicable local requirements.
 
-## Rental application and lease workflow
+## Application and lease rules
 
 - Each new property starts with **Owner approval** for rental applications. The Owner may delegate application decisions to the assigned Property Manager. The rule in effect when an application is submitted is saved with that application, so changing the rule later does not rewrite older applications.
 - Once an inquiry has a rental application, its property and unit cannot be changed. Start a new inquiry for a different property or unit; viewing notes and other valid inquiry updates remain available.
@@ -36,24 +37,47 @@ Access and decision authority should follow the written management agreement and
 - Existing or offline leases can be entered with a reason or a reference to the existing lease record. A Manager can prepare that record, but only the Owner or an Admin with the Owner's written instruction can activate it.
 - The Owner can end leases for their properties. A Manager can end a lease only with a separate Owner-granted termination authorization. An Admin needs the Owner's written instruction. The system records the reason, effective date, actor, and authority, and keeps the lease history.
 
-## Technology
+## How the system is built
 
 - **Frontend:** React, Vite, React Bootstrap, React Router, and Axios
 - **Backend:** Django and Django REST Framework
 - **Authentication:** Django sessions with CSRF protection
 - **Database:** PostgreSQL
 
-## Run locally
+## Run the website on your computer
+
+These steps are for someone setting up the project for the first time on Windows. You will need an internet connection to download the tools and project packages. Even when your database is on Supabase, Python and the server setup below are still needed to run the server on your computer.
 
 ### Requirements
 
-- Python **3.12** and pip (the baseline runtime used for verification)
-- PostgreSQL, either local or hosted
-- Node.js **20.19+** (20.x), **22.13+** (22.x), or **24+**, with npm
+- Python **3.12** (used to run the server)
+- Node.js **20.19+** (20.x), **22.13+** (22.x), or **24+** (used to run the website), including npm
+- Git (used to download the project)
+- A PostgreSQL database, either hosted by Supabase or running on your computer
 
-### 1. Configure and start the backend
+### Step 1: Check for the required tools
 
-From the project folder, open PowerShell and run:
+PowerShell is the command window included with Windows. Open it and enter these commands one at a time:
+
+```powershell
+node --version
+npm --version
+git --version
+py --version
+```
+
+If PowerShell says a command is “not recognized,” install that tool. After installing, close and reopen PowerShell, then check the versions again.
+
+- **Node.js and npm:** Install a supported version from [nodejs.org](https://nodejs.org/). npm is included with the Windows installer.
+- **Git:** Install [Git for Windows](https://git-scm.com/download/win). Use the installer’s recommended options.
+- **Python:** Install Python **3.12** from [python.org](https://www.python.org/downloads/windows/). Select **Add python.exe to PATH** in the installer.
+- **PostgreSQL database:** If you already use Supabase for this project, you do **not** need to install PostgreSQL on your computer. Otherwise, you can install it from [postgresql.org](https://www.postgresql.org/download/windows/).
+
+When the checks print version numbers, continue to the next step. If Python's `py` command is not recognized after installation, rerun the Python installer and make sure its launcher is selected.
+
+### Step 2: Set up the server
+
+The **server** is the part of the project that handles information and talks to the database. In PowerShell, first make sure you are in the main project folder (the folder containing `backend` and `frontend`), then run:
 
 ```powershell
 cd backend
@@ -62,7 +86,7 @@ py -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-The backend reads its environment settings from `backend/.env`. Create that file with your database connection details:
+The server needs a settings file named `.env` inside the `backend` folder. Create `backend/.env` and add the settings below. Replace the example values with your own. Keep this file private; it contains passwords and must not be uploaded to GitHub. If you are using Supabase, use the database settings from Supabase instead of the local example values.
 
 ```dotenv
 DJANGO_SECRET_KEY=replace-with-a-long-random-local-key
@@ -77,28 +101,29 @@ DB_PORT=5432
 DB_SSLMODE=require
 ```
 
-For a hosted Supabase database, use the connection details supplied by Supabase for `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_PORT`. Database TLS is controlled by `DB_SSLMODE`, defaulting to `require` when debug is disabled and `prefer` in debug mode; it does not depend on the hostname. The loopback-only `core.local_settings` overrides this to `prefer` for local PostgreSQL. Use `--settings=core.local_settings` on local migration and account-setup commands if your local database does not support TLS.
+**Using Supabase?** In your Supabase project, open the database connection details and copy the database name, username, password, host, and port into `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_PORT`. Keep `DB_SSLMODE=require`. You do not need to install PostgreSQL on your computer. If using PostgreSQL installed on your computer, use its local connection details instead.
 
-Run the database setup and start Django:
+Save the file as `backend/.env` (make sure it is not accidentally saved as `.env.txt`).
+
+In PowerShell, prepare the database and create the first server account:
 
 ```powershell
 python manage.py migrate
 python manage.py createsuperuser
 ```
 
-The Django superuser is separate from the app's Admin role. To use the Admin dashboard, change the new account's app role to `Admin` in the Django shell, replacing the example email:
+The account created above can manage the server, but it is not automatically an Admin in the website. To give it access to the Admin dashboard, replace `admin@example.com` with the email you used, then run:
 
 ```powershell
 python manage.py shell -c "from users.models import User; u = User.objects.get(email='admin@example.com'); u.role = User.Role.ADMIN; u.save(update_fields=['role'])"
 python manage.py runserver 127.0.0.1:8000 --settings=core.local_settings
 ```
 
-Keep the backend terminal running. The Vite development server forwards `/api` requests to this Django server.
-The local settings file permits HTTP and non-secure cookies only for loopback hosts. It leaves `DJANGO_DEBUG` disabled; never use `core.local_settings` in production.
+Leave this PowerShell window open while you use the website. It is running the server. The local settings option in the last command is only for running on your own computer; do not use it for a live website.
 
-### 2. Start the frontend
+### Step 3: Start the website
 
-Open a second PowerShell window from the project folder:
+Open a second PowerShell window. Go to the project folder and run:
 
 ```powershell
 cd frontend
@@ -106,21 +131,23 @@ npm ci
 npm run dev
 ```
 
-Open the local address printed by Vite. By default, it is `http://localhost:5173`.
+PowerShell will show a local web address, usually `http://localhost:5173`. Open that address in your browser. Keep both PowerShell windows open while using the website.
 
-### Browser security smoke test
+To stop the website and server, click each PowerShell window and press **Ctrl+C**.
 
-With the backend virtual environment activated and frontend packages installed, run this from `frontend`:
+### Optional: run the browser security check
+
+This check is for developers who want to confirm the sign-in and account pages work. It is not needed to start the website. With the server environment activated and website packages installed, run this from the `frontend` folder:
 
 ```powershell
 npm run test:browser
 ```
 
-The test starts its own servers on ports `18000` and `15173`, creates a temporary SQLite database and Tenant account, then checks sign-in, session restore after refresh, profile editing, and logout. It cleans up its test data and servers afterward. It leaves `DJANGO_DEBUG` disabled and does not use your PostgreSQL database. On Windows it uses installed Brave or Edge; if neither is installed, run `npx playwright install chromium` once. Set `PYTHON_EXECUTABLE` to your virtual environment's Python path if `python` does not point to it.
+The check starts temporary test servers and a temporary database. It checks signing in, refreshing the page, editing a profile, and signing out. It cleans up after itself and does not change your Supabase or local PostgreSQL database. On Windows it needs Brave or Edge. If neither is installed, install its test browser once with `npx playwright install chromium`.
 
-### Automated quality baseline
+### Optional: developer quality checks
 
-With the backend virtual environment activated, run from `backend`:
+These checks are for developers making code changes. They are not required to run the website. With the server environment activated, run these commands from the `backend` folder:
 
 ```powershell
 python manage.py check --settings=core.test_settings
@@ -128,10 +155,7 @@ python manage.py makemigrations --check --dry-run --settings=core.test_settings
 python manage.py test --settings=core.test_settings --noinput
 ```
 
-These checks use an isolated in-memory SQLite database and a process-local cache,
-even if the environment configures Redis. Browser tests also use a process-local
-cache. They do not verify
-production migrations or PostgreSQL locking behavior. From `frontend`, run:
+These backend checks use a temporary SQLite database and do not change your project database. They do not check production database behavior. To check the website code too, run these from the `frontend` folder:
 
 ```powershell
 npm ci
@@ -153,45 +177,13 @@ UI. Expense CSV export is available to Admins, assigned Managers, and Owners for
 property; it follows existing property/status filters and shared CSV formula
 safety and 10,000-row limit behavior.
 
-The `Quality checks` GitHub workflow uses Python 3.12 and Node 22, runs backend
-checks/tests and frontend lint/build, and runs `test:ui` with Playwright Chromium.
-The separate `Security checks` workflow audits dependencies. Local passing checks
-do not imply the GitHub workflow has run; review its result after pushing.
+When code is uploaded to GitHub, the `Quality checks` workflow runs the project checks with Python 3.12 and Node 22. A separate `Security checks` workflow reviews software dependencies. Running checks on your own computer does not mean the GitHub checks have run; view their results on GitHub after uploading code.
 
-## Prepare a Vercel deployment
+## Optional technical reference
 
-The root `vercel.json` deploys the Vite frontend and Django backend as one
-[Vercel Services](https://vercel.com/docs/services) project. Services is in beta.
-It sends `/api`, `/admin`, and `/static` to Django and other paths to the
-frontend. Keep `VITE_API_URL` unset so the browser uses the same-origin `/api`
-path for session and CSRF cookies.
+The sections below are mainly for developers and people who maintain the live website. You can skip them if you only need to understand the system or run it on your computer.
 
-1. Import this repository into Vercel with the repository root as the project
-   root. Use Vercel CLI 50.38.0 or newer if deploying from the command line.
-2. Provision a managed PostgreSQL database and a Redis-compatible cache.
-   Choose a database and cache region close to the Vercel function region.
-3. Set these Vercel environment variables for each deployed environment:
-   `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=false`, `DB_NAME`, `DB_USER`,
-   `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, and `REDIS_URL`. Set
-   `DJANGO_ALLOWED_HOSTS` to your custom production domain, if any. Vercel's
-   generated deployment hostname is added automatically from `VERCEL_URL`.
-   Use a Redis protocol URL (`redis://` or `rediss://`), not an HTTP REST URL.
-   The production database connection uses TLS by default. Keep secrets only
-   in Vercel environment settings; do not commit `.env` files.
-4. Run `python manage.py migrate --settings=core.settings` against the target
-   database as a separate release step using the same environment variables.
-   Do not run migrations from a request handler or during every build.
-5. Deploy a preview first. Check `/api/auth/csrf/`, `/admin/`, a deep frontend
-   link, and sign-in, refresh, profile edit, and logout. Then deploy to
-   production. Django's collected admin static files are served by Vercel's
-   CDN because `STATIC_ROOT` is configured.
-
-The root `vercel.json` schedules monthly billing and daily lease reminders on
-Vercel. Both endpoints require the production `CRON_SECRET`; see the scheduler
-details below. The backend has no file upload fields today; if uploads are
-added, use durable object storage.
-
-## API areas
+### API areas
 
 The backend API is served under `/api`:
 
@@ -212,7 +204,7 @@ Most API requests require a signed-in session. The browser sends the secure sess
 
 Older JWT sign-ins are no longer accepted after this update. Users must sign in again. Login attempts are limited by client IP and account email using Django's cache; use a shared cache in a multi-server deployment and add rate limiting at the reverse proxy as well.
 
-## Maintenance work orders
+### Maintenance work orders
 
 Tenants submit requests with a Normal or Urgent priority and can track status,
 assignment, and public activity. Admins and the assigned Property Manager can
@@ -224,7 +216,7 @@ requesting approval again. Owner and staff views show the estimate, decision,
 cost, and dated history; Tenants do not receive those private fields. Apply
 `maintenance` migration `0003` before using this workflow.
 
-## CSV exports
+### CSV exports
 
 Invoices, payments, leases, and maintenance lists provide a CSV download. Tenants
 can export their own records in all four areas. Each
@@ -232,7 +224,7 @@ export uses the same role and query filters as its list API. Exports contain up
 to 10,000 rows, include headers even when empty, and omit private maintenance
 financial columns for Tenants. Spreadsheet formula-like values are escaped.
 
-## Delivery status
+### Delivery status
 
 The [feature roadmap](docs/feature-roadmap-2026-10-16.md) distinguishes implemented
 code, local verification, staging acceptance, and production verification.
@@ -244,7 +236,7 @@ in-app alerts, but detecting a scheduler that never invokes the app requires
 independent monitoring. Verify all target database migrations, not only those
 named in individual feature sections.
 
-## Inspections and move-out
+### Inspections and move-out
 
 An Owner, or a Manager with the property's lease-ending authority, can start
 move-out from an active lease. Admins must record the Owner instruction and a
@@ -259,7 +251,7 @@ becomes available if no active or pending lease holds it. The existing End
 lease action remains available for leases that do not use the move-out flow.
 Apply the `contracts` migration `0007` before using move-out.
 
-## Property expenses and Owner statements
+### Property expenses and Owner statements
 
 Admins and assigned Managers enter property expenses with category, date,
 amount, payee, and receipt or document reference. Each expense remains Pending
@@ -275,7 +267,7 @@ figure does not include taxes, opening balances, or payouts. Maintenance costs
 must be entered separately as expenses after verification. Apply the `billing`
 migrations `0005` and `0006` before using this area.
 
-## Monthly rent invoices
+### Monthly rent invoices
 
 Each lease sets a rent due day from **1 to 28**, defaulting to the **1st**. Monthly billing creates one invoice for each active lease whose due date falls within that lease term. Running billing again for the same month will not create another invoice. If a scheduled run is missed, the command can generate the correct month later; invoices whose due date has passed are marked overdue.
 
@@ -303,13 +295,13 @@ python manage.py generate_monthly_invoices --month 2026-10
 
 The command does not install a scheduler. Set up a monthly job in the hosting provider or operating system scheduler, and use the deployment's Python environment and database configuration. Running the command twice is safe for invoice creation; both attempts appear in run history.
 
-## Lease expiry reminders and renewals
+### Lease expiry reminders and renewals
 
 The root `vercel.json` also schedules `GET /api/contracts/scheduled-reminders/` daily at 00:15 UTC. It uses the same production `CRON_SECRET` as monthly billing. The job sends in-app reminders to the Tenant, Owner, and assigned Manager when an active lease reaches 60, 30, and 7 days before its end date. Each milestone is recorded once, so retrying the job does not duplicate its notifications. On other hosts, run `python manage.py send_lease_expiry_reminders` daily.
 
 The Owner or assigned Manager may propose the next term's end date and rent from an active lease. A Manager's proposal needs an Owner decision; an Owner proposal is approved when saved. The Tenant can see the proposal and receives an in-app update, but signatures still happen outside the system. This workflow records a proposed term, not a signed agreement. Once the old lease has ended, the Owner or assigned Manager can prepare the linked pending successor; this expires the old record and reserves the same home. Activation then follows the existing rules for a manual lease: the Owner or an Admin with the Owner's written instruction and reference records the signed-copy reference. Manager signing delegation for application-based leases does not authorize activating a renewal. Notice periods and any legal requirements remain governed by the signed agreements and applicable law.
 
-## Rent payment ledger
+### Rent payment ledger
 
 An invoice can have more than one payment transaction, so a Tenant can pay the balance in parts. A Tenant submits the amount, payment date, method, transaction reference, and an optional receipt link through `POST /api/payments/`. The submission remains **Pending Verification** until the Property Manager assigned to the property or an Admin checks it.
 
@@ -323,7 +315,7 @@ Admin and Manager financial reports can be filtered by invoice due month and sho
 
 Verified payment rows offer **Download PDF** in the Tenant, Admin, Manager, and Owner payment views. The acknowledgment identifies the Tenant, property/unit, rental invoice, payment amount/date/method/reference, and verification. Its remaining balance is labeled with the download time, so later partial payments are reflected correctly. Downloads use the existing payment access scope through `GET /api/payments/{id}/acknowledgment/`; pending, rejected, and reversed payments cannot be downloaded. Install ReportLab using the backend setup command above when updating an existing environment.
 
-## Financial validation and summaries
+### Financial validation and summaries
 
 Invoice rent amounts and lease rents must be positive; late fees and security deposits may be zero but cannot be negative. An invoice's total is its rent amount plus late fee. Creating or editing financial amounts recalculates that total, and a supplied total must match it. Verified or reversed payment history continues to protect invoice amounts from editing; ordinary notes updates do not recalculate historical totals.
 
@@ -331,7 +323,7 @@ Invoice status filters use the same verified-payment balance and due-date rules 
 
 A pending lease on a property without units keeps that property reserved as Pending. Editing the draft preserves that reservation; moving the draft releases the old property when no other lease or approved application holds it.
 
-## Project layout
+### Project layout
 
 ```text
 backend/                 Django project and API
@@ -353,8 +345,25 @@ frontend/                React and Vite user interface
     utils/               Formatting and domain utilities
 ```
 
-## Before deployment
+### Put the website online (Vercel)
 
-The commands above are for local development. Before deploying, set `DJANGO_DEBUG=false`, use a secure `DJANGO_SECRET_KEY`, configure the real host names and database, and serve the app over HTTPS. The backend redirects HTTP to HTTPS in production and enables a one-hour HSTS policy by default. If TLS terminates at a trusted reverse proxy, set `DJANGO_TRUST_X_FORWARDED_PROTO=true` only after the proxy strips untrusted forwarding headers. Run `python manage.py check --deploy` with the production environment. Do not commit `.env` files or real passwords to Git.
+This section is for the person responsible for publishing and maintaining the live website. If you only want to run the project on your computer, you can skip it.
 
-Keep production secrets in the hosting provider's secret store and rotate them after suspected exposure. Back up PostgreSQL regularly and test restoring a backup before relying on it. Review account and payment audit events after suspicious activity. The GitHub security workflow checks pinned Python dependencies and production npm dependencies on pull requests and pushes to `main`. For multiple backend workers, use a shared Django cache so login throttling applies across workers. HSTS subdomain and preload options require a domain-wide HTTPS decision; leave them disabled until every subdomain is verified.
+The project is set up to deploy the website and server together on [Vercel](https://vercel.com/docs/services). Vercel Services is in beta.
+
+1. Import this GitHub repository into Vercel. Set the project root to the top-level folder of this repository. If using the Vercel command-line tool, use version 50.38.0 or newer.
+2. Set up a hosted PostgreSQL database and a Redis-compatible cache. Supabase can provide the PostgreSQL database. Choose database and cache locations near the Vercel server location.
+3. In Vercel's project settings, add the required environment variables for each environment: `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=false`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, and `REDIS_URL`. These are private settings; do not put real passwords in this README or commit them to GitHub. Set `DJANGO_ALLOWED_HOSTS` to your custom domain if you have one. Vercel adds its generated deployment address automatically. The cache address must start with `redis://` or `rediss://`.
+4. Before using the site, run the database setup command below once for the target database, using the same private settings:
+
+   ```powershell
+   python manage.py migrate --settings=core.settings
+   ```
+
+   Run this as a separate release step. Do not run it while a visitor is using the site or every time the project is built.
+5. Publish a preview first. Check the sign-in page and try signing in, refreshing the page, editing a profile, and signing out. If these work, publish to production. Django's admin files are served by Vercel's CDN.
+
+The root `vercel.json` schedules monthly billing and daily lease reminders on Vercel. Both scheduled tasks require a private `CRON_SECRET`; see the sections below. The project does not currently have file upload fields. If uploads are added later, they need durable file storage.
+
+For a live website, turn off debug mode, use a strong secret key, configure the correct domain and database, and use HTTPS. Keep secrets in Vercel's private environment settings, never in GitHub. Back up the database regularly and check that backups can be restored. If you suspect an account or payment issue, review the activity records. The GitHub security workflow checks dependencies when code is pushed or a pull request is opened.
+
