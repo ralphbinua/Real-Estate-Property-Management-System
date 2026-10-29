@@ -997,6 +997,46 @@ class RoleDataIsolationApiTests(APITestCase):
             response = self.client.get(endpoint)
             self.assertEqual(response.status_code, 404, response.data)
 
+    def test_notifications_are_scoped_to_each_recipient_for_all_roles(self):
+        recipients = [
+            self.admin,
+            self.owner_a, self.owner_b,
+            self.manager_a, self.manager_b,
+            self.agent_a, self.agent_b,
+            self.tenant_a, self.tenant_b,
+        ]
+        notification_by_user = {
+            user.pk: Notification.objects.create(
+                recipient=user,
+                event_type=Notification.EventType.ACCOUNT,
+                title=f'Private notice {user.pk}',
+                message='Visible only to its recipient.',
+                destination=Notification.Destination.ADMIN_OVERVIEW,
+            )
+            for user in recipients
+        }
+
+        for user in recipients:
+            self.client.force_authenticate(user=user)
+            response = self.client.get('/api/notifications/')
+            self.assertEqual(response.status_code, 200, response.data)
+            records = response.data.get('results', response.data)
+            self.assertEqual(
+                {row['id'] for row in records},
+                {notification_by_user[user.pk].pk},
+                f'Notifications leaked across recipients for {user.role}.',
+            )
+
+        own_notice = notification_by_user[self.owner_a.pk]
+        foreign_notice = notification_by_user[self.owner_b.pk]
+        self.client.force_authenticate(user=self.owner_a)
+        response = self.client.post(f'/api/notifications/{foreign_notice.pk}/read/')
+        self.assertEqual(response.status_code, 404, response.data)
+        self.assertIsNone(foreign_notice.__class__.objects.get(pk=foreign_notice.pk).read_at)
+        response = self.client.post(f'/api/notifications/{own_notice.pk}/read/')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsNotNone(own_notice.__class__.objects.get(pk=own_notice.pk).read_at)
+
     def test_unassigned_agent_cannot_read_old_prospect_records_or_add_properties(self):
         self.world_a['property'].assigned_agents.remove(self.agent_a)
         self.client.force_authenticate(user=self.agent_a)

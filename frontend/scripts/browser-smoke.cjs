@@ -296,7 +296,14 @@ async function verifyExpenseExport(page, role) {
   await selectWorkspaceSection(page, role, 'billing', sectionLabel);
   await page.getByRole('heading', { name: 'Property expenses and Owner statement' }).waitFor();
   const propertySelect = page.locator('section[aria-label="Property expenses and Owner statement"] select').first();
-  await propertySelect.selectOption({ label: 'Browser Expense Export' });
+  const fixtureOption = propertySelect.locator('option').filter({ hasText: 'Browser Expense Export' });
+  const fixturePropertyId = await fixtureOption.getAttribute('value');
+  if (!fixturePropertyId) throw new Error(`${role} could not find the expense export fixture property.`);
+  await propertySelect.selectOption(fixturePropertyId);
+  await page.waitForFunction(({ selector, value }) => document.querySelector(selector)?.value === value, {
+    selector: 'section[aria-label="Property expenses and Owner statement"] select',
+    value: fixturePropertyId,
+  });
   const propertyId = await propertySelect.inputValue();
   const exportRequests = [];
   page.on('request', (request) => {

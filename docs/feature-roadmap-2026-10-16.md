@@ -37,7 +37,7 @@ The Django API and React/Vite frontend support Admin, Owner, Property Manager, A
 ## Known documentation and operational gaps
 
 - Reconciled on 2026-10-17: ordinary application-based lease preparation is limited to Admins and assigned Managers. Owner renewal-successor preparation is a separate action. The Sheet also now reflects Tenant access to all four scoped exports and lease-controlled occupancy assignment.
-- Application settings use UTC; confirm the intended business timezone and scheduler timing. The Google Sheet's Singapore timezone does not configure the application.
+- Application settings default provisionally to `Asia/Manila` and allow `DJANGO_TIME_ZONE` overrides. Confirm the business timezone and scheduler timing before release; the Google Sheet's Singapore timezone does not configure the application.
 - Billing failures create records and in-app alerts, but an independent detector for a scheduler that never invokes the app was not found in the reviewed code. Reminder operational run history is also less complete than billing history.
 - A new quality workflow runs backend checks/tests, frontend lint/build, and existing browser checks alongside the dependency audit. Its actual GitHub execution remains unverified until pushed and run.
 - Browser smoke checks include role layouts and a Tenant/Admin maintenance scenario. They do not prove the full application, lease, renewal, settlement, and statement journey.

@@ -21,6 +21,7 @@ from properties.querysets import property_serializer_queryset
 from users.audit import record_activity
 from core.pagination import OptInPageNumberPagination
 from core.csv_exports import csv_response
+from core.cron_monitoring import report_cron_result
 from notifications.models import Notification
 from notifications.services import create_for_recipients
 
@@ -52,7 +53,12 @@ def scheduled_lease_reminders(request):
     secret = os.environ.get('CRON_SECRET', '')
     if not secret or not compare_digest(request.headers.get('Authorization', ''), f'Bearer {secret}'):
         return Response({'detail': 'Unauthorized.'}, status=401)
-    count = send_lease_expiry_reminders()
+    try:
+        count = send_lease_expiry_reminders()
+    except Exception:
+        report_cron_result('lease_reminders', succeeded=False)
+        raise
+    report_cron_result('lease_reminders', succeeded=True)
     return Response({'sentCount': count})
 
 

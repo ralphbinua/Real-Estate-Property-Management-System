@@ -23,6 +23,7 @@ def renewal_data(renewal):
         return None
     return {
         'id': renewal.pk,
+        'version': renewal.version,
         'status': renewal.status,
         'startDate': renewal.proposed_start_date.isoformat(),
         'endDate': renewal.proposed_end_date.isoformat(),
@@ -65,10 +66,12 @@ def propose_renewal(contract, actor, *, end_date, rent_amount):
     start_date = contract.end_date + timedelta(days=1)
     if end_date <= start_date:
         raise ValidationError({'endDate': 'The new lease must end after its start date.'})
-    if LeaseRenewal.objects.filter(contract=contract).exists():
-        raise ValidationError({'detail': 'This lease already has a renewal record.'})
+    previous = LeaseRenewal.objects.select_for_update().filter(contract=contract).order_by('-version', '-pk').first()
+    if previous and previous.status != LeaseRenewal.Status.DECLINED:
+        raise ValidationError({'detail': 'A renewal proposal is already active or has been prepared.'})
     renewal = LeaseRenewal.objects.create(
-        contract=contract, initiated_by=actor, proposed_start_date=start_date,
+        contract=contract, version=(previous.version + 1 if previous else 1),
+        initiated_by=actor, proposed_start_date=start_date,
         proposed_end_date=end_date, proposed_rent=rent_amount,
         status=LeaseRenewal.Status.APPROVED if actor.role == 'Owner' else LeaseRenewal.Status.PROPOSED,
         decided_by=actor if actor.role == 'Owner' else None,
@@ -81,7 +84,7 @@ def propose_renewal(contract, actor, *, end_date, rent_amount):
 
 @transaction.atomic
 def decide_renewal(contract, actor, *, approve, note=''):
-    renewal = LeaseRenewal.objects.select_for_update().select_related('contract__property', 'contract__tenant').filter(contract=contract).first()
+    renewal = LeaseRenewal.objects.select_for_update().select_related('contract__property', 'contract__tenant').filter(contract=contract).order_by('-version', '-pk').first()
     if renewal is None:
         raise ValidationError({'detail': 'This lease has no renewal proposal.'})
     if actor.role != 'Owner' or renewal.contract.property.owner_id != actor.pk:
@@ -100,7 +103,7 @@ def decide_renewal(contract, actor, *, approve, note=''):
 
 @transaction.atomic
 def prepare_renewal(contract, actor):
-    renewal = LeaseRenewal.objects.select_for_update().select_related('contract__property', 'contract__tenant').filter(contract=contract).first()
+    renewal = LeaseRenewal.objects.select_for_update().select_related('contract__property', 'contract__tenant').filter(contract=contract).order_by('-version', '-pk').first()
     if renewal is None:
         raise ValidationError({'detail': 'This lease has no renewal proposal.'})
     old = Contract.objects.select_for_update().get(pk=contract.pk)

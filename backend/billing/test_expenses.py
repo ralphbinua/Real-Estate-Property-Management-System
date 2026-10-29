@@ -56,6 +56,9 @@ class ExpenseStatementTests(APITestCase):
         corrected = self.client.get(f'/api/expenses/statement/?propertyId={self.property.pk}&month=2026-10')
         self.assertEqual(corrected.data['approvedExpenses'], '0.00')
         self.assertEqual(corrected.data['netCash'], '700.00')
+        self.assertEqual(self.client.post(f'/api/expenses/{expense_id}/reverse/', {'reason': 'Second reversal'}, format='json').status_code, 400)
+        self.assertEqual(self.client.get(f'/api/expenses/{expense_id}/').data['status'], 'Reversed')
+        self.assertEqual(self.client.get(f'/api/expenses/{expense_id}/').data['decisionNote'], 'Duplicate receipt')
 
     def test_cross_property_and_tenant_access_denied(self):
         self.client.force_authenticate(self.manager)

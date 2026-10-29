@@ -20,6 +20,7 @@ class ContractSerializer(serializers.ModelSerializer):
     status = serializers.CharField(read_only=True)
     sourceApplication = serializers.IntegerField(source='source_application_id', read_only=True, allow_null=True)
     renewal = serializers.SerializerMethodField()
+    renewalHistory = serializers.SerializerMethodField()
     manualLeaseReason = serializers.CharField(source='manual_lease_reason', required=False, allow_blank=True, trim_whitespace=True)
     manualLeaseReference = serializers.CharField(source='manual_lease_reference', required=False, allow_blank=True, max_length=500, trim_whitespace=True)
     activatedBy = UserSerializer(source='activated_by', read_only=True)
@@ -52,7 +53,7 @@ class ContractSerializer(serializers.ModelSerializer):
         model = Contract
         fields = [
             '_id', 'property', 'unit', 'tenant', 'startDate', 'endDate', 
-            'rentAmount', 'rentDueDay', 'depositAmount', 'status', 'sourceApplication', 'renewal', 'manualLeaseReason',
+            'rentAmount', 'rentDueDay', 'depositAmount', 'status', 'sourceApplication', 'renewal', 'renewalHistory', 'manualLeaseReason',
             'manualLeaseReference', 'activatedBy', 'activatedAt', 'activationBasis', 'activationNote',
             'activationInstructionReference',
             'signedCopyReference', 'terminatedBy', 'terminatedAt', 'terminationEffectiveDate',
@@ -70,7 +71,12 @@ class ContractSerializer(serializers.ModelSerializer):
     def get_renewal(self, instance):
         from .models import LeaseRenewal
         from .renewals import renewal_data
-        return renewal_data(LeaseRenewal.objects.filter(contract=instance).first())
+        return renewal_data(instance.renewal)
+
+    def get_renewalHistory(self, instance):
+        from .models import LeaseRenewal
+        from .renewals import renewal_data
+        return [renewal_data(item) for item in LeaseRenewal.objects.filter(contract=instance).order_by('version', 'pk')]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

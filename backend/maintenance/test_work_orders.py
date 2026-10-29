@@ -63,6 +63,7 @@ class MaintenanceWorkOrderTests(APITestCase):
         self.assertNotIn('actualCost', tenant_view.data)
         self.assertNotIn('vendorContact', tenant_view.data)
         self.assertEqual(tenant_view.data['status'], 'Resolved')
+        self.assertEqual(tenant_view.data['activity'][-1]['summary'], 'Status changed to Resolved.')
 
     def test_rejected_estimate_requires_revision_before_rerequest(self):
         request_id = self.make_request()

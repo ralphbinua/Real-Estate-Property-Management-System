@@ -229,7 +229,11 @@ financial columns for Tenants. Spreadsheet formula-like values are escaped.
 The [feature roadmap](docs/feature-roadmap-2026-10-16.md) distinguishes implemented
 code, local verification, staging acceptance, and production verification.
 Existing features and cron entries are not evidence of a successful deployment.
-Application dates currently use UTC; confirm the business timezone before release.
+Application dates default to `Asia/Manila`, based on the current workspace
+timezone. Set `DJANGO_TIME_ZONE` to the approved business IANA timezone in every
+environment; the deployment owner should confirm or override this provisional
+default before release. The Google Sheet's `Asia/Singapore` timezone does not
+configure the application.
 The configured billing and reminder jobs run at 00:05 UTC on the first of the
 month and 00:15 UTC daily, respectively. Billing records failures and sends Admin
 in-app alerts, but detecting a scheduler that never invokes the app requires
@@ -281,7 +285,9 @@ The Admin or Property Manager can still use **Run monthly billing batch** in the
 
 The root `vercel.json` configures a monthly cron call to `GET /api/invoices/scheduled-monthly-billing/` at 00:05 UTC on the first day of each month. Set a strong `CRON_SECRET` in the production deployment environment; Vercel sends it as a Bearer token. The endpoint rejects requests when the secret is absent or incorrect. Apply migrations before enabling the cron job. Confirm the job appears in the production deployment's Cron Jobs settings and verify its first run in the Admin billing history. Vercel does not retry failed cron calls, so monitor failed or missing runs and rerun the month manually if needed.
 
-For non-Vercel hosting, schedule this command on the first day of each month from the `backend` folder. Django currently uses UTC to determine the billing month, so schedule it shortly after 00:00 UTC:
+For independent missed-run alerts, create two checks in Healthchecks.io: monthly billing at `5 0 1 * *` UTC and lease reminders at `15 0 * * *` UTC. Set their private ping URLs as `BILLING_HEALTHCHECK_URL` and `LEASE_REMINDERS_HEALTHCHECK_URL` in the deployment environment. Successful jobs send a success check-in; failed jobs send a failure check-in. Missing URLs or failed check-ins are logged without changing the billing or reminder result. Keep the URLs out of source control, screenshots, and the Delivery Plan. Configure an alert recipient and name the operator responsible for recovery. Set the check grace period to match the Vercel plan: Hobby invocations can arrive within the scheduled hour, so allow at least 65 minutes; other plans target the configured minute. In staging, verify success and failure signals, then deliberately suppress one scheduled invocation and confirm the independent alert fires. See [Healthchecks.io's cron monitoring guide](https://healthchecks.io/docs/monitoring_cron_jobs/) and [Vercel's Cron Jobs docs](https://vercel.com/docs/cron-jobs/manage-cron-jobs).
+
+For non-Vercel hosting, schedule this command on the first day of each month from the `backend` folder. Django uses `DJANGO_TIME_ZONE` (default `Asia/Manila`) to determine the billing month; schedule the job after the UTC time that reaches the intended local billing date:
 
 ```powershell
 python manage.py generate_monthly_invoices
@@ -300,6 +306,8 @@ The command does not install a scheduler. Set up a monthly job in the hosting pr
 The root `vercel.json` also schedules `GET /api/contracts/scheduled-reminders/` daily at 00:15 UTC. It uses the same production `CRON_SECRET` as monthly billing. The job sends in-app reminders to the Tenant, Owner, and assigned Manager when an active lease reaches 60, 30, and 7 days before its end date. Each milestone is recorded once, so retrying the job does not duplicate its notifications. On other hosts, run `python manage.py send_lease_expiry_reminders` daily.
 
 The Owner or assigned Manager may propose the next term's end date and rent from an active lease. A Manager's proposal needs an Owner decision; an Owner proposal is approved when saved. The Tenant can see the proposal and receives an in-app update, but signatures still happen outside the system. This workflow records a proposed term, not a signed agreement. Once the old lease has ended, the Owner or assigned Manager can prepare the linked pending successor; this expires the old record and reserves the same home. Activation then follows the existing rules for a manual lease: the Owner or an Admin with the Owner's written instruction and reference records the signed-copy reference. Manager signing delegation for application-based leases does not authorize activating a renewal. Notice periods and any legal requirements remain governed by the signed agreements and applicable law.
+
+If the Owner declines a Manager's proposal, the Owner or assigned Manager can submit a replacement while the original lease remains active. Each version and Owner decision stays in the lease's renewal history. Apply `contracts` migration `0008` to enable renewal history.
 
 ### Rent payment ledger
 

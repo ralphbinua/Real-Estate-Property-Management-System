@@ -23,11 +23,14 @@ class ScopedCsvExportTests(APITestCase):
         cls.admin = User.objects.create_user(username='export-admin', email='export-admin@example.test', role='Admin')
         cls.manager = User.objects.create_user(username='export-manager', email='export-manager@example.test', role='Property Manager')
         cls.other_manager = User.objects.create_user(username='export-other-manager', email='export-other-manager@example.test', role='Property Manager')
+        cls.agent = User.objects.create_user(username='export-agent', email='export-agent@example.test', role='Agent')
+        cls.other_agent = User.objects.create_user(username='export-other-agent', email='export-other-agent@example.test', role='Agent')
         cls.tenant = User.objects.create_user(username='export-tenant', email='export-tenant@example.test', role='Tenant')
         cls.other_tenant = User.objects.create_user(username='export-other-tenant', email='export-other-tenant@example.test', role='Tenant')
         cls.properties = {}
         for suffix, owner, manager, tenant in [('A', cls.owner, cls.manager, cls.tenant), ('B', cls.other_owner, cls.other_manager, cls.other_tenant)]:
             prop = Property.objects.create(title=f'Export {suffix}', address=f'{suffix} Road', property_type='Apartment', owner=owner, manager=manager)
+            prop.assigned_agents.add(cls.agent if suffix == 'A' else cls.other_agent)
             cls.properties[suffix] = prop
             unit = Unit.objects.create(property=prop, unit_number=suffix, monthly_rate=1000, tenant=tenant)
             lease = Contract.objects.create(property=prop, unit=unit, tenant=tenant, start_date=date(2026, 1, 1), end_date=date(2026, 12, 31), rent_amount=Decimal('1000.00'))
@@ -55,6 +58,45 @@ class ScopedCsvExportTests(APITestCase):
         self.assertEqual(len(self.rows('/api/contracts/export/?status=Active')), 1)
         payment_rows = self.rows('/api/payments/export/')
         self.assertIn("'=unsafe", payment_rows[1])
+
+    def test_csv_exports_respect_five_role_record_boundaries(self):
+        exports = (
+            '/api/invoices/export/',
+            '/api/payments/export/',
+            '/api/contracts/export/',
+            '/api/maintenance/export/',
+        )
+        role_worlds = (
+            (self.admin, {'Export A', 'Export B'}),
+            (self.owner, {'Export A'}),
+            (self.other_owner, {'Export B'}),
+            (self.manager, {'Export A'}),
+            (self.other_manager, {'Export B'}),
+            (self.tenant, {'Export A'}),
+            (self.other_tenant, {'Export B'}),
+        )
+        for user, expected_properties in role_worlds:
+            for path in exports:
+                with self.subTest(role=user.role, user=user.pk, path=path):
+                    self.client.force_authenticate(user)
+                    response = self.response(path)
+                    self.assertEqual(response.status_code, 200, path)
+                    rows = list(csv.reader(io.StringIO(b''.join(response.streaming_content).decode('utf-8-sig'))))
+                    content = '\n'.join(','.join(row) for row in rows[1:])
+                    visible = {name for name in ('Export A', 'Export B') if name in content}
+                    self.assertEqual(visible, expected_properties, path)
+
+        for agent in (self.agent, self.other_agent):
+            for path in exports:
+                with self.subTest(role=agent.role, user=agent.pk, path=path):
+                    self.client.force_authenticate(agent)
+                    response = self.response(path)
+                    if path in ('/api/contracts/export/', '/api/maintenance/export/'):
+                        self.assertEqual(response.status_code, 403, path)
+                    else:
+                        self.assertEqual(response.status_code, 200, path)
+                        rows = list(csv.reader(io.StringIO(b''.join(response.streaming_content).decode('utf-8-sig'))))
+                        self.assertEqual(len(rows), 1, path)
 
     def test_tenant_maintenance_export_hides_financial_columns(self):
         self.client.force_authenticate(self.tenant)

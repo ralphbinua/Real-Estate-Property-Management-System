@@ -34,12 +34,22 @@ export default function RenewalControls({ contract, role, onUpdated }) {
   return <div className="mt-2">
     {daysLeft !== null && daysLeft >= 0 && daysLeft <= 60 && <div className="small text-warning">Ends in {daysLeft} day{daysLeft === 1 ? '' : 's'}</div>}
     {renewal && <div className="small text-muted">Renewal: {renewal.status} · {renewal.startDate}–{renewal.endDate}</div>}
+    {contract.renewalHistory?.length > 1 && <details className="small mt-1">
+      <summary>Renewal proposal history ({contract.renewalHistory.length})</summary>
+      <ol className="mb-1 mt-1">
+        {contract.renewalHistory.map((item) => <li key={item.id}>
+          Version {item.version}: {item.status} · {item.startDate}–{item.endDate} · {item.rentAmount}/month
+          {item.decisionNote && <div className="text-muted">Decision note: {item.decisionNote}</div>}
+        </li>)}
+      </ol>
+    </details>}
     {error && <Alert variant="danger" className="small py-1 my-2">{error}</Alert>}
     {contract.status === 'Active' && !renewal && daysLeft >= 0 && <Button size="sm" variant="outline-primary" disabled={busy} onClick={() => setShowProposal(true)}>Propose renewal</Button>}
     {role === 'owner' && renewal?.status === 'Proposed' && <div className="d-flex gap-2 mt-1">
       <Button size="sm" disabled={busy} onClick={() => perform(() => decideLeaseRenewal(id, true))}>Approve renewal</Button>
       <Button size="sm" variant="outline-danger" disabled={busy} onClick={() => perform(() => decideLeaseRenewal(id, false))}>Decline</Button>
     </div>}
+    {(role === 'manager' || role === 'owner') && renewal?.status === 'Declined' && contract.status === 'Active' && daysLeft >= 0 && <Button size="sm" variant="outline-primary" disabled={busy} onClick={() => setShowProposal(true)}>Propose revised renewal</Button>}
     {renewal?.status === 'Approved' && daysLeft < 0 && <Button size="sm" variant="outline-primary" disabled={busy} onClick={() => perform(() => prepareLeaseRenewal(id))}>Prepare next lease</Button>}
     {renewal?.status === 'Prepared' && <div className="small text-muted">Next lease #{renewal.successorId} is waiting for external signatures and authorized activation.</div>}
 

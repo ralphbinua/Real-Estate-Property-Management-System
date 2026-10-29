@@ -30,6 +30,20 @@ class BillingRunTests(APITestCase):
             self.assertEqual(response.data['generatedCount'], 0)
         self.assertEqual(BillingRun.objects.filter(trigger='Scheduled', status='Succeeded').count(), 2)
 
+    @patch.dict('os.environ', {'CRON_SECRET': 'billing-test-secret'})
+    def test_scheduled_endpoint_reports_success_and_failure_to_monitor(self):
+        url = '/api/invoices/scheduled-monthly-billing/'
+        with patch('billing.views.report_cron_result') as report:
+            response = self.client.get(url, HTTP_AUTHORIZATION='Bearer billing-test-secret')
+        self.assertEqual(response.status_code, 200, response.data)
+        report.assert_called_once_with('billing', succeeded=True)
+
+        with patch('billing.views.run_monthly_billing', side_effect=RuntimeError('expected billing failure')):
+            with patch('billing.views.report_cron_result') as report:
+                with self.assertRaises(RuntimeError):
+                    self.client.get(url, HTTP_AUTHORIZATION='Bearer billing-test-secret')
+        report.assert_called_once_with('billing', succeeded=False)
+
     def test_run_history_is_staff_only_and_manager_sees_only_own_manual_runs(self):
         BillingRun.objects.create(month=date(2026, 10, 1), trigger='Scheduled', status='Succeeded')
         BillingRun.objects.create(month=date(2026, 10, 1), trigger='Manual', actor=self.admin, status='Succeeded')

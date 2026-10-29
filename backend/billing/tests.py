@@ -77,6 +77,14 @@ class InvoiceFinancialValidationApiTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data['totalDue'], '1060.00')
 
+    def test_verified_rent_does_not_cover_the_unpaid_late_fee(self):
+        Payment.objects.create(invoice=self.invoice, amount=1000, status=Payment.Status.VERIFIED)
+        response = self.client.get(f'/api/invoices/{self.invoice.pk}/')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['amountPaid'], Decimal('1000.00'))
+        self.assertEqual(response.data['balanceDue'], Decimal('50.00'))
+        self.assertEqual(response.data['status'], 'Partially Paid')
+
     def test_mismatched_total_edit_is_rejected(self):
         response = self.client.patch(f'/api/invoices/{self.invoice.pk}/', {'totalDue': '1.00'}, format='json')
         self.assertEqual(response.status_code, 400, response.data)

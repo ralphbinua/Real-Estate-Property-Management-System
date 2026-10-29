@@ -26,7 +26,7 @@ class LeaseRenewalTests(APITestCase):
         cls.contract = Contract.objects.create(
             property=cls.property, unit=cls.unit, tenant=cls.tenant, status='Active',
             start_date=timezone.localdate() - timedelta(days=300),
-            end_date=timezone.localdate() + timedelta(days=30), rent_amount=1000,
+            end_date=timezone.localdate() + timedelta(days=30), rent_amount=1000, deposit_amount=500,
         )
 
     def propose(self, actor):
@@ -98,6 +98,70 @@ class LeaseRenewalTests(APITestCase):
             self.assertEqual(self.client.post(url).status_code, 400)
         self.assertEqual(Contract.objects.count(), 1)
 
+    def test_owner_can_consider_a_replacement_after_declining_and_history_is_preserved(self):
+        first = self.propose(self.manager)
+        self.client.force_authenticate(self.owner)
+        declined = self.client.post(
+            f'/api/contracts/{self.contract.pk}/renewal-decision/',
+            {'approve': False, 'note': 'Revise the proposed rent.'}, format='json',
+        )
+        self.assertEqual(declined.status_code, 200, declined.data)
+
+        self.client.force_authenticate(self.manager)
+        replacement = self.client.post(f'/api/contracts/{self.contract.pk}/renewal/', {
+            'endDate': (self.contract.end_date + timedelta(days=731)).isoformat(),
+            'rentAmount': '1050.00',
+        }, format='json')
+        self.assertEqual(replacement.status_code, 201, replacement.data)
+        self.assertNotEqual(replacement.data['id'], first.data['id'])
+        self.assertEqual(replacement.data['status'], 'Proposed')
+        self.assertEqual(replacement.data['version'], 2)
+        self.assertEqual(replacement.data['rentAmount'], '1050.00')
+
+        self.client.force_authenticate(self.owner)
+        approved = self.client.post(
+            f'/api/contracts/{self.contract.pk}/renewal-decision/',
+            {'approve': True}, format='json',
+        )
+        self.assertEqual(approved.status_code, 200, approved.data)
+        self.assertEqual(approved.data['id'], replacement.data['id'])
+        self.assertEqual(LeaseRenewal.objects.filter(contract=self.contract).count(), 2)
+        self.assertEqual(LeaseRenewal.objects.get(pk=first.data['id']).status, LeaseRenewal.Status.DECLINED)
+        self.assertEqual(self.client.get(f'/api/contracts/{self.contract.pk}/').data['renewal']['id'], replacement.data['id'])
+        self.assertEqual([item['id'] for item in self.client.get(f'/api/contracts/{self.contract.pk}/').data['renewalHistory']], [first.data['id'], replacement.data['id']])
+
+    def test_inspection_versions_are_immutable_and_access_is_role_scoped(self):
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self.client.post(f'/api/contracts/{self.contract.pk}/move-out/', {
+            'reason': 'Tenant moved out', 'effectiveDate': timezone.localdate().isoformat(),
+        }, format='json').status_code, 200)
+        path = f'/api/contracts/{self.contract.pk}/inspection/'
+        self.client.force_authenticate(self.manager)
+        original = self.client.post(path, {
+            'kind': 'Move Out', 'inspectedOn': timezone.localdate().isoformat(),
+            'checklist': {'walls': 'Good'}, 'notes': 'Initial inspection',
+        }, format='json')
+        self.assertEqual(original.status_code, 201, original.data)
+        updated = self.client.post(path, {
+            'kind': 'Move Out', 'inspectedOn': timezone.localdate().isoformat(),
+            'checklist': {'walls': 'Fair'}, 'notes': 'Revised inspection',
+        }, format='json')
+        self.assertEqual(updated.data['version'], 2)
+        self.assertEqual(self.client.get(path).data[1]['checklist'], {'walls': 'Good'})
+        self.client.force_authenticate(self.other_owner)
+        self.assertEqual(self.client.get(path).status_code, 404)
+        self.client.force_authenticate(self.tenant)
+        self.assertEqual(self.client.post(f'/api/contracts/{self.contract.pk}/inspection-acknowledge/', {
+            'inspectionId': original.data['id'],
+        }, format='json').status_code, 200)
+        self.client.force_authenticate(self.manager)
+        self.assertEqual(self.client.post(f'/api/contracts/{self.contract.pk}/deposit-settlement/', {
+            'deductions': '500.01', 'reason': 'Over deposit cap',
+        }, format='json').status_code, 400)
+        self.assertEqual(self.client.post(f'/api/contracts/{self.contract.pk}/deposit-settlement/', {
+            'deductions': '500.00', 'reason': 'Within deposit cap',
+        }, format='json').status_code, 200)
+
     def test_invalid_renewal_term_does_not_create_record(self):
         self.client.force_authenticate(self.owner)
         response = self.client.post(f'/api/contracts/{self.contract.pk}/renewal/', {
@@ -122,3 +186,17 @@ class LeaseRenewalTests(APITestCase):
         self.assertEqual(self.client.get(url, HTTP_AUTHORIZATION='Bearer wrong').status_code, 401)
         response = self.client.get(url, HTTP_AUTHORIZATION='Bearer renewal-test-secret')
         self.assertEqual(response.status_code, 200, response.data)
+
+    @patch.dict('os.environ', {'CRON_SECRET': 'renewal-test-secret'})
+    def test_reminder_endpoint_reports_success_and_failure_to_monitor(self):
+        url = '/api/contracts/scheduled-reminders/'
+        with patch('contracts.views.report_cron_result') as report:
+            response = self.client.get(url, HTTP_AUTHORIZATION='Bearer renewal-test-secret')
+        self.assertEqual(response.status_code, 200, response.data)
+        report.assert_called_once_with('lease_reminders', succeeded=True)
+
+        with patch('contracts.views.send_lease_expiry_reminders', side_effect=RuntimeError('expected reminder failure')):
+            with patch('contracts.views.report_cron_result') as report:
+                with self.assertRaises(RuntimeError):
+                    self.client.get(url, HTTP_AUTHORIZATION='Bearer renewal-test-secret')
+        report.assert_called_once_with('lease_reminders', succeeded=False)

@@ -1,3 +1,4 @@
+import builtins
 from django.db import models
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -74,6 +75,11 @@ class Contract(models.Model):
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    @builtins.property
+    def renewal(self):
+        """Return the latest proposal for compatibility with existing callers."""
+        return self.renewal_proposals.order_by('-version', '-pk').first()
+
     def __str__(self):
         return f"Lease #{self.id} - {self.property.title}"
 
@@ -85,7 +91,8 @@ class LeaseRenewal(models.Model):
         DECLINED = 'Declined', 'Declined'
         PREPARED = 'Prepared', 'Prepared'
 
-    contract = models.OneToOneField(Contract, on_delete=models.PROTECT, related_name='renewal')
+    contract = models.ForeignKey(Contract, on_delete=models.PROTECT, related_name='renewal_proposals')
+    version = models.PositiveIntegerField(default=1)
     proposed_start_date = models.DateField()
     proposed_end_date = models.DateField()
     proposed_rent = models.DecimalField(max_digits=10, decimal_places=2)
@@ -96,6 +103,10 @@ class LeaseRenewal(models.Model):
     decided_at = models.DateTimeField(null=True, blank=True)
     decision_note = models.TextField(blank=True, default='')
     successor = models.OneToOneField(Contract, on_delete=models.PROTECT, null=True, blank=True, related_name='renewed_from')
+
+    class Meta:
+        ordering = ['-version', '-id']
+        constraints = [models.UniqueConstraint(fields=['contract', 'version'], name='unique_lease_renewal_version')]
 
     def __str__(self):
         return f'Renewal for lease #{self.contract_id} ({self.status})'

@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from contracts.models import Contract
 from core.pagination import OptInPageNumberPagination
 from core.csv_exports import csv_response
+from core.cron_monitoring import report_cron_result
 from users.audit import record_activity
 from notifications.models import Notification
 from notifications.services import create_for_recipients
@@ -60,9 +61,14 @@ def scheduled_monthly_billing(request):
     supplied = request.headers.get('Authorization', '')
     if not secret or not compare_digest(supplied, f'Bearer {secret}'):
         return Response({'detail': 'Unauthorized.'}, status=status.HTTP_401_UNAUTHORIZED)
-    run = run_monthly_billing(trigger='Scheduled')
-    record_activity(None, 'GENERATE', 'Invoices', '',
-                    f'Generated {run.created_count} monthly rent invoices for {run.month:%Y-%m}.')
+    try:
+        run = run_monthly_billing(trigger='Scheduled')
+        record_activity(None, 'GENERATE', 'Invoices', '',
+                        f'Generated {run.created_count} monthly rent invoices for {run.month:%Y-%m}.')
+    except Exception:
+        report_cron_result('billing', succeeded=False)
+        raise
+    report_cron_result('billing', succeeded=True)
     return Response({'month': run.month.isoformat(), 'generatedCount': run.created_count})
 
 

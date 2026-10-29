@@ -184,6 +184,7 @@ class PaymentWorkflowApiTests(APITestCase):
 
         self.client.force_authenticate(self.tenant)
         self.assert_invoice('0.00', '32000.00', 'Pending')
+
         verified_id = self.submit_payment('12000.00', 'VERIFIED-001')
         self.client.force_authenticate(self.manager)
         verified = self.client.post(f'/api/payments/{verified_id}/verify/', {}, format='json')
@@ -197,3 +198,39 @@ class PaymentWorkflowApiTests(APITestCase):
         self.assertEqual(reversed_payment.data['status'], Payment.Status.REVERSED)
         self.client.force_authenticate(self.tenant)
         self.assert_invoice('0.00', '32000.00', 'Pending')
+
+    def test_acknowledgment_requires_verified_payment_and_remains_in_scope_after_reversal(self):
+        self.client.force_authenticate(self.tenant)
+        payment_id = self.submit_payment('500.00', 'ACK-SCOPE-001')
+        acknowledgment_url = f'/api/payments/{payment_id}/acknowledgment/'
+        self.assertEqual(self.client.get(acknowledgment_url).status_code, 400)
+
+        self.client.force_authenticate(self.other_tenant)
+        self.assertEqual(self.client.get(acknowledgment_url).status_code, 404)
+        self.client.force_authenticate(self.manager)
+        self.assertEqual(self.client.get(acknowledgment_url).status_code, 400)
+        self.assertEqual(self.client.post(f'/api/payments/{payment_id}/verify/', {}, format='json').status_code, 200)
+        self.client.force_authenticate(self.tenant)
+        self.assertEqual(self.client.get(acknowledgment_url).status_code, 200)
+
+        self.client.force_authenticate(self.manager)
+        self.assertEqual(self.client.post(f'/api/payments/{payment_id}/reverse/', {
+            'reason': 'Transfer returned',
+        }, format='json').status_code, 200)
+        self.client.force_authenticate(self.tenant)
+        self.assertEqual(self.client.get(acknowledgment_url).status_code, 400)
+        self.assert_invoice('0.00', '32000.00', 'Pending')
+
+    def test_split_payment_ledger_counts_only_verified_installments(self):
+        self.client.force_authenticate(self.tenant)
+        first = self.submit_payment('10000.00', 'SPLIT-001')
+        second = self.submit_payment('5000.00', 'SPLIT-002')
+        self.client.force_authenticate(self.manager)
+        self.assertEqual(self.client.post(f'/api/payments/{first}/verify/', {}, format='json').status_code, 200)
+        self.client.force_authenticate(self.tenant)
+        self.assert_invoice('10000.00', '22000.00', 'Partially Paid')
+        self.assertEqual(Payment.objects.get(pk=second).status, Payment.Status.PENDING_VERIFICATION)
+        self.client.force_authenticate(self.manager)
+        self.assertEqual(self.client.post(f'/api/payments/{second}/verify/', {}, format='json').status_code, 200)
+        self.client.force_authenticate(self.tenant)
+        self.assert_invoice('15000.00', '17000.00', 'Partially Paid')
