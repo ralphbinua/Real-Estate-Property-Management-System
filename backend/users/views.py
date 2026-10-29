@@ -213,20 +213,23 @@ class UserViewSet(viewsets.ModelViewSet):
             tenants = User.objects.filter(role=User.Role.TENANT, is_active=True, is_deleted=False)
         elif user.role == User.Role.PROPERTY_MANAGER:
             from django.db.models import Exists, OuterRef, Q
-            from contracts.models import Contract
-            active_leases = Contract.objects.filter(
-                tenant_id=OuterRef('pk'),
-                status__in=['Active', 'Pending'],
-                is_deleted=False,
+            from properties.models import RentalApplication
+            approved_applications = RentalApplication.objects.filter(
+                inquiry__property__manager=user,
+                inquiry__property__is_deleted=False,
+                status='Approved',
+                applicant_email__iexact=OuterRef('email'),
             )
-            tenants = User.objects.annotate(has_active_lease=Exists(active_leases)).filter(
+            tenants = User.objects.annotate(
+                has_approved_application=Exists(approved_applications),
+            ).filter(
                 role=User.Role.TENANT,
                 is_active=True,
                 is_deleted=False,
             ).filter(
                 Q(rented_units__property__manager=user)
                 | Q(tenant_contracts__property__manager=user, tenant_contracts__is_deleted=False)
-                | (Q(rented_units__isnull=True) & Q(has_active_lease=False))
+                | Q(has_approved_application=True)
             ).distinct()
         else:
             return Response({'detail': 'Only administrators and property managers may browse tenant accounts.'}, status=403)

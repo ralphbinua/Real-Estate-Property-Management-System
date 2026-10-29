@@ -405,6 +405,140 @@ class RentalLifecycleApiTests(APITestCase):
         self.assertEqual(response.status_code, 201, response.data)
         return RentalApplication.objects.get(pk=response.data['id'])
 
+    def test_manager_without_pricing_authority_must_get_owner_rent_approval(self):
+        self.act_as(self.manager)
+        direct_edit = self.client.patch(
+            f'/api/properties/units/{self.unit.pk}/', {'monthlyRate': '35000.00'}, format='json',
+        )
+        self.assertEqual(direct_edit.status_code, 400, direct_edit.data)
+        property_rate_edit = self.client.patch(
+            f'/api/properties/{self.property.pk}/', {'price': '35000.00'}, format='json',
+        )
+        self.assertEqual(property_rate_edit.status_code, 400, property_rate_edit.data)
+        proposal = self.client.post('/api/properties/rent-change-requests/', {
+            'propertyId': self.property.pk,
+            'targetKind': 'Unit',
+            'unitId': self.unit.pk,
+            'proposedRate': '35000.00',
+            'reason': 'Updated market rate.',
+        }, format='json')
+        self.assertEqual(proposal.status_code, 201, proposal.data)
+        self.assertEqual(proposal.data['status'], 'Pending')
+
+        self.act_as(self.owner)
+        response = self.client.patch(
+            f"/api/properties/rent-change-requests/{proposal.data['id']}/decision/",
+            {'status': 'Approved', 'decisionNote': 'Approved under the management agreement.'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.unit.refresh_from_db()
+        self.assertEqual(self.unit.monthly_rate, Decimal('35000.00'))
+
+        self.act_as(self.owner)
+        authority = self.client.patch(
+            f'/api/properties/{self.property.pk}/rent-pricing-authority/',
+            {
+                'authorized': True,
+                'confirmWrittenAuthority': True,
+                'agreementReference': 'test-only/pricing-agreement.pdf',
+            },
+            format='json',
+        )
+        self.assertEqual(authority.status_code, 200, authority.data)
+        self.act_as(self.manager)
+        authorized_edit = self.client.patch(
+            f'/api/properties/units/{self.unit.pk}/', {'monthlyRate': '36000.00'}, format='json',
+        )
+        self.assertEqual(authorized_edit.status_code, 200, authorized_edit.data)
+        self.unit.refresh_from_db()
+        self.assertEqual(self.unit.monthly_rate, Decimal('36000.00'))
+
+    def test_manager_never_activates_manual_lease_even_with_signing_authority(self):
+        self.unit.status = 'Reserved'
+        self.unit.save(update_fields=['status'])
+        contract = Contract.objects.create(
+            property=self.property,
+            unit=self.unit,
+            tenant=self.tenant,
+            start_date=date.today(),
+            end_date=date.today() + timedelta(days=365),
+            rent_amount=Decimal('32000.00'),
+            status='Pending',
+            manual_lease_reason='Existing offline agreement.',
+            manual_lease_reference='test-only/offline-lease.pdf',
+        )
+        self.act_as(self.owner)
+        authority = self.client.patch(
+            f'/api/properties/{self.property.pk}/lease-signing-authority/',
+            {
+                'authorized': True,
+                'confirmWrittenAuthority': True,
+                'agreementReference': 'test-only/management-agreement.pdf',
+            },
+            format='json',
+        )
+        self.assertEqual(authority.status_code, 200, authority.data)
+
+        self.act_as(self.manager)
+        response = self.client.post(f'/api/contracts/{contract.pk}/activate/', {
+            'signaturesComplete': True,
+            'signedCopyReference': 'test-only/signed-copy.pdf',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 400, response.data)
+        contract.refresh_from_db()
+        self.assertEqual(contract.status, 'Pending')
+        self.assertEqual(contract.activation_basis, '')
+
+    def test_manager_can_end_lease_only_after_owner_records_termination_authority(self):
+        self.unit.status = 'Occupied'
+        self.unit.tenant = self.tenant
+        self.unit.save(update_fields=['status', 'tenant'])
+        contract = Contract.objects.create(
+            property=self.property,
+            unit=self.unit,
+            tenant=self.tenant,
+            start_date=date.today() - timedelta(days=30),
+            end_date=date.today() + timedelta(days=335),
+            rent_amount=Decimal('32000.00'),
+            status='Active',
+        )
+        termination_url = f'/api/contracts/{contract.pk}/terminate/'
+        termination_data = {
+            'reason': 'Scheduled lease end.',
+            'effectiveDate': date.today().isoformat(),
+        }
+
+        self.act_as(self.manager)
+        denied = self.client.post(termination_url, termination_data, format='json')
+        self.assertEqual(denied.status_code, 400, denied.data)
+        contract.refresh_from_db()
+        self.assertEqual(contract.status, 'Active')
+
+        self.act_as(self.owner)
+        granted = self.client.patch(
+            f'/api/properties/{self.property.pk}/termination-authority/',
+            {
+                'authorized': True,
+                'confirmWrittenAuthority': True,
+                'agreementReference': 'test-only/management-agreement.pdf',
+            },
+            format='json',
+        )
+        self.assertEqual(granted.status_code, 200, granted.data)
+
+        self.act_as(self.manager)
+        ended = self.client.post(termination_url, termination_data, format='json')
+
+        self.assertEqual(ended.status_code, 200, ended.data)
+        contract.refresh_from_db()
+        self.assertEqual(contract.status, 'Terminated')
+        self.assertEqual(contract.termination_basis, 'Manager Delegation')
+        self.assertEqual(contract.terminated_by_id, self.manager.pk)
+        self.assertEqual(contract.termination_note, 'test-only/management-agreement.pdf')
+
     def test_application_keeps_owner_rule_after_property_rule_changes_to_manager(self):
         application = self.submit_application(approval_mode='Owner', name='Owner rule snapshot applicant')
         self.assertEqual(application.approval_mode, 'Owner')
@@ -996,6 +1130,40 @@ class RoleDataIsolationApiTests(APITestCase):
             self.client.force_authenticate(user=user)
             response = self.client.get(endpoint)
             self.assertEqual(response.status_code, 404, response.data)
+
+    def test_owner_application_decision_rejects_other_roles_and_admin_without_reference(self):
+        application = self.world_a['application']
+        application.status = 'Pending Owner Approval'
+        application.approval_mode = 'Owner'
+        application.save(update_fields=['status', 'approval_mode'])
+        unit = self.world_a['unit']
+        unit.status = 'Available'
+        unit.save(update_fields=['status'])
+        url = f'/api/properties/applications/{application.pk}/'
+
+        attempts = (
+            (self.admin, 400),
+            (self.manager_a, 400),
+            (self.agent_a, 403),
+            (self.tenant_a, 403),
+            (self.owner_b, 404),
+        )
+        for user, expected_status in attempts:
+            with self.subTest(role=user.role, user=user.username):
+                self.client.force_authenticate(user=user)
+                response = self.client.patch(url, {'status': 'Approved'}, format='json')
+                self.assertEqual(response.status_code, expected_status, response.data)
+                application.refresh_from_db()
+                self.assertEqual(application.status, 'Pending Owner Approval')
+                unit.refresh_from_db()
+                self.assertEqual(unit.status, 'Available')
+
+        self.client.force_authenticate(user=self.owner_a)
+        response = self.client.patch(url, {'status': 'Approved'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        application.refresh_from_db()
+        self.assertEqual(application.status, 'Approved')
+        self.assertEqual(Property.objects.get(pk=self.world_a['property'].pk).units.get().status, 'Reserved')
 
     def test_notifications_are_scoped_to_each_recipient_for_all_roles(self):
         recipients = [

@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
+from properties.models import Property, PropertyInquiry, RentalApplication
 
 
 User = get_user_model()
@@ -48,3 +49,61 @@ class UserListingTests(TestCase):
         self.assertEqual(staff.data['count'], 4)
         self.assertEqual(tenants.status_code, 200)
         self.assertEqual(tenants.data['count'], 1)
+
+
+class ManagerTenantDirectoryScopeTests(TestCase):
+    def setUp(self):
+        self.manager = User.objects.create_user(
+            username='manager@example.test',
+            email='manager@example.test',
+            password='StrongPass-12345',
+            role=User.Role.PROPERTY_MANAGER,
+        )
+        self.owner = User.objects.create_user(
+            username='owner@example.test',
+            email='owner@example.test',
+            password='StrongPass-12345',
+            role=User.Role.OWNER,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.manager)
+
+    def test_manager_sees_only_tenants_connected_to_assigned_properties(self):
+        approved_tenant = User.objects.create_user(
+            username='approved@example.test',
+            email='approved@example.test',
+            password='StrongPass-12345',
+            role=User.Role.TENANT,
+            first_name='Approved',
+        )
+        unrelated_tenant = User.objects.create_user(
+            username='unrelated@example.test',
+            email='unrelated@example.test',
+            password='StrongPass-12345',
+            role=User.Role.TENANT,
+            first_name='Unrelated',
+        )
+        prop = Property.objects.create(
+            title='Assigned property',
+            address='1 Main Street',
+            property_type='Apartment',
+            owner=self.owner,
+            manager=self.manager,
+        )
+        inquiry = PropertyInquiry.objects.create(
+            property=prop,
+            prospect_name='Approved applicant',
+            prospect_email=approved_tenant.email,
+        )
+        RentalApplication.objects.create(
+            inquiry=inquiry,
+            applicant_email=approved_tenant.email.upper(),
+            status='Approved',
+        )
+
+        response = self.client.get('/api/users/tenants/')
+
+        self.assertEqual(response.status_code, 200)
+        returned_ids = {tenant['_id'] for tenant in response.data}
+        self.assertIn(approved_tenant.id, returned_ids)
+        self.assertNotIn(unrelated_tenant.id, returned_ids)
