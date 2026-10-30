@@ -121,13 +121,17 @@ class PropertyExpense(models.Model):
         ('Taxes', 'Taxes'), ('Fees', 'Fees'), ('Other', 'Other'),
     ]
     property = models.ForeignKey(Property, on_delete=models.PROTECT, related_name='expenses')
+    maintenance_request = models.OneToOneField(
+        'maintenance.MaintenanceRequest', on_delete=models.PROTECT,
+        null=True, blank=True, related_name='property_expense',
+    )
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     incurred_on = models.DateField()
     payee = models.CharField(max_length=160)
     reference = models.CharField(max_length=500, blank=True, default='')
     description = models.TextField(blank=True, default='')
-    status = models.CharField(max_length=12, choices=[('Pending', 'Pending'), ('Approved', 'Approved'), ('Rejected', 'Rejected'), ('Reversed', 'Reversed')], default='Pending')
+    status = models.CharField(max_length=12, choices=[('Draft', 'Draft'), ('Pending', 'Pending'), ('Approved', 'Approved'), ('Rejected', 'Rejected'), ('Reversed', 'Reversed')], default='Pending')
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='created_property_expenses')
     created_at = models.DateTimeField(auto_now_add=True)
     decided_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='decided_property_expenses')

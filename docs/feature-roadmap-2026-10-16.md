@@ -106,13 +106,12 @@ The selected increment is the scoped expense CSV export. It is implemented and l
 | --- | --- | --- |
 | Expense CSV export (selected; locally complete) | Export property expense history for reconciliation | Supported roles, columns, filters, and cap are implemented |
 | Additional scoped CSV exports | Extend reporting to applications or prospects | Resources, columns, roles, filters, caps |
-| Maintenance-to-expense assistance | Reduce duplicate entry while preserving Owner approval | Linked draft creation and duplicate prevention |
 | Private document uploads | Store lease, receipt, and inspection evidence | Provider, access, retention, file limits |
 | Email reminders | Reach users outside the in-app inbox | Provider, preferences, delivery/retry policy |
 | Formal notice tracking | Extend lease lifecycle records | Approved notice policy, dates, responsible roles |
 | Online payments or electronic signing | Reduce external manual steps | Provider, callbacks, reconciliation, authority and recovery |
 
-**Status:** Expense CSV is the selected and implemented P3 increment. It reuses expense list authorization and property/status filters, neutralizes formula-like cells, and caps exports at 10,000 rows. Linked expense drafts, configurable reports, bulk changes, chat, uploads, online payments, and electronic signing remain future scope pending evidence or provider decisions.
+**Status:** Expense CSV is the selected and implemented P3 increment. It reuses expense list authorization and property/status filters, neutralizes formula-like cells, and caps exports at 10,000 rows. Maintenance-to-expense drafts are implemented locally with one linked expense per work order, staff review before submission, and separate Owner approval. Configurable reports, bulk changes, chat, uploads, online payments, and electronic signing remain future scope pending evidence or provider decisions.
 
 ## Release gate and current evidence
 

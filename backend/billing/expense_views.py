@@ -26,11 +26,12 @@ class ExpenseSerializer(serializers.ModelSerializer):
     decidedBy = serializers.IntegerField(source='decided_by_id', read_only=True)
     decidedAt = serializers.DateTimeField(source='decided_at', read_only=True)
     decisionNote = serializers.CharField(source='decision_note', read_only=True)
+    maintenanceRequestId = serializers.IntegerField(source='maintenance_request_id', read_only=True)
     history = serializers.SerializerMethodField()
 
     class Meta:
         model = PropertyExpense
-        fields = ['id', 'propertyId', 'propertyTitle', 'category', 'amount', 'incurredOn', 'payee', 'reference', 'description', 'status', 'createdBy', 'decidedBy', 'decidedAt', 'decisionNote', 'history']
+        fields = ['id', 'propertyId', 'propertyTitle', 'category', 'amount', 'incurredOn', 'payee', 'reference', 'description', 'status', 'createdBy', 'decidedBy', 'decidedAt', 'decisionNote', 'maintenanceRequestId', 'history']
         read_only_fields = ['status']
 
     def get_history(self, item):
@@ -70,7 +71,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         if user.role == 'Property Manager':
             expenses = expenses.filter(property__manager=user)
         elif user.role == 'Owner':
-            expenses = expenses.filter(property__owner=user)
+            expenses = expenses.filter(property__owner=user).exclude(status='Draft')
         property_id = self.request.query_params.get('propertyId')
         if property_id:
             if not property_id.isdigit():
@@ -110,9 +111,30 @@ class ExpenseViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_update(self, serializer):
-        item = serializer.save(status='Pending', decided_by=None, decided_at=None, decision_note='')
-        PropertyExpenseEvent.objects.create(expense=item, actor=self.request.user, action='Revised', summary='Expense revised and resubmitted for Owner approval.')
-        record_activity(self.request.user, 'UPDATE', 'Property expense', item.pk, f'Revised expense {item.pk}.')
+        current_status = serializer.instance.status
+        item = serializer.save(status='Draft' if current_status == 'Draft' else 'Pending', decided_by=None, decided_at=None, decision_note='')
+        action_label = 'Draft saved' if current_status == 'Draft' else 'Revised'
+        summary = 'Expense draft saved for staff review.' if current_status == 'Draft' else 'Expense revised and resubmitted for Owner approval.'
+        PropertyExpenseEvent.objects.create(expense=item, actor=self.request.user, action=action_label, summary=summary)
+        record_activity(self.request.user, 'UPDATE', 'Property expense', item.pk, f'{summary} Expense {item.pk}.')
+
+    @action(detail=True, methods=['post'])
+    @transaction.atomic
+    def submit(self, request, pk=None):
+        user = self._active_user()
+        if user.role not in ('Admin', 'Property Manager'):
+            raise PermissionDenied('Only staff may submit expense drafts.')
+        visible = self.get_object()
+        item = PropertyExpense.objects.select_for_update().get(pk=visible.pk)
+        if item.status != 'Draft':
+            raise ValidationError({'status': 'Only an expense draft can be submitted.'})
+        if not item.property.owner_id:
+            raise ValidationError({'propertyId': 'This property needs an Owner to approve expenses.'})
+        item.status = 'Pending'
+        item.save(update_fields=['status'])
+        PropertyExpenseEvent.objects.create(expense=item, actor=user, action='Submitted', summary='Expense draft submitted for Owner approval.')
+        record_activity(user, 'UPDATE', 'Property expense', item.pk, f'Submitted expense draft {item.pk} for Owner approval.')
+        return Response(self.get_serializer(item).data)
 
     @action(detail=True, methods=['post'])
     @transaction.atomic

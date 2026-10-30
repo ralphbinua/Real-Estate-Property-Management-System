@@ -14,6 +14,7 @@ from core.pagination import OptInPageNumberPagination
 from core.csv_exports import csv_response
 from notifications.models import Notification
 from notifications.services import create_for_recipients
+from billing.models import PropertyExpense, PropertyExpenseEvent
 
 
 class IsAuthorizedMaintenanceReader(permissions.BasePermission):
@@ -46,7 +47,7 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = MaintenanceRequest.objects.filter(is_deleted=False).select_related(
-            'unit', 'tenant', 'assigned_to',
+            'unit', 'tenant', 'assigned_to', 'property_expense',
         ).prefetch_related(
             Prefetch('property', queryset=property_serializer_queryset(Property.objects.all())),
             'events',
@@ -74,7 +75,7 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
         return scoped_requests
 
     def get_permissions(self):
-        if self.action in ('update', 'partial_update', 'destroy', 'request_approval'):
+        if self.action in ('update', 'partial_update', 'destroy', 'request_approval', 'create_expense'):
             return [IsAdminOrManager()]
         if self.action == 'decide_approval':
             return [IsOwner()]
@@ -83,6 +84,70 @@ class MaintenanceRequestViewSet(viewsets.ModelViewSet):
         if self.action in ('list', 'retrieve', 'export'):
             return [IsAuthorizedMaintenanceReader()]
         return [permissions.IsAuthenticated()]
+
+    @action(detail=True, methods=['post'], url_path='create-expense')
+    @transaction.atomic
+    def create_expense(self, request, pk=None):
+        work = MaintenanceRequest.objects.select_for_update().get(pk=self.get_object().pk)
+        if work.status != 'Resolved':
+            raise ValidationError({'status': 'Resolve the maintenance request before recording its final expense.'})
+        if work.actual_cost is None or work.actual_cost <= 0:
+            raise ValidationError({'actualCost': 'Enter a final cost greater than zero before creating an expense.'})
+        if work.approval_status != 'Approved':
+            raise ValidationError({'approvalStatus': 'Owner approval of the repair estimate is required before recording its expense.'})
+        if not work.property.owner_id:
+            raise ValidationError({'property': 'This property needs an Owner to approve expenses.'})
+
+        reference = f'Maintenance #{work.pk}'
+        existing = PropertyExpense.objects.select_for_update().filter(
+            maintenance_request=work,
+        ).first()
+        if not existing:
+            # Adopt a prior manual expense for this work order instead of duplicating it.
+            existing = PropertyExpense.objects.select_for_update().filter(
+                property=work.property, reference=reference,
+            ).order_by('id').first()
+            if existing:
+                if existing.maintenance_request_id:
+                    raise ValidationError({'expense': 'A different maintenance request already uses this expense.'})
+                existing.maintenance_request = work
+                existing.save(update_fields=['maintenance_request'])
+                PropertyExpenseEvent.objects.create(
+                    expense=existing, actor=request.user, action='Linked',
+                    summary=f'Linked to maintenance request #{work.pk}.',
+                )
+                MaintenanceEvent.objects.create(
+                    request=work, actor=request.user, event_type='Expense linked',
+                    summary=f'Existing expense #{existing.pk} linked to this maintenance request.',
+                    tenant_visible=False,
+                )
+                record_activity(request.user, 'UPDATE', 'Maintenance request', work.pk, f'Linked existing expense {existing.pk} to maintenance request {work.pk}.')
+                return Response(MaintenanceRequestSerializer(work, context={'request': request}).data, status=status.HTTP_200_OK)
+            expense = PropertyExpense.objects.create(
+                property=work.property,
+                maintenance_request=work,
+                category='Repairs',
+                amount=work.actual_cost,
+                incurred_on=timezone.localtime(work.updated_at).date(),
+                payee=work.vendor_name.strip() or 'Maintenance vendor (confirm)',
+                reference=reference,
+                description=work.issue_description,
+                created_by=request.user,
+                status='Draft',
+            )
+            PropertyExpenseEvent.objects.create(
+                expense=expense, actor=request.user, action='Created',
+                summary='Draft created from a resolved maintenance request for staff review.',
+            )
+            MaintenanceEvent.objects.create(
+                request=work, actor=request.user, event_type='Expense draft created',
+                summary=f'Expense draft #{expense.pk} created from this maintenance request.',
+                tenant_visible=False,
+            )
+            record_activity(request.user, 'CREATE', 'Property expense', expense.pk, f'Created expense draft from maintenance request {work.pk}.')
+            return Response(MaintenanceRequestSerializer(work, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+        raise ValidationError({'expense': 'This maintenance request already has an expense linked.'})
 
     @action(detail=False, methods=['get'])
     def export(self, request):

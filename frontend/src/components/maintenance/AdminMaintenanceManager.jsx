@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { Form, Alert, Spinner, Button } from 'react-bootstrap';
 import Table from '../ui/ResponsiveTable.jsx';
-import { assignMaintenanceRequest, fetchMaintenanceRequestsPage, updateMaintenanceStatus, updateMaintenanceWorkOrder, requestMaintenanceApproval } from '../../services/maintenance/maintenanceService';
+import { assignMaintenanceRequest, fetchMaintenanceRequestsPage, updateMaintenanceStatus, updateMaintenanceWorkOrder, requestMaintenanceApproval, createMaintenanceExpenseDraft } from '../../services/maintenance/maintenanceService';
 import usePaginatedCollection from '../../hooks/usePaginatedCollection';
 import CollectionPagination from '../ui/CollectionPagination';
 import ExportCsvButton from '../ui/ExportCsvButton';
@@ -67,6 +67,20 @@ export default function AdminMaintenanceManager() {
       refresh();
     } catch (err) {
       setError(err.response?.data?.assignedTo?.[0] || 'Failed to assign the request.');
+    }
+  };
+
+  const createExpenseDraft = async (id) => {
+    setError(''); setSuccess('');
+    try {
+      const result = await createMaintenanceExpenseDraft(id);
+      setSuccess(result.linkedExpenseId
+        ? `Expense #${result.linkedExpenseId} is linked. Review or edit it under Property expenses before submitting.`
+        : 'Expense draft linked. Review or edit it under Property expenses before submitting.');
+      refresh();
+    } catch (err) {
+      const data = err.response?.data;
+      setError(data?.expense?.[0] || data?.actualCost?.[0] || data?.status?.[0] || 'Could not create the expense draft.');
     }
   };
 
@@ -161,6 +175,7 @@ export default function AdminMaintenanceManager() {
                       <Button size="sm" onClick={() => workAction(reqId)}>Save details</Button>
                       <Button size="sm" variant="outline-primary" disabled={req.approvalStatus === 'Pending' || req.approvalStatus === 'Approved' || !req.estimateAmount} onClick={() => workAction(reqId, true)}>Request Owner approval</Button>
                     </div><div className="px-2 pb-2">Approval: {req.approvalStatus}{req.approvalNote && ` · ${req.approvalNote}`}</div>
+                    {req.linkedExpenseId ? <div className="px-2 pb-2 small text-success">Expense #{req.linkedExpenseId} · {req.linkedExpenseStatus}</div> : <div className="px-2 pb-2"><Button size="sm" variant="outline-success" disabled={req.status !== 'Resolved' || !Number(req.actualCost) || req.approvalStatus !== 'Approved'} onClick={() => createExpenseDraft(reqId)}>Create expense draft</Button><small className="ms-2 text-muted">Available after resolution, Owner estimate approval, and final cost entry.</small></div>}
                     {req.activity?.length > 0 && <details className="px-2 pb-2"><summary>History</summary><ul>{req.activity.map((event, index) => <li key={`${event.at}-${index}`}>{event.summary}</li>)}</ul></details>}
                     </td></tr>}
                     </Fragment>

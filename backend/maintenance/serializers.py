@@ -19,6 +19,8 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
     approvalRequestedAt = serializers.DateTimeField(source='approval_requested_at', read_only=True)
     approvalDecidedAt = serializers.DateTimeField(source='approval_decided_at', read_only=True)
     approvalNote = serializers.CharField(source='approval_note', read_only=True)
+    linkedExpenseId = serializers.SerializerMethodField()
+    linkedExpenseStatus = serializers.SerializerMethodField()
     activity = serializers.SerializerMethodField()
     assignedTo = serializers.PrimaryKeyRelatedField(
         source='assigned_to', queryset=User.objects.filter(is_active=True, is_deleted=False),
@@ -42,6 +44,7 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
             '_id', 'property', 'unit', 'tenant', 'issueDescription', 
             'status', 'priority', 'vendorName', 'vendorContact', 'estimateAmount', 'actualCost',
             'approvalStatus', 'approvalRequestedAt', 'approvalDecidedAt', 'approvalNote', 'activity',
+            'linkedExpenseId', 'linkedExpenseStatus',
             'assignedTo', 'assignedToDetails', 'propertyDetails',
             'tenantDetails', 'created_at', 'updated_at'
         ]
@@ -71,6 +74,14 @@ class MaintenanceRequestSerializer(serializers.ModelSerializer):
             'summary': event.summary,
             'at': event.created_at.isoformat(),
         } for event in events]
+
+    def get_linkedExpenseId(self, instance):
+        expense = getattr(instance, 'property_expense', None)
+        return expense.pk if expense else None
+
+    def get_linkedExpenseStatus(self, instance):
+        expense = getattr(instance, 'property_expense', None)
+        return expense.status if expense else None
 
     def get_assignedToDetails(self, instance):
         assignee = instance.assigned_to

@@ -150,7 +150,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   backdrop-filter: blur(12px);
 }
 
-.app-navbar .container { min-height: 71px; }
+.app-navbar .container, .app-navbar .app-navbar-container { min-height: 71px; }
+.app-navbar .app-navbar-container { padding-right: 24px; padding-left: 276px; }
 .app-brand {
   display: inline-flex;
   align-items: center;
@@ -685,7 +686,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .workspace-frame > .workspace-sidebar { display: none; }
 
   .app-navbar { min-height: 64px; backdrop-filter: none; }
-  .app-navbar .container { min-height: 63px; padding: 9px 16px; }
+  .app-navbar .container, .app-navbar .app-navbar-container { min-height: 63px; padding: 9px 16px; }
   .app-navbar .app-brand { min-width: 0; max-width: calc(100% - 64px); padding: 0; font-size: 1rem; }
   .app-brand-mark { flex-shrink: 0; }
   .app-brand > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -856,7 +857,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 @media (max-width: 420px) {
   .app-navbar .app-brand > span:last-child { display: none; }
-  .app-navbar .container { flex-wrap: nowrap; }
+  .app-navbar .container, .app-navbar .app-navbar-container { flex-wrap: nowrap; }
   .app-mobile-top-actions { margin-left: auto; }
   .workspace-frame .workspace-main > :is(.pm-admin, .pm-manager, .pm-agent, .pm-owner, .pm-tenant) { padding-inline: 14px; }
   .workspace-frame .workspace-main .pm-metrics { display: grid; grid-template-columns: minmax(0, 1fr); }

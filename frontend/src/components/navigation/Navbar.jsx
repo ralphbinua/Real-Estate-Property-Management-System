@@ -61,7 +61,7 @@ export default function AppNavbar() {
 
   return (
     <Navbar expand="lg" expanded={expanded} onToggle={setExpanded} className={`app-navbar sticky-top${expanded ? ' is-menu-open' : ''}`}>
-      <Container>
+      <Container fluid={Boolean(user)} className={user ? 'app-navbar-container' : undefined}>
         <Navbar.Brand as={Link} to={user ? role.path : '/login'} className="app-brand">
           <span className="app-brand-mark" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none">

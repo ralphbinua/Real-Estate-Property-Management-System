@@ -3,7 +3,7 @@ import { Alert, Button, Form, Spinner } from 'react-bootstrap';
 import Table from '../ui/ResponsiveTable.jsx';
 import { useAuth } from '../../context/useAuth';
 import { fetchProperties } from '../../services/properties/propertyService';
-import { createExpense, decideExpense, exportExpenses, fetchExpenses, fetchOwnerStatement, reviseExpense, reverseExpense } from '../../services/billing/expenseService';
+import { createExpense, decideExpense, exportExpenses, fetchExpenses, fetchOwnerStatement, reviseExpense, reverseExpense, submitExpense } from '../../services/billing/expenseService';
 import formatCurrency from '../../utils/formatCurrency';
 
 const emptyForm = { category: 'Repairs', amount: '', incurredOn: new Date().toISOString().slice(0, 10), payee: '', reference: '', description: '' };
@@ -74,7 +74,7 @@ export default function PropertyFinancePanel() {
       if (editing) await reviseExpense(editing, form);
       else await createExpense({ ...form, propertyId: Number(propertyId) });
       setEditing(null); setForm(emptyForm);
-      setSuccess('Expense submitted for Owner approval.');
+      setSuccess(editing && expenses.find((item) => item.id === editing)?.status === 'Draft' ? 'Expense draft saved.' : 'Expense submitted for Owner approval.');
       await refresh();
     } catch (err) { setError(errorMessage(err)); }
   };
@@ -91,6 +91,14 @@ export default function PropertyFinancePanel() {
     try {
       await reverseExpense(id, decisionNote[id] || '');
       setSuccess('Expense reversed. Record a new entry if needed.');
+      await refresh();
+    } catch (err) { setError(errorMessage(err)); }
+  };
+  const submitDraft = async (id) => {
+    setError(''); setSuccess('');
+    try {
+      await submitExpense(id);
+      setSuccess('Expense submitted for Owner approval.');
       await refresh();
     } catch (err) { setError(errorMessage(err)); }
   };
@@ -143,13 +151,14 @@ export default function PropertyFinancePanel() {
         <div className="col-12 col-sm-6"><Form.Label className="small">Receipt or document reference</Form.Label><Form.Control size="sm" maxLength={500} value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></div>
         <div className="col-12 col-sm-6"><Form.Label className="small">Description</Form.Label><Form.Control size="sm" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
       </div>
-      <div className="mt-2"><Button size="sm" type="submit">{editing ? 'Resubmit expense' : 'Submit expense'}</Button>{editing && <Button size="sm" variant="link" onClick={() => { setEditing(null); setForm(emptyForm); }}>Cancel edit</Button>}</div>
+      <div className="mt-2"><Button size="sm" type="submit">{editing ? (expenses.find((item) => item.id === editing)?.status === 'Draft' ? 'Save draft' : 'Resubmit expense') : 'Submit expense'}</Button>{editing && <Button size="sm" variant="link" onClick={() => { setEditing(null); setForm(emptyForm); }}>Cancel edit</Button>}</div>
     </Form>}
     {propertyId && <><div className="d-flex flex-wrap align-items-center justify-content-between gap-2"><h6 className="mb-0">Expense history</h6><Button size="sm" variant="outline-secondary" disabled={!propertyId || exporting} onClick={exportCsv}>{exporting ? 'Exporting…' : 'Export expenses CSV'}</Button></div><Table responsive className="pm-table mt-2"><thead><tr><th>Date</th><th>Category</th><th>Payee</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>
       {expenses.map((item) => <tr key={item.id}><td>{item.incurredOn}</td><td>{item.category}</td><td>{item.payee}{item.reference && <small className="d-block">Reference: {item.reference}</small>}</td><td>{formatCurrency(item.amount)}</td><td>{item.status}{item.decisionNote && <small className="d-block">{item.decisionNote}</small>}</td><td>
         {owner && item.status === 'Pending' && <><Form.Control size="sm" className="mb-1" aria-label={`Decision note for expense ${item.id}`} placeholder="Decision note" value={decisionNote[item.id] || ''} onChange={(e) => setDecisionNote((current) => ({ ...current, [item.id]: e.target.value }))} /><Button size="sm" className="me-1" onClick={() => decide(item.id, true)}>Approve</Button><Button size="sm" variant="outline-danger" onClick={() => decide(item.id, false)}>Reject</Button></>}
         {owner && item.status === 'Approved' && <><Form.Control size="sm" className="mb-1" aria-label={`Reversal reason for expense ${item.id}`} placeholder="Reason for reversal" value={decisionNote[item.id] || ''} onChange={(e) => setDecisionNote((current) => ({ ...current, [item.id]: e.target.value }))} /><Button size="sm" variant="outline-danger" disabled={!decisionNote[item.id]?.trim()} onClick={() => reverse(item.id)}>Reverse</Button></>}
-        {staff && ['Pending', 'Rejected'].includes(item.status) && <Button size="sm" variant="outline-secondary" onClick={() => { setEditing(item.id); setForm({ category: item.category, amount: item.amount, incurredOn: item.incurredOn, payee: item.payee, reference: item.reference, description: item.description }); }}>Revise</Button>}
+        {staff && ['Draft', 'Pending', 'Rejected'].includes(item.status) && <Button size="sm" variant="outline-secondary" onClick={() => { setEditing(item.id); setForm({ category: item.category, amount: item.amount, incurredOn: item.incurredOn, payee: item.payee, reference: item.reference, description: item.description }); }}>Revise</Button>}
+        {staff && item.status === 'Draft' && <Button size="sm" className="ms-1" onClick={() => submitDraft(item.id)}>Submit for Owner approval</Button>}
         <details><summary>History</summary><ul className="ps-3">{item.history?.map((event, index) => <li key={`${event.at}-${index}`}>{event.summary}</li>)}</ul></details>
       </td></tr>)}
       {!expenses.length && <tr><td colSpan="6">No expenses recorded for this property.</td></tr>}
