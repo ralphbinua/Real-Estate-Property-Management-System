@@ -280,11 +280,15 @@ class PaymentAcknowledgmentApiTests(APITestCase):
                 self.assertEqual(response.status_code, 200)
 
     def test_outside_scope_users_cannot_download_payment_details(self):
-        for actor in (self.other_owner, self.other_manager, self.other_tenant, self.agent):
+        for actor in (self.other_owner, self.other_manager, self.other_tenant):
             with self.subTest(actor=actor.username):
                 self.client.force_authenticate(actor)
                 response = self.client.get(self.acknowledgment_url())
                 self.assertEqual(response.status_code, 404)
+
+    def test_agent_cannot_download_payment_acknowledgment_even_for_assigned_listing(self):
+        self.client.force_authenticate(self.agent)
+        self.assertEqual(self.client.get(self.acknowledgment_url()).status_code, 403)
 
     def test_pending_rejected_and_reversed_payments_have_no_acknowledgment(self):
         self.client.force_authenticate(self.tenant)

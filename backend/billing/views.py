@@ -45,6 +45,17 @@ class IsAdmin(permissions.BasePermission):
         )
 
 
+class IsAuthorizedBillingReader(permissions.BasePermission):
+    message = 'You may only access billing records for your role and assigned scope.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            user and user.is_authenticated and user.is_active and not user.is_deleted
+            and user.role in ('Admin', 'Property Manager', 'Owner', 'Tenant')
+        )
+
+
 class IsTenant(permissions.BasePermission):
     def has_permission(self, request, view):
         user = request.user
@@ -111,6 +122,8 @@ class InvoiceViewSet(viewsets.ModelViewSet):
         return invoice_serializer_queryset(invoices.order_by('-id'))
 
     def get_permissions(self):
+        if self.action == 'export':
+            return [IsAuthorizedBillingReader()]
         if self.action in ('create', 'update', 'partial_update', 'destroy'):
             return [IsAdmin()]
         if self.action in ('generate', 'runs'):
@@ -259,6 +272,8 @@ class PaymentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.
         return payments.order_by('-created_at', '-id')
 
     def get_permissions(self):
+        if self.action in ('export', 'acknowledgment'):
+            return [IsAuthorizedBillingReader()]
         if self.action == 'create':
             return [IsTenant()]
         if self.action in ('record', 'verify', 'reject', 'reverse'):

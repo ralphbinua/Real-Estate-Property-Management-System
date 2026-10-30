@@ -87,16 +87,11 @@ class ScopedCsvExportTests(APITestCase):
                     self.assertEqual(visible, expected_properties, path)
 
         for agent in (self.agent, self.other_agent):
-            for path in exports:
+            for path in exports + ('/api/expenses/export/',):
                 with self.subTest(role=agent.role, user=agent.pk, path=path):
                     self.client.force_authenticate(agent)
                     response = self.response(path)
-                    if path in ('/api/contracts/export/', '/api/maintenance/export/'):
-                        self.assertEqual(response.status_code, 403, path)
-                    else:
-                        self.assertEqual(response.status_code, 200, path)
-                        rows = list(csv.reader(io.StringIO(b''.join(response.streaming_content).decode('utf-8-sig'))))
-                        self.assertEqual(len(rows), 1, path)
+                    self.assertEqual(response.status_code, 403, path)
 
     def test_tenant_maintenance_export_hides_financial_columns(self):
         self.client.force_authenticate(self.tenant)
