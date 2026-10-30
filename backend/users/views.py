@@ -172,11 +172,14 @@ class UserViewSet(viewsets.ModelViewSet):
         return UserSerializer
 
     def get_queryset(self):
-        include_deleted = self.request.query_params.get('includeDeleted')
-        if include_deleted == 'true':
-            users = User.objects.all()
-        else:
-            users = User.objects.filter(is_deleted=False)
+        status_filter = self.request.query_params.get('status', '').strip().casefold()
+        users = User.objects.filter(is_deleted=False)
+        if status_filter == 'inactive':
+            users = User.objects.filter(is_active=False, is_deleted=False)
+        elif status_filter == 'active':
+            users = users.filter(is_active=True, is_deleted=False)
+        elif status_filter not in ('', 'inactive', 'all'):
+            users = users.none()
         role = self.request.query_params.get('role')
         roles = [value.strip() for value in self.request.query_params.get('roles', '').split(',') if value.strip()]
         search = self.request.query_params.get('search', '').strip()
@@ -200,6 +203,16 @@ class UserViewSet(viewsets.ModelViewSet):
                 | Q(phone_number__icontains=search)
                 | Q(role__in=matching_roles)
             )
+        property_id = self.request.query_params.get('property_id', '').strip()
+        if property_id:
+            if not property_id.isdecimal():
+                users = users.none()
+            else:
+                users = users.filter(
+                    Q(owned_properties__id=property_id)
+                    | Q(managed_properties__id=property_id)
+                    | Q(assigned_properties__id=property_id)
+                ).distinct()
         return users.order_by('-id')
 
     @action(detail=False, methods=['get', 'patch'], permission_classes=[permissions.IsAuthenticated])
@@ -246,8 +259,14 @@ class UserViewSet(viewsets.ModelViewSet):
         events = AuditEvent.objects.select_related('actor').all().order_by('-created_at', '-id')
         action_name = request.query_params.get('action')
         search = request.query_params.get('search', '').strip()
+        entity_type = request.query_params.get('entityType', request.query_params.get('entity_type', '')).strip()
+        entity_id = request.query_params.get('entityId', request.query_params.get('entity_id', '')).strip()
         if action_name:
             events = events.filter(action=action_name)
+        if entity_type:
+            events = events.filter(entity_type__iexact=entity_type)
+        if entity_id:
+            events = events.filter(entity_id=entity_id)
         if search:
             events = events.filter(
                 Q(action__icontains=search)
@@ -312,18 +331,42 @@ class UserViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         previous_role = serializer.instance.role
         previous_deleted = serializer.instance.is_deleted
+        previous_active = serializer.instance.is_active and not previous_deleted
         user = serializer.save()
-        user.is_active = not user.is_deleted
+        if user.is_deleted:
+            user.is_active = False
         user.deleted_at = timezone.now() if user.is_deleted else None
         user.save(update_fields=['is_active', 'deleted_at'])
-        record_activity(self.request.user, 'UPDATE', 'User', user.pk, f'Updated account {user.email}.')
 
         role_changed = user.role != previous_role
-        newly_deactivated = user.is_deleted and not previous_deleted
-        if not role_changed and not newly_deactivated:
+        deactivated = previous_active and not user.is_active and not user.is_deleted
+        soft_deleted = user.is_deleted and not previous_deleted
+        restored = previous_deleted and not user.is_deleted
+        reactivated = user.is_active and not previous_active and not user.is_deleted
+        if soft_deleted:
+            action = 'SOFT DELETE'
+        elif deactivated:
+            action = 'DEACTIVATE'
+        elif restored:
+            action = 'RESTORE'
+        elif reactivated:
+            action = 'REACTIVATE'
+        else:
+            action = 'UPDATE'
+        record_activity(self.request.user, action, 'User', user.pk, f'{action.title()} account {user.email}.')
+
+        status_changed = deactivated or soft_deleted or restored or reactivated
+        if not role_changed and not status_changed:
             return
 
-        if user.is_active and not user.is_deleted:
+        status_message = {
+            'DEACTIVATE': 'deactivated',
+            'SOFT DELETE': 'soft-deleted',
+            'RESTORE': 'restored',
+            'REACTIVATE': 'reactivated',
+        }.get(action, 'updated')
+
+        if reactivated or (role_changed and user.is_active and not user.is_deleted):
             destination = {
                 User.Role.ADMIN: Notification.Destination.ADMIN_OVERVIEW,
                 User.Role.OWNER: Notification.Destination.OWNER_OVERVIEW,
@@ -336,8 +379,8 @@ class UserViewSet(viewsets.ModelViewSet):
                     recipients=[user],
                     actor=self.request.user,
                     event_type=Notification.EventType.ACCOUNT,
-                    title='Your account was updated',
-                    message='Your account access or role has changed.',
+                    title='Your account was reactivated' if reactivated else 'Your account was updated',
+                    message='Your account is active again and you can sign in.' if reactivated else 'Your account access or role has changed.',
                     destination=destination,
                 )
 
@@ -350,7 +393,7 @@ class UserViewSet(viewsets.ModelViewSet):
             actor=self.request.user,
             event_type=Notification.EventType.ACCOUNT,
             title='User account updated',
-            message='A user account role or access status changed.',
+            message=f'An account was {status_message}.',
             destination=Notification.Destination.ADMIN_USERS,
         )
 
@@ -358,17 +401,17 @@ class UserViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         if instance.pk == self.request.user.pk:
             from rest_framework.exceptions import ValidationError
-            raise ValidationError({'detail': 'You cannot deactivate your own administrator account.'})
-        if instance.role == User.Role.ADMIN and User.objects.filter(
+            raise ValidationError({'detail': 'You cannot soft-delete your own administrator account.'})
+        if instance.role == User.Role.ADMIN and instance.is_active and User.objects.filter(
             role=User.Role.ADMIN, is_active=True, is_deleted=False
         ).count() <= 1:
             from rest_framework.exceptions import ValidationError
-            raise ValidationError({'detail': 'The last active administrator account cannot be deactivated.'})
+            raise ValidationError({'detail': 'The last active administrator account cannot be soft-deleted.'})
         instance.is_deleted = True
         instance.is_active = False
         instance.deleted_at = timezone.now()
         instance.save(update_fields=['is_deleted', 'is_active', 'deleted_at'])
-        record_activity(self.request.user, 'DEACTIVATE', 'User', instance.pk, f'Deactivated account {instance.email}.')
+        record_activity(self.request.user, 'SOFT DELETE', 'User', instance.pk, f'Soft-deleted account {instance.email}.')
         create_for_recipients(
             recipients=User.objects.filter(
                 role=User.Role.ADMIN,
@@ -377,8 +420,8 @@ class UserViewSet(viewsets.ModelViewSet):
             ).exclude(pk=instance.pk),
             actor=self.request.user,
             event_type=Notification.EventType.ACCOUNT,
-            title='User account deactivated',
-            message='A user account was deactivated.',
+            title='User account deleted',
+            message='A user account was soft-deleted and retained in the database.',
             destination=Notification.Destination.ADMIN_USERS,
         )
 

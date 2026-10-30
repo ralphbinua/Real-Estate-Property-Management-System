@@ -5,7 +5,7 @@ from .models import User, SystemSettings
 class UserSerializer(serializers.ModelSerializer):
     _id = serializers.IntegerField(source='id', read_only=True)
     isDeleted = serializers.BooleanField(source='is_deleted', required=False, default=False)
-    isActive = serializers.BooleanField(source='is_active', read_only=True)
+    isActive = serializers.BooleanField(source='is_active', required=False)
     createdAt = serializers.DateTimeField(source='date_joined', read_only=True) 
     name = serializers.CharField(required=False, allow_blank=True)
     password = serializers.CharField(write_only=True, required=False)
@@ -30,11 +30,23 @@ class UserSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         user = getattr(request, 'user', None)
         new_role = attrs.get('role', self.instance.role)
-        deleting = attrs.get('is_deleted', self.instance.is_deleted)
-        disabling_admin = self.instance.role == User.Role.ADMIN and (new_role != User.Role.ADMIN or deleting)
-        if user and self.instance.pk == user.pk and disabling_admin:
-            raise serializers.ValidationError('You cannot deactivate or change the role of your own administrator account.')
-        if disabling_admin and User.objects.filter(role=User.Role.ADMIN, is_active=True, is_deleted=False).count() <= 1:
+        new_deleted = attrs.get('is_deleted', self.instance.is_deleted)
+        new_active = attrs.get('is_active', self.instance.is_active)
+        disabling_active_admin = (
+            self.instance.role == User.Role.ADMIN
+            and self.instance.is_active
+            and not self.instance.is_deleted
+            and (new_role != User.Role.ADMIN or new_deleted or not new_active)
+        )
+        changing_own_admin_access = (
+            self.instance.role == User.Role.ADMIN
+            and user
+            and self.instance.pk == user.pk
+            and (new_role != User.Role.ADMIN or new_deleted or not new_active)
+        )
+        if changing_own_admin_access:
+            raise serializers.ValidationError('You cannot deactivate, delete, or change the role of your own administrator account.')
+        if disabling_active_admin and User.objects.filter(role=User.Role.ADMIN, is_active=True, is_deleted=False).count() <= 1:
             raise serializers.ValidationError('The last active administrator account cannot be deactivated or demoted.')
         return attrs
 

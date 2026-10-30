@@ -481,13 +481,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .pm-admin-summary-item > span { color: #687286; font-size: .74rem; font-weight: 650; }
 .pm-admin-summary-item > strong { color: var(--app-ink); font-size: 1.5rem; font-weight: 750; line-height: 1.2; }
 .pm-admin-summary-item > small { color: #7a8291; font-size: .69rem; line-height: 1.45; }
-.pm-user-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+.pm-user-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; margin-bottom: 18px; }
+.pm-user-toolbar-copy { flex: 1 1 240px; }
 .pm-user-toolbar-copy h4 { font-size: 1.05rem; }
 .pm-user-toolbar-copy p { margin-top: 4px; font-size: .78rem; }
-.pm-user-toolbar-actions { display: flex; align-items: center; gap: 10px; }
+.pm-user-toolbar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex: 1 1 680px; flex-wrap: wrap; }
 .pm-user-search { width: min(280px, 28vw); }
 .pm-user-search .form-control { min-height: 40px; }
 .pm-user-role-filter { width: 180px; min-height: 40px; flex: 0 0 auto; }
+.pm-user-status-filter { width: 170px; min-height: 40px; flex: 0 0 auto; }
+.pm-user-property-filter { width: 210px; min-height: 40px; flex: 0 1 210px; }
 .pm-user-add { min-height: 40px; flex: 0 0 auto; padding: 7px 14px; white-space: nowrap; }
 .pm-users-table { min-width: 700px; }
 .pm-users-table thead th { padding: 13px 18px; }
@@ -787,6 +790,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .workspace-frame .workspace-main .pm-prospects-header { flex-wrap: wrap; gap: 10px; padding: 16px; }
   .workspace-frame .workspace-main .pm-card-footer { flex-wrap: wrap; gap: 10px; }
   .workspace-frame .workspace-main .pm-user-toolbar-actions { flex-wrap: wrap; }
+  .workspace-frame .workspace-main .pm-user-toolbar-actions .form-select { flex: 1 1 100%; width: 100%; }
   .workspace-frame .workspace-main .pm-user-search { flex: 1 1 100%; width: 100%; }
   .workspace-frame .workspace-main .pm-user-role-filter { flex: 1 1 100%; width: 100%; }
   .workspace-frame .workspace-main .form-control, .workspace-frame .workspace-main .form-select { min-height: 44px; font-size: 16px; }

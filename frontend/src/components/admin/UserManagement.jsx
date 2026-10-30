@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge, Alert, Tabs, Tab, Button, Card, Form, Modal, Spinner, InputGroup } from 'react-bootstrap';
 import Table from '../ui/ResponsiveTable.jsx';
 import { fetchUsersPage, createUserByAdmin, updateUser, deleteUser } from '../../services/users/userService';
+import { fetchProperties } from '../../services/properties/propertyService';
 import usePaginatedCollection from '../../hooks/usePaginatedCollection';
 import CollectionPagination from '../ui/CollectionPagination';
 import { formatUserManagementError } from './userManagementErrors';
+import UserAccountHistoryModal from './UserAccountHistoryModal';
 
 const ROLE_COLORS = {
   tenant: 'info',
@@ -28,8 +30,17 @@ export default function UserManagement() {
   const [activeTab, setActiveTab] = useState('tenants');
   const [search, setSearch] = useState('');
   const [staffRole, setStaffRole] = useState('all');
+  const [staffStatus, setStaffStatus] = useState('active');
+  const [staffProperty, setStaffProperty] = useState('');
+  const [properties, setProperties] = useState([]);
+  const [propertyLoadError, setPropertyLoadError] = useState('');
+  const [historyUser, setHistoryUser] = useState(null);
+  const [pendingDeactivate, setPendingDeactivate] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [deactivating, setDeactivating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [reactivatingUserId, setReactivatingUserId] = useState(null);
+  const [reactivationError, setReactivationError] = useState('');
   const [createError, setCreateError] = useState('');
   const [editError, setEditError] = useState('');
   const [deactivateError, setDeactivateError] = useState('');
@@ -61,12 +72,29 @@ export default function UserManagement() {
     password: '',
   });
 
+  useEffect(() => {
+    let current = true;
+    fetchProperties()
+      .then((rows) => {
+        if (current) setProperties(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (current) setPropertyLoadError('Property assignment filter could not be loaded.');
+      });
+    return () => { current = false; };
+  }, []);
+
   const roles = activeTab === 'tenants'
     ? ['tenant']
     : (staffRole === 'all' ? ['admin', 'property manager', 'agent', 'owner'] : [staffRole]);
   const { items: users, count, page, pageCount, loading, error: loadError, setPage, refresh } = usePaginatedCollection(
     fetchUsersPage,
-    { roles: roles.join(','), search },
+    {
+      roles: roles.join(','),
+      search,
+      status: staffStatus,
+      ...(activeTab === 'staff' ? { property_id: staffProperty } : {}),
+    },
   );
 
   const handleOpenAddModal = () => {
@@ -155,13 +183,42 @@ export default function UserManagement() {
   const handleOpenDeactivateModal = (user) => {
     setDeactivateError('');
     setSuccess('');
-    setPendingDelete(user);
+    setPendingDeactivate(user);
   };
 
   const handleCloseDeactivateModal = () => {
+    if (deactivating) return;
+    setPendingDeactivate(null);
+    setDeactivateError('');
+  };
+
+  const handleOpenDeleteModal = (user) => {
+    setDeactivateError('');
+    setSuccess('');
+    setPendingDelete(user);
+  };
+
+  const handleCloseDeleteModal = () => {
     if (deleting) return;
     setPendingDelete(null);
     setDeactivateError('');
+  };
+
+  const confirmDeactivate = async () => {
+    if (!pendingDeactivate) return;
+    setDeactivating(true);
+    setDeactivateError('');
+    setSuccess('');
+    try {
+      await updateUser(pendingDeactivate._id || pendingDeactivate.id, { isActive: false });
+      setSuccess(`${pendingDeactivate.name || pendingDeactivate.email} was deactivated. The account remains in the directory and database.`);
+      setPendingDeactivate(null);
+      refresh();
+    } catch (err) {
+      setDeactivateError(formatUserManagementError(err, 'Failed to deactivate user account.'));
+    } finally {
+      setDeactivating(false);
+    }
   };
 
   const confirmDelete = async () => {
@@ -172,13 +229,29 @@ export default function UserManagement() {
     try {
       const userId = pendingDelete._id || pendingDelete.id;
       await deleteUser(userId);
-      setSuccess(`${pendingDelete.name} was deactivated.`);
+      setSuccess(`${pendingDelete.name || pendingDelete.email} was soft-deleted. The database record was retained.`);
       setPendingDelete(null);
       refresh();
     } catch (err) {
-      setDeactivateError(formatUserManagementError(err, 'Failed to deactivate user account.'));
+      setDeactivateError(formatUserManagementError(err, 'Failed to soft-delete user account.'));
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleReactivateUser = async (user) => {
+    const userId = user._id || user.id;
+    setReactivatingUserId(userId);
+    setReactivationError('');
+    setSuccess('');
+    try {
+      await updateUser(userId, { isActive: true, isDeleted: false });
+      setSuccess(`${user.name || user.email} was reactivated.`);
+      refresh();
+    } catch (err) {
+      setReactivationError(formatUserManagementError(err, 'Failed to reactivate user account.'));
+    } finally {
+      setReactivatingUserId(null);
     }
   };
 
@@ -194,11 +267,12 @@ export default function UserManagement() {
     }
 
     if (users.length === 0) {
+      const hasActiveFilters = staffStatus !== 'active' || (activeTab === 'staff' && (staffRole !== 'all' || staffProperty !== ''));
       return (
         <div className="text-center text-muted py-5">
           <div className="fs-4 mb-1">No accounts found</div>
           <div className="small">
-            {q ? 'Try a different search term.' : 'Nothing to show in this tab yet.'}
+            {q || hasActiveFilters ? 'Try adjusting your search or filters.' : 'Nothing to show in this tab yet.'}
           </div>
         </div>
       );
@@ -211,6 +285,7 @@ export default function UserManagement() {
             <th className="fw-semibold border-0">Name</th>
             <th className="fw-semibold border-0">Email</th>
             <th className="fw-semibold border-0">Role</th>
+            <th className="fw-semibold border-0">Status</th>
             <th className="fw-semibold border-0 text-end">Action</th>
           </tr>
         </thead>
@@ -236,8 +311,14 @@ export default function UserManagement() {
                     {user.role}
                   </Badge>
                 </td>
+                <td>
+                  <Badge bg={user.isActive === false ? 'secondary' : 'success'}>
+                    {user.isActive === false ? 'Deactivated' : 'Active'}
+                  </Badge>
+                </td>
                 <td className="text-end">
                   <div className="d-flex justify-content-end gap-2">
+                    <Button variant="outline-secondary" size="sm" onClick={() => setHistoryUser(user)}>History</Button>
                     <Button
                       variant="outline-primary"
                       size="sm"
@@ -245,13 +326,14 @@ export default function UserManagement() {
                     >
                       Edit
                     </Button>
-                    <Button
-                      variant="outline-danger"
-                      size="sm"
-                      onClick={() => handleOpenDeactivateModal(user)}
-                    >
-                      Deactivate
-                    </Button>
+                    {user.isActive === false ? (
+                      <Button variant="outline-success" size="sm" disabled={reactivatingUserId === userId} onClick={() => handleReactivateUser(user)}>
+                        {reactivatingUserId === userId ? <Spinner animation="border" size="sm" /> : 'Reactivate'}
+                      </Button>
+                    ) : (
+                      <Button variant="outline-warning" size="sm" onClick={() => handleOpenDeactivateModal(user)}>Deactivate</Button>
+                    )}
+                    <Button variant="outline-danger" size="sm" onClick={() => handleOpenDeleteModal(user)}>Delete</Button>
                   </div>
                 </td>
               </tr>
@@ -280,20 +362,28 @@ export default function UserManagement() {
             />
           </InputGroup>
           {activeTab === 'staff' && (
-            <Form.Select
-              className="pm-user-role-filter"
-              aria-label="Filter staff accounts by role"
-              value={staffRole}
-              onChange={(e) => setStaffRole(e.target.value)}
-              size="sm"
-            >
-              <option value="all">All staff roles</option>
-              <option value="admin">Admin</option>
-              <option value="property manager">Property Manager</option>
-              <option value="agent">Agent</option>
-              <option value="owner">Owner</option>
-            </Form.Select>
+            <>
+              <Form.Select className="pm-user-role-filter" aria-label="Filter staff accounts by role" value={staffRole} onChange={(e) => setStaffRole(e.target.value)} size="sm">
+                <option value="all">All staff roles</option>
+                <option value="admin">Admin</option>
+                <option value="property manager">Property Manager</option>
+                <option value="agent">Agent</option>
+                <option value="owner">Owner</option>
+              </Form.Select>
+              <Form.Select className="pm-user-property-filter" aria-label="Filter staff accounts by property assignment" value={staffProperty} onChange={(e) => setStaffProperty(e.target.value)} size="sm">
+                <option value="">All property assignments</option>
+                {properties.map((property) => {
+                  const propertyId = property._id || property.id;
+                  return <option key={propertyId} value={propertyId}>{property.title || property.address || `Property ${propertyId}`}</option>;
+                })}
+              </Form.Select>
+            </>
           )}
+          <Form.Select className="pm-user-status-filter" aria-label="Filter accounts by status" value={staffStatus} onChange={(e) => setStaffStatus(e.target.value)} size="sm">
+            <option value="active">Active accounts</option>
+            <option value="inactive">Deactivated accounts</option>
+            <option value="all">Active and deactivated</option>
+          </Form.Select>
           <Button variant="primary" className="pm-user-add" onClick={handleOpenAddModal}>
             + Add User
           </Button>
@@ -301,6 +391,8 @@ export default function UserManagement() {
       </div>
 
       {loadError && <Alert variant="danger">{loadError}</Alert>}
+      {activeTab === 'staff' && propertyLoadError && <Alert variant="warning">{propertyLoadError}</Alert>}
+      {reactivationError && <Alert variant="danger" dismissible onClose={() => setReactivationError('')}>{reactivationError}</Alert>}
       {success && <Alert variant="success" dismissible onClose={() => setSuccess('')}>{success}</Alert>}
 
       <Card className="border-0 shadow-sm">
@@ -311,6 +403,8 @@ export default function UserManagement() {
             onSelect={(k) => {
               setActiveTab(k);
               setStaffRole('all');
+              setStaffStatus('active');
+              setStaffProperty('');
             }}
             className="border-bottom px-3 pt-2 bg-light"
           >
@@ -475,23 +569,44 @@ export default function UserManagement() {
       </Modal>
 
       {/* Modal: Deactivate User Account */}
-      <Modal show={!!pendingDelete} onHide={handleCloseDeactivateModal} centered aria-labelledby="deactivate-user-dialog-title">
+      <Modal show={!!pendingDeactivate} onHide={handleCloseDeactivateModal} centered aria-labelledby="deactivate-user-dialog-title">
         <Modal.Header closeButton>
           <Modal.Title id="deactivate-user-dialog-title" className="fs-5">Deactivate user account</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           {deactivateError && <Alert variant="danger" role="alert" aria-live="assertive">{deactivateError}</Alert>}
-          Deactivate <strong>{pendingDelete?.name}</strong> ({pendingDelete?.email})? They will no longer be able to sign in. Their records will be retained.
+          Deactivate <strong>{pendingDeactivate?.name}</strong> ({pendingDeactivate?.email})? They will no longer be able to sign in. The account stays in the directory and database, and an Admin can reactivate it later.
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="outline-secondary" onClick={() => setPendingDelete(null)} disabled={deleting}>
+          <Button variant="outline-secondary" onClick={handleCloseDeactivateModal} disabled={deactivating}>
             Cancel
           </Button>
-          <Button variant="danger" onClick={confirmDelete} disabled={deleting}>
-            {deleting ? <Spinner animation="border" size="sm" /> : 'Deactivate'}
+          <Button variant="warning" onClick={confirmDeactivate} disabled={deactivating}>
+            {deactivating ? <Spinner animation="border" size="sm" /> : 'Deactivate'}
           </Button>
         </Modal.Footer>
       </Modal>
+
+      {/* Modal: Soft-delete User Account */}
+      <Modal show={!!pendingDelete} onHide={handleCloseDeleteModal} centered aria-labelledby="delete-user-dialog-title">
+        <Modal.Header closeButton>
+          <Modal.Title id="delete-user-dialog-title" className="fs-5">Delete user account</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {deactivateError && <Alert variant="danger" role="alert" aria-live="assertive">{deactivateError}</Alert>}
+          Soft-delete <strong>{pendingDelete?.name}</strong> ({pendingDelete?.email})? They will no longer be able to sign in. The record remains in the database but will not appear in the account directory, including when viewing all account statuses.
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="outline-secondary" onClick={handleCloseDeleteModal} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={confirmDelete} disabled={deleting}>
+            {deleting ? <Spinner animation="border" size="sm" /> : 'Delete account'}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {historyUser && <UserAccountHistoryModal user={historyUser} onHide={() => setHistoryUser(null)} />}
     </div>
   );
 }
