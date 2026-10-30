@@ -50,6 +50,51 @@ class UserListingTests(TestCase):
         self.assertEqual(tenants.status_code, 200)
         self.assertEqual(tenants.data['count'], 1)
 
+    def test_user_directory_search_matches_role_names(self):
+        admin = User.objects.create_user(
+            username='site-admin@example.test',
+            email='site-admin@example.test',
+            password='StrongPass-12345',
+            first_name='Site',
+            last_name='Administrator',
+            role=User.Role.ADMIN,
+        )
+        manager = User.objects.create_user(
+            username='staff@example.test',
+            email='staff@example.test',
+            password='StrongPass-12345',
+            first_name='Casey',
+            last_name='Staff',
+            role=User.Role.PROPERTY_MANAGER,
+        )
+        User.objects.create_user(
+            username='agent@example.test',
+            email='agent@example.test',
+            password='StrongPass-12345',
+            role=User.Role.AGENT,
+        )
+
+        response = self.client.get('/api/users/', {
+            'roles': 'admin,property manager,agent,owner',
+            'search': 'admin',
+            'page': 1,
+            'page_size': 50,
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 2)
+        self.assertEqual({row['_id'] for row in response.data['results']}, {admin.id, self.admin.id})
+
+        manager_response = self.client.get('/api/users/', {
+            'roles': 'admin,property manager,agent,owner',
+            'search': 'property manager',
+            'page': 1,
+            'page_size': 50,
+        })
+        self.assertEqual(manager_response.status_code, 200)
+        self.assertEqual(manager_response.data['count'], 1)
+        self.assertEqual(manager_response.data['results'][0]['_id'], manager.id)
+
 
 class ManagerTenantDirectoryScopeTests(TestCase):
     def setUp(self):

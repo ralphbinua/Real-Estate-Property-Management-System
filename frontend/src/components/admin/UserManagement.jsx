@@ -27,6 +27,7 @@ export default function UserManagement() {
   const [success, setSuccess] = useState('');
   const [activeTab, setActiveTab] = useState('tenants');
   const [search, setSearch] = useState('');
+  const [staffRole, setStaffRole] = useState('all');
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -60,7 +61,9 @@ export default function UserManagement() {
     password: '',
   });
 
-  const roles = activeTab === 'tenants' ? ['tenant'] : ['admin', 'property manager', 'agent', 'owner'];
+  const roles = activeTab === 'tenants'
+    ? ['tenant']
+    : (staffRole === 'all' ? ['admin', 'property manager', 'agent', 'owner'] : [staffRole]);
   const { items: users, count, page, pageCount, loading, error: loadError, setPage, refresh } = usePaginatedCollection(
     fetchUsersPage,
     { roles: roles.join(','), search },
@@ -269,12 +272,28 @@ export default function UserManagement() {
         <div className="pm-user-toolbar-actions">
           <InputGroup className="pm-user-search">
             <Form.Control
-              placeholder="Search name or email…"
+              placeholder="Search name, email, or phone…"
+              aria-label="Search user accounts by name, email, or phone"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               size="sm"
             />
           </InputGroup>
+          {activeTab === 'staff' && (
+            <Form.Select
+              className="pm-user-role-filter"
+              aria-label="Filter staff accounts by role"
+              value={staffRole}
+              onChange={(e) => setStaffRole(e.target.value)}
+              size="sm"
+            >
+              <option value="all">All staff roles</option>
+              <option value="admin">Admin</option>
+              <option value="property manager">Property Manager</option>
+              <option value="agent">Agent</option>
+              <option value="owner">Owner</option>
+            </Form.Select>
+          )}
           <Button variant="primary" className="pm-user-add" onClick={handleOpenAddModal}>
             + Add User
           </Button>
@@ -289,7 +308,10 @@ export default function UserManagement() {
           <Tabs
             id="user-roles-tabs"
             activeKey={activeTab}
-            onSelect={(k) => setActiveTab(k)}
+            onSelect={(k) => {
+              setActiveTab(k);
+              setStaffRole('all');
+            }}
             className="border-bottom px-3 pt-2 bg-light"
           >
             <Tab eventKey="staff" title="Staff">

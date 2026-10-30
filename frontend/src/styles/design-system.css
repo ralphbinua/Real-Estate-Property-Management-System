@@ -487,6 +487,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .pm-user-toolbar-actions { display: flex; align-items: center; gap: 10px; }
 .pm-user-search { width: min(280px, 28vw); }
 .pm-user-search .form-control { min-height: 40px; }
+.pm-user-role-filter { width: 180px; min-height: 40px; flex: 0 0 auto; }
 .pm-user-add { min-height: 40px; flex: 0 0 auto; padding: 7px 14px; white-space: nowrap; }
 .pm-users-table { min-width: 700px; }
 .pm-users-table thead th { padding: 13px 18px; }
@@ -669,6 +670,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .pm-user-toolbar { align-items: stretch; flex-direction: column; }
   .pm-user-toolbar-actions { width: 100%; }
   .pm-user-search { width: auto; flex: 1 1 auto; }
+  .pm-user-role-filter { width: auto; flex: 1 1 160px; }
   .pm-user-add { flex: 0 0 auto; }
 }
 
@@ -786,6 +788,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .workspace-frame .workspace-main .pm-card-footer { flex-wrap: wrap; gap: 10px; }
   .workspace-frame .workspace-main .pm-user-toolbar-actions { flex-wrap: wrap; }
   .workspace-frame .workspace-main .pm-user-search { flex: 1 1 100%; width: 100%; }
+  .workspace-frame .workspace-main .pm-user-role-filter { flex: 1 1 100%; width: 100%; }
   .workspace-frame .workspace-main .form-control, .workspace-frame .workspace-main .form-select { min-height: 44px; font-size: 16px; }
   .workspace-frame .workspace-main .btn { min-height: 44px; white-space: normal; }
   .workspace-frame .workspace-main .workspace-pagination { flex-direction: column; align-items: stretch !important; gap: 8px !important; }

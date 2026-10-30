@@ -187,12 +187,18 @@ class UserViewSet(viewsets.ModelViewSet):
             normalized_roles = [role_values.get(value.casefold(), value) for value in roles]
             users = users.filter(role__in=normalized_roles)
         if search:
+            matching_roles = [
+                role_value
+                for role_value, role_label in User.Role.choices
+                if search.casefold() in role_label.casefold()
+            ]
             users = users.filter(
                 Q(email__icontains=search)
                 | Q(first_name__icontains=search)
                 | Q(middle_name__icontains=search)
                 | Q(last_name__icontains=search)
                 | Q(phone_number__icontains=search)
+                | Q(role__in=matching_roles)
             )
         return users.order_by('-id')
 
