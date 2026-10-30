@@ -63,6 +63,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
     balanceDue = serializers.SerializerMethodField()
     pendingPaymentCount = serializers.SerializerMethodField()
     isArchived = serializers.BooleanField(source='is_deleted', read_only=True)
+    paid_at = serializers.DateTimeField(required=False, allow_null=True, read_only=True)
     paidAt = serializers.DateTimeField(source='paid_at', required=False, allow_null=True, read_only=True)
     paymentMethod = serializers.CharField(source='payment_method', required=False, allow_blank=True, read_only=True)
     receiptUrl = serializers.CharField(source='receipt_url', required=False, allow_blank=True, read_only=True)

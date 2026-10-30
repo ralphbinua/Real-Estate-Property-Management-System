@@ -10,6 +10,7 @@ from contracts.models import Contract
 from properties.models import Property, Unit
 
 from .models import Invoice, Payment
+from .serializers import InvoiceSerializer
 
 
 User = get_user_model()
@@ -20,6 +21,26 @@ class PaymentWorkflowApiTests(APITestCase):
 
     def setUp(self):
         cache.clear()
+
+    def test_invoice_form_does_not_expose_ledger_managed_paid_at(self):
+        serializer = InvoiceSerializer()
+
+        self.assertTrue(serializer.fields['paid_at'].read_only)
+        self.assertTrue(serializer.fields['paidAt'].read_only)
+
+        self.client.force_authenticate(self.admin)
+        response = self.client.post('/api/invoices/', {
+            'contract': self.contract.pk,
+            'tenant': self.tenant.pk,
+            'property': self.property.pk,
+            'amount': '1.00',
+            'dueDate': timezone.localdate().isoformat(),
+            'status': 'Pending',
+            'remarks': 'QA TEST ONLY: no real funds received.',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['paid_at'], None)
 
     @classmethod
     def setUpTestData(cls):
